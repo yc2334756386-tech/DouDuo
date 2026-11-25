@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 // 「我的」里的收藏夹 / 收藏合集 / 收藏音乐、批量操作确认、点赞名单。接口在 DouyinBridge+Library.swift。
@@ -444,7 +445,9 @@ struct DYCollectedMixesScreen: View {
 struct DYCollectedMusicScreen: View {
     let bridge: DouyinBridge
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var pager: DYSimplePager<DYMusicInfo>
+    @StateObject private var preview = DYCollectedMusicPlayer()
     @State private var message: String?
 
     let embedded: Bool
@@ -467,7 +470,11 @@ struct DYCollectedMusicScreen: View {
             List {
                 if let message { Text(message).font(.caption).foregroundStyle(.orange) }
                 ForEach(pager.items) { m in
-                    HStack(spacing: 12) {
+                    Button {
+                        message = nil
+                        preview.toggle(m)
+                    } label: {
+                      HStack(spacing: 12) {
                         CachedAsyncImage(url: m.cover.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
                             placeholder: { Color.primary.opacity(0.08).overlay(Image(systemName: "music.note").foregroundStyle(.secondary)) }
                             .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
@@ -478,7 +485,13 @@ struct DYCollectedMusicScreen: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        Image(systemName: preview.playingID == m.id ? "pause.fill" : "play.fill")
+                            .foregroundStyle(.secondary)
+                      }
+                      .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(preview.playingID == m.id ? "正在播放" : "播放")
                     .accessibilityIdentifier("douyin.music.row")
                     .swipeActions {
                         Button("取消收藏", role: .destructive) { Task { await uncollect(m) } }
@@ -492,6 +505,13 @@ struct DYCollectedMusicScreen: View {
             }
             .listStyle(.plain)
             .refreshable { await pager.reload() }
+            .onDisappear { preview.stop() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { preview.stop() }
+            }
+            .alert("音乐无法播放", isPresented: Binding(get: { preview.failure != nil }, set: { if !$0 { preview.failure = nil } })) {
+                Button("好") { preview.failure = nil }
+            } message: { Text(preview.failure ?? "") }
             .navigationTitle("收藏的音乐")
             .navigationBarTitleDisplayMode(.inline)
             .task { if pager.items.isEmpty { await pager.more() } }
@@ -500,11 +520,85 @@ struct DYCollectedMusicScreen: View {
     private func uncollect(_ m: DYMusicInfo) async {
         do {
             switch try await bridge.collectMusic(m.id, on: false) {
-            case .ok: pager.items.removeAll { $0.id == m.id }; message = nil
+            case .ok:
+                if preview.selectedID == m.id { preview.stop() }
+                pager.items.removeAll { $0.id == m.id }
+                message = nil
             case .notLoggedIn: message = "抖音未登录"
             case .failed(let why): message = "没取消掉：" + why
             }
         } catch { message = "没取消掉：" + error.localizedDescription }
+    }
+}
+
+@MainActor
+private final class DYCollectedMusicPlayer: ObservableObject {
+    @Published private(set) var playingID: String?
+    @Published var failure: String?
+    private(set) var selectedID: String?
+    private var player: AVPlayer?
+    private var status: NSKeyValueObservation?
+    private var endObservers: [NSObjectProtocol] = []
+
+    func toggle(_ music: DYMusicInfo) {
+        if selectedID == music.id, let player {
+            if playingID != nil {
+                player.pause()
+                playingID = nil
+            } else {
+                playingID = music.id
+                player.play()
+            }
+            return
+        }
+        stop()
+        guard let value = music.playURL, let url = URL(string: value),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+            failure = "抖音没有提供这首音乐的试听地址。"
+            return
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback, options: DYLaunchMute.sessionOptions)
+            try session.setActive(true)
+        } catch {
+            failure = error.localizedDescription
+            return
+        }
+
+        let item = AVPlayerItem(asset: DYMedia.asset(url))
+        let next = AVPlayer(playerItem: item)
+        player = next
+        selectedID = music.id
+        playingID = music.id
+        status = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in self?.finish(item, failed: true) }
+        }
+        for name in [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification] {
+            endObservers.append(NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.finish(item, failed: name == AVPlayerItem.failedToPlayToEndTimeNotification) }
+            })
+        }
+        next.play()
+    }
+
+    private func finish(_ item: AVPlayerItem, failed: Bool) {
+        guard player?.currentItem === item else { return }
+        stop()
+        if failed { failure = "试听地址暂时不可用，请刷新收藏列表后重试。" }
+    }
+
+    func stop() {
+        status = nil
+        for observer in endObservers { NotificationCenter.default.removeObserver(observer) }
+        endObservers.removeAll()
+        player?.pause()
+        player = nil
+        selectedID = nil
+        playingID = nil
+        failure = nil
     }
 }
 

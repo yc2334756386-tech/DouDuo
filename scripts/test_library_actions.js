@@ -3,8 +3,8 @@
 // 从生产 Swift 抽 JS，在本地假环境里跑：记录发出的请求、回放给定响应。不碰抖音。
 // 期望形状逐个对照网页版 douyin_web 脚本（2026-11-22）。
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
-const src = fs.readFileSync(path.join(__dirname, '../DouDuo/DouyinBridge+Library.swift'), 'utf8');
-const more = fs.readFileSync(path.join(__dirname, '../DouDuo/DouyinBridge+More.swift'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '../DouDuo/DouyinBridge+Library.swift'), 'utf8').replace(/\r\n/g, '\n');
+const more = fs.readFileSync(path.join(__dirname, '../DouDuo/DouyinBridge+More.swift'), 'utf8').replace(/\r\n/g, '\n');
 const js = (s, name) => { const m = s.match(new RegExp('static let ' + name + ' = #"""\\n([\\s\\S]*?)\\n\\s*"""#')); assert(m, '找不到 ' + name); return m[1]; };
 let failed = 0;
 const test = async (name, fn) => { try { await fn(); console.log('PASS ' + name); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.message)); } };
@@ -81,9 +81,14 @@ const bp = b => new URLSearchParams(b);
     const { sent } = await run(js(src, 'musicCollectJS'), { mid: 'mu1', action: '1' }, ok({ status_code: 0 }));
     const b = bp(sent[0].body); assert.equal(b.get('music_id'), 'mu1'); assert.equal(b.get('type'), '1'); assert.equal(b.get('action'), '1');
   });
-  await test('音乐收藏列表：mc_list', async () => {
-    const { out } = await run(js(src, 'musicListCollectionJS'), { cursor: '0' }, ok({ status_code: 0, mc_list: [{ id_str: '5', title: '歌', author: '人', duration: 65 }] }));
+  await test('音乐收藏列表：可用的试听地址和无地址曲目', async () => {
+    const { out } = await run(js(src, 'musicListCollectionJS'), { cursor: '0' }, ok({ status_code: 0, mc_list: [
+      { id_str: '5', title: '歌', author: '人', duration: 65, play_url: {url_list: ['', 'https://example.org/clip']} },
+      { id_str: '6', play_url: {uri: 'audio/resource-id'} },
+      { id_str: '7', play_url: 'https://example.org/preview' }
+    ] }));
     assert.deepEqual([out.items[0].id, out.items[0].title, out.items[0].duration], ['5', '歌', 65]);
+    assert.deepEqual(out.items.map(m => m.playURL), ['https://example.org/clip', null, 'https://example.org/preview']);
   });
   await test('删除通知 / 拒绝关注请求：notice_id_str + action_type', async () => {
     const { sent } = await run(js(src, 'noticeDelJS'), { nid: 'n1', action: '1' }, ok({ status_code: 0 }));

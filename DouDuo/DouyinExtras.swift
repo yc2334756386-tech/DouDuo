@@ -121,7 +121,8 @@ private struct DYSugResp: Decodable { let status: Int; let items: [DYSug] }
 extension DouyinBridge {
     /// 列表通用：喜欢 / 收藏 / 历史 / 稍后再看 / 关注 / 搜索，统一回 (items, cursor, hasMore)
     private func list(_ js: String, _ args: [String: Any]) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
-        let d = try await call(js, args: args)
+        let searchContinuation = js == Self.searchJS && (args["cursor"] as? String) != "0"
+        let d = try await call(js, args: args, attempts: searchContinuation ? 1 : 3)
         let p = try JSONDecoder().decode(DYListPage.self, from: d)
         if p.code == 8 || p.code == 2483 || (p.msg ?? "").contains("未登录") || (p.msg ?? "").contains("请先登录") {
             throw DYError.bad("抖音未登录：请在「我的」中登录后重试")
@@ -227,12 +228,8 @@ extension DouyinBridge {
         return (p.items, p.cursor, p.hasMore)
     }
 
-    /// 搜索：网页接口只给第一页（翻第二页安全 SDK 直接压住不返回，换参数 / search_id 都一样）
-    /// → 只拉一次、hasMore 置 false，免得底部一直转圈或报「拦截」
     func search(_ kw: String, offset: String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
-        guard offset == "0" else { return ([], offset, false) }
-        let r = try await list(Self.searchJS, ["kw": kw, "cursor": "0"])
-        return (r.items, r.cursor, false)
+        try await list(Self.searchJS, ["kw": kw, "cursor": offset])
     }
 
     /// 抖音热搜
@@ -750,10 +747,14 @@ extension DouyinBridge {
 
     static let searchJS = listTail + #"""
     const r = await req('GET', '/aweme/v1/web/search/item/?' + q({ search_channel: 'aweme_video_web', keyword: kw, search_source: 'normal_search',
-      query_correct_type: '1', is_filter_search: '0', from_group_id: '', offset: cursor, count: '24', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
+      query_correct_type: '1', is_filter_search: '0', from_group_id: '', offset: cursor, count: '50', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
     const d = parse(r.t) || {};
-    const arr = (d.data || []).map(x => x && (x.aweme_info || x.aweme)).filter(Boolean);
-    return pack(r, d, arr, d.cursor, d.has_more);
+    if (r.s === 200 && d.status_code == null && !Array.isArray(d.data)) {
+      return pack(r, { status_code: -1, status_msg: '原生搜索未收到结果，可在网页版继续搜索' }, [], cursor, false);
+    }
+    const arr = (Array.isArray(d.data) ? d.data : []).map(x => x && (x.aweme_info || x.aweme)).filter(Boolean);
+    const next = Number(d.cursor);
+    return pack(r, d, arr, d.cursor, Number(d.has_more) === 1 && Number.isSafeInteger(next) && next > Number(cursor));
     """#
 
     static let hotJS = #"""
@@ -1684,6 +1685,7 @@ struct DYSearchScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var state: DYSearchSession
     @State private var open: DYListTarget?
+    @State private var webSearch: DYWebTarget?
 
     init(bridge: DouyinBridge, onAuthor: @escaping (DYAweme) -> Void, initialQuery: String = "",
          session: DYSearchSession? = nil, onClose: (() -> Void)? = nil) {
@@ -1742,8 +1744,20 @@ struct DYSearchScreen: View {
             if let model = state.model {
                 DYSearchResults(model: model, onOpen: { i in
                     state.presentsVideo = true
-                    open = DYListTarget(title: "搜索：\(state.keyword)", items: model.items, start: i, model: model)
+                    open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
                 })
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Button("在抖音网页版继续搜索", systemImage: "safari") {
+                        guard let url = Self.videoSearchURL(state.lastRun) else { return }
+                        state.presentsVideo = true
+                        webSearch = DYWebTarget(url: url)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial)
+                    .accessibilityIdentifier("douyin.search.web")
+                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1825,6 +1839,20 @@ struct DYSearchScreen: View {
             DYListPlayer(bridge: bridge, title: t.title, playback: t.playback,
                          loadMore: t.model.map { m in { await m.loadMore() } }, onAuthor: onAuthor, presentsAuthor: true)
         }
+        .fullScreenCover(item: $webSearch, onDismiss: { state.presentsVideo = false }) { target in
+            DouyinWebScreen(start: target.url)
+        }
+    }
+
+    static func videoSearchURL(_ keyword: String) -> URL? {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_~"))
+        guard !keyword.isEmpty, let segment = keyword.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        var url = URLComponents()
+        url.scheme = "https"
+        url.host = "www.douyin.com"
+        url.percentEncodedPath = "/search/" + segment
+        url.queryItems = [URLQueryItem(name: "type", value: "video")]
+        return url.url
     }
 
     private var hotSection: some View {

@@ -393,7 +393,9 @@ extension DouyinBridge {
     const items = (d.mc_list || []).filter(Boolean).map(m => ({
       id: String(m.id_str || m.id || m.mid || ''), title: m.title || '', author: m.author || m.owner_nickname || '',
       cover: first(m.cover_medium) || first(m.cover_thumb), duration: Number(m.duration || 0),
-      playURL: (m.play_url && ((m.play_url.url_list || [])[0] || m.play_url.uri)) || null
+      playURL: (typeof m.play_url === 'string' ? [m.play_url] :
+        [...(Array.isArray(m.play_url?.url_list) ? m.play_url.url_list : []), m.play_url?.uri])
+        .find(url => typeof url === 'string' && /^https?:\/\/[^/]/i.test(url)) || null
     })).filter(m => m.id);
     return JSON.stringify({ status: r.s, code: d.status_code ?? null, msg: d.status_msg || null, items, cursor: String(d.cursor ?? 0), hasMore: !!d.has_more });
     """#
