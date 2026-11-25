@@ -12,6 +12,8 @@ import Combine
 import WebKit
 import AVFoundation
 import PhotosUI
+import CoreImage
+import ImageIO
 
 // MARK: - 数据
 
@@ -4251,8 +4253,8 @@ struct DYUpstreamVideoPage: View {
                                   secondary: theme.media.onMediaSecondary.color(for: scheme),
                                   hashtagNames: item.hashtagNames ?? [])
             }
-            if !item.music.isEmpty {
-                Label(item.music, systemImage: "music.note")
+            if !item.music.isEmpty || item.musicID != nil || item.musicURL != nil {
+                DYOriginalSoundControl(bridge: bridge, item: item)
                     .font(.caption).lineLimit(1)
                     .foregroundStyle(theme.media.onMediaSecondary.color(for: scheme))
             }
@@ -4737,8 +4739,8 @@ struct DYClassicVideoPage: View {
                 .font(.caption2.weight(.regular))
                 .foregroundStyle(fg.opacity(0.62))
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            if !item.music.isEmpty {
-                Label(item.music, systemImage: "music.note")
+            if !item.music.isEmpty || item.musicID != nil || item.musicURL != nil {
+                DYOriginalSoundControl(bridge: bridge, item: item)
                     .font(.caption2).lineLimit(1)
                     .foregroundStyle(fg.opacity(0.54))
                     .accessibilityIdentifier("douyin.video.music")
@@ -4981,6 +4983,8 @@ struct DYCommentPanel: View {
     @State private var restoreID: String?
     @State private var restored = false
     @State private var listAtTop = true
+    @State private var commentAuthor: DYAweme.Author?
+    @State private var profileWeb: DYWebTarget?
 
     init(bridge: DouyinBridge, aweme: DYAweme, onClose: (() -> Void)?, focus: DYCommentFocus? = nil,
          fillsPane: Bool = false, trailingInset: CGFloat = 0, horizontalStatus: Bool = false) {
@@ -4995,15 +4999,9 @@ struct DYCommentPanel: View {
 
     var body: some View {
         ZStack {
-            GeometryReader { geometry in
-                CachedAsyncImage(url: (aweme.images.first ?? aweme.cover).flatMap(URL.init(string:))) {
-                    $0.resizable().scaledToFill()
-                } placeholder: { Color.clear }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .blur(radius: 28)
-                    .overlay(commentScheme == .dark ? Color.black.opacity(0.48) : Color.white.opacity(0.65))
-                    .clipped()
-            }
+            DYCommentCoverBackdrop(source: aweme.images.first ?? aweme.cover)
+            Color.clear.dyPanelGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .allowsHitTesting(false)
         VStack(spacing: 0) {
             if expandedCaptionID == aweme.id {
                 DYVideoCaptionHeader(bridge: bridge, aweme: aweme, onClose: nil)
@@ -5070,7 +5068,6 @@ struct DYCommentPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .dyPanelGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -5078,6 +5075,15 @@ struct DYCommentPanel: View {
         .accessibilityIdentifier("douyin.comments.panel")
         .task(id: aweme.id) { await load() }
         .onDisappear { savePosition() }
+        .sheet(item: $commentAuthor) { author in
+            NavigationStack {
+                DYAuthorScreen(bridge: bridge, author: author, onWeb: { url in
+                    commentAuthor = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { profileWeb = DYWebTarget(url: url) }
+                })
+            }
+        }
+        .fullScreenCover(item: $profileWeb) { DouyinWebScreen(start: $0.url) }
         .onReceive(bridge.$signReady) { ready in
             if ready, items.isEmpty, error != nil { error = nil; hasMore = true; Task { await load() } }
         }
@@ -5085,9 +5091,16 @@ struct DYCommentPanel: View {
 
     private func commentRow(_ comment: DYComment) -> some View {
         HStack(alignment: .top, spacing: 10) {
+            Button {
+                commentAuthor = DYAweme.Author(name: comment.name, avatar: comment.avatar, secUid: comment.sec, uid: comment.uid)
+            } label: {
             CachedAsyncImage(url: comment.avatar.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
                 placeholder: { Color.primary.opacity(0.08) }
                 .frame(width: 32, height: 32).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(comment.sec == nil && comment.uid == nil)
+            .accessibilityLabel("打开\(comment.name)的主页")
             VStack(alignment: .leading, spacing: 5) {
                 Text(comment.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 if !comment.text.isEmpty {
@@ -5212,6 +5225,8 @@ enum DYCommentEmoji {
 struct DYCommentMedia: View {
     let comment: DYComment
     @State private var viewer: DYCommentViewerTarget?
+    @State private var saveMessage: String?
+    @State private var saving = false
 
     private var pics: [DYCommentImage] { comment.images ?? [] }
 
@@ -5220,6 +5235,9 @@ struct DYCommentMedia: View {
         content.dyPhotoViewer(Binding(
             get: { viewer.map { t in DYPhotoViewerTarget(urls: t.images.compactMap { URL(string: $0.full) }, start: t.start) } },
             set: { if $0 == nil { viewer = nil } }))
+        .alert("保存图片", isPresented: Binding(get: { saveMessage != nil }, set: { if !$0 { saveMessage = nil } })) {
+            Button("好") { saveMessage = nil }
+        } message: { Text(saveMessage ?? "") }
     }
 
     private var content: some View {
@@ -5261,6 +5279,52 @@ struct DYCommentMedia: View {
             .frame(width: max(w, 44), height: max(h, 44))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
+            .contextMenu {
+                Button(comment.sticker == img ? "保存表情包到相册" : "保存图片到相册", systemImage: "square.and.arrow.down") {
+                    guard !saving else { return }
+                    saving = true
+                    Task {
+                        defer { saving = false }
+                        do { try await DYSaver.saveCommentImage(img.full); saveMessage = "已保存到相册" }
+                        catch { saveMessage = error.localizedDescription }
+                    }
+                }
+                .disabled(saving)
+            }
+    }
+}
+
+private struct DYCommentCoverBackdrop: View {
+    let source: String?
+    @Environment(\.colorScheme) private var scheme
+    @State private var image: UIImage?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if let image { Image(uiImage: image).resizable().scaledToFill() }
+                scheme == .dark ? Color.black.opacity(0.48) : Color.white.opacity(0.65)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+        }
+        .allowsHitTesting(false)
+        .task(id: source) {
+            guard let source, let url = URL(string: source),
+                  let (data, _) = try? await URLSession.shared.data(from: url) else { image = nil; return }
+            let prepared = await Task.detached(priority: .utility) { () -> UIImage? in
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0,
+                        [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                         kCGImageSourceCreateThumbnailWithTransform: true,
+                         kCGImageSourceThumbnailMaxPixelSize: 480] as CFDictionary) else { return nil }
+                let input = CIImage(cgImage: thumbnail)
+                let blurred = input.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: ["inputRadius": 14]).cropped(to: input.extent)
+                guard let result = CIContext().createCGImage(blurred, from: input.extent) else { return nil }
+                return UIImage(cgImage: result)
+            }.value
+            if !Task.isCancelled { image = prepared }
+        }
     }
 }
 

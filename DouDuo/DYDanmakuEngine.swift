@@ -59,6 +59,10 @@ final class DYDanmakuEngineView: UIView {
     private var pool: [CALayer] = []
     private var images: [String: CGImage] = [:]
     private var sizes: [String: CGSize] = [:]
+    private var rasterizing: Set<String> = []
+    private var cacheOrder: [String] = []
+    private var lastWarmTime: Double = -1
+    private let rasterQueue = DispatchQueue(label: "douduo.danmaku.text", qos: .userInitiated)
     private var lastShown: [String: Double] = [:]   // 去重：同文本 10s 内不重复
     private var link: CADisplayLink?
     private var clock = DYDanmakuClock()
@@ -166,6 +170,7 @@ final class DYDanmakuEngineView: UIView {
     }
 
     fileprivate func tick(_ l: CADisplayLink) {
+        #if DEBUG
         if lastTS > 0 {
             gaps.append(l.timestamp - lastTS)
             if gaps.count >= 480 {
@@ -176,6 +181,7 @@ final class DYDanmakuEngineView: UIView {
                 gaps.removeAll(); maxOn = 0; spawned = 0; dropped = 0
             }
         }
+        #endif
         lastTS = l.timestamp
         let lead = l.targetTimestamp - CACurrentMediaTime()
         render(clock.now(Date().addingTimeInterval(max(0, lead))))
@@ -184,6 +190,10 @@ final class DYDanmakuEngineView: UIView {
     private func render(_ t: Double) {
         let w = bounds.width
         guard w > 0 else { return }
+        if lastWarmTime < 0 || abs(t - lastWarmTime) >= 0.25 {
+            lastWarmTime = t
+            for item in queue.dropFirst(cursor).prefix(32) where item.offset <= t + 6 { prepareRaster(item) }
+        }
         // 时间倒退（不是用户跳转，比如循环回开头）：清屏重排
         if lastT >= 0, t + 0.5 < lastT { restart(at: t) }
         lastT = t
@@ -227,7 +237,11 @@ final class DYDanmakuEngineView: UIView {
             if key.isEmpty { continue }
             if deduplicate, let last = lastShown[key], d.offset - last < 10 { done.insert(d.id); continue }
             if spawnedAt.count >= maxPerSecond { cursor -= 1; break }   // 这一秒满了，下一帧再看
-            let size = measure(d)
+            guard let size = sizes[d.id], let raster = images[d.id] else {
+                prepareRaster(d)
+                cursor -= 1
+                break
+            }
             let travel = DYDanmakuStyle.travelSeconds(width: size.width, screen: screen)
             let speed = (screen + size.width) / CGFloat(travel)
             guard let lane = freeLane(at: t, width: size.width, speed: speed, screen: screen) else {
@@ -238,7 +252,7 @@ final class DYDanmakuEngineView: UIView {
             let layer = pool.popLast() ?? CALayer()
             layer.anchorPoint = .zero
             layer.contentsScale = UIScreen.main.scale
-            layer.contents = image(for: d)
+            layer.contents = raster
             layer.bounds = CGRect(origin: .zero, size: size)
             layer.position = CGPoint(x: screen, y: CGFloat(lane) * DYDanmakuStyle.laneHeight)
             clip.addSublayer(layer)
@@ -272,36 +286,49 @@ final class DYDanmakuEngineView: UIView {
         return nil
     }
 
-    private func measure(_ d: DYDanmaku) -> CGSize {
-        if let s = sizes[d.id] { return s }
-        _ = image(for: d)
-        return sizes[d.id] ?? CGSize(width: 60, height: DYDanmakuStyle.laneHeight)
+    private func prepareRaster(_ item: DYDanmaku) {
+        guard images[item.id] == nil, rasterizing.insert(item.id).inserted else { return }
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        rasterQueue.async { [weak self] in
+            let result = Self.makeRaster(text: item.text, scale: scale)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.rasterizing.remove(item.id)
+                guard let (image, size) = result else { return }
+                self.images[item.id] = image
+                self.sizes[item.id] = size
+                self.cacheOrder.append(item.id)
+                if self.cacheOrder.count > 512 {
+                    for id in self.cacheOrder.prefix(64) { self.images[id] = nil; self.sizes[id] = nil }
+                    self.cacheOrder.removeFirst(64)
+                }
+            }
+        }
     }
 
-    private func image(for d: DYDanmaku) -> CGImage? {
-        if let i = images[d.id] { return i }
-        if images.count > 800 { images.removeAll(); sizes.removeAll() }
+    nonisolated private static func makeRaster(text value: String, scale: CGFloat) -> (CGImage, CGSize)? {
         let font = UIFont.systemFont(ofSize: DYDanmakuStyle.fontSize, weight: .semibold)
         let shadow = NSShadow()
         shadow.shadowColor = UIColor.black.withAlphaComponent(0.7)
         shadow.shadowBlurRadius = 1.5
         shadow.shadowOffset = CGSize(width: 0, height: 1)
-        let attrs: [NSAttributedString.Key: Any] = [
+        let attributes: [NSAttributedString.Key: Any] = [
             .font: font, .foregroundColor: UIColor.white.withAlphaComponent(0.95), .shadow: shadow,
         ]
-        let text = d.text as NSString
-        let size = text.size(withAttributes: attrs)
-        let pad: CGFloat = 3
-        let box = CGSize(width: ceil(size.width) + pad * 2, height: ceil(size.height) + pad * 2)
-        let fmt = UIGraphicsImageRendererFormat.preferred()
-        fmt.opaque = false
-        let img = UIGraphicsImageRenderer(size: box, format: fmt).image { _ in
-            text.draw(at: CGPoint(x: pad, y: pad), withAttributes: attrs)
+        let text = value as NSString
+        let size = text.size(withAttributes: attributes)
+        let box = CGSize(width: ceil(size.width) + 6, height: ceil(size.height) + 6)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+        format.preferredRange = .standard
+        let image = UIGraphicsImageRenderer(size: box, format: format).image { _ in
+            text.draw(at: CGPoint(x: 3, y: 3), withAttributes: attributes)
         }
-        images[d.id] = img.cgImage
-        sizes[d.id] = box
-        return img.cgImage
+        guard let raster = image.cgImage else { return nil }
+        return (raster, box)
     }
+
 }
 
 /// CADisplayLink 强引用 target：弱引用中转，视图销毁不泄漏

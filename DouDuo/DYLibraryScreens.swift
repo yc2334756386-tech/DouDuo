@@ -449,6 +449,7 @@ struct DYCollectedMusicScreen: View {
     @StateObject private var pager: DYSimplePager<DYMusicInfo>
     @StateObject private var preview = DYCollectedMusicPlayer()
     @State private var message: String?
+    @State private var musicWorks: DYMusicInfo?
 
     let embedded: Bool
 
@@ -470,27 +471,32 @@ struct DYCollectedMusicScreen: View {
             List {
                 if let message { Text(message).font(.caption).foregroundStyle(.orange) }
                 ForEach(pager.items) { m in
-                    Button {
-                        message = nil
-                        preview.toggle(m)
-                    } label: {
                       HStack(spacing: 12) {
+                        Button { preview.stop(); musicWorks = m } label: {
                         CachedAsyncImage(url: m.cover.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
                             placeholder: { Color.primary.opacity(0.08).overlay(Image(systemName: "music.note").foregroundStyle(.secondary)) }
                             .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看使用这段原声的视频")
+                        Button { message = nil; preview.toggle(m) } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(m.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                             Text([m.author, m.duration > 0 ? String(format: "%d:%02d", m.duration / 60, m.duration % 60) : nil]
                                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        }
+                        .buttonStyle(.plain)
                         Spacer()
+                        Button { message = nil; preview.toggle(m) } label: {
                         Image(systemName: preview.playingID == m.id ? "pause.fill" : "play.fill")
                             .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
                       }
                       .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
                     .accessibilityValue(preview.playingID == m.id ? "正在播放" : "播放")
                     .accessibilityIdentifier("douyin.music.row")
                     .swipeActions {
@@ -512,6 +518,7 @@ struct DYCollectedMusicScreen: View {
                 Button("好") { preview.failure = nil }
             } message: { Text(preview.failure ?? "") }
             .navigationTitle("收藏的音乐")
+            .fullScreenCover(item: $musicWorks) { DYMusicVideosScreen(bridge: bridge, music: $0) }
             .navigationBarTitleDisplayMode(.inline)
             .task { if pager.items.isEmpty { await pager.more() } }
             .overlay(alignment: .bottomLeading) {
@@ -897,4 +904,116 @@ struct DYCollectPromptHost: ViewModifier {
                 }
             }
     }
+}
+
+
+struct DYMusicVideosScreen: View {
+    let bridge: DouyinBridge
+    let music: DYMusicInfo
+    @State private var transport: DYNativeSearchTransport
+    @State private var author: DYAweme.Author?
+    @State private var web: DYWebTarget?
+
+    init(bridge: DouyinBridge, music: DYMusicInfo) {
+        self.bridge = bridge
+        self.music = music
+        _transport = State(initialValue: DYNativeSearchTransport(keyword: music.title, bridge: bridge, musicID: music.id))
+    }
+
+    var body: some View {
+        DYPagedVideoScreen(bridge: bridge, title: music.title, onAuthor: { author = $0.author }) { cursor in
+            try await transport.page(cursor)
+        }
+        .background { DYNativeSearchHost(transport: transport).frame(width: 1, height: 1).opacity(0.01).accessibilityHidden(true) }
+        .sheet(item: $author) { person in
+            NavigationStack {
+                DYAuthorScreen(bridge: bridge, author: person, onWeb: { url in
+                    author = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { web = DYWebTarget(url: url) }
+                })
+            }
+        }
+        .fullScreenCover(item: $web) { DouyinWebScreen(start: $0.url) }
+    }
+}
+
+struct DYOriginalSoundControl: View {
+    let bridge: DouyinBridge?
+    let item: DYAweme
+    @State private var works: DYMusicInfo?
+    @State private var export: DYAudioExport?
+    @State private var message: String?
+    @State private var busy = false
+
+    var body: some View {
+        Menu {
+            Button("查看使用该原声的视频", systemImage: "play.rectangle.on.rectangle") { perform(.videos) }
+            Button("收藏原声", systemImage: "star") { perform(.collect) }
+            Button("保存原声到文件", systemImage: "square.and.arrow.down") { perform(.save) }
+        } label: { Label(item.music.isEmpty ? "原声" : item.music, systemImage: "music.note").lineLimit(1) }
+        .disabled(busy || bridge == nil)
+        .fullScreenCover(item: $works) { music in
+            if let bridge { DYMusicVideosScreen(bridge: bridge, music: music) }
+        }
+        .sheet(item: $export) { DYAudioExportSheet(url: $0.url) }
+        .alert("原声", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+            Button("好") { message = nil }
+        } message: { Text(message ?? "") }
+    }
+
+    private enum Action { case videos, collect, save }
+
+    private func perform(_ action: Action) {
+        guard !busy, let bridge else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let music = try await bridge.originalSound(item)
+                switch action {
+                case .videos:
+                    guard !music.id.isEmpty else { throw DYError.bad("这条作品没有可用的原声标识") }
+                    works = music
+                case .collect:
+                    guard !music.id.isEmpty else { throw DYError.bad("这条作品没有可用的原声标识") }
+                    switch try await bridge.collectMusic(music.id, on: true) {
+                    case .ok: message = "已收藏原声"
+                    case .notLoggedIn: message = "请先在「我的」中登录"
+                    case .failed(let reason): message = reason
+                    }
+                case .save:
+                    guard let value = music.playURL, let url = URL(string: value) else { throw DYError.bad("平台没有提供这段原声的音频地址") }
+                    var request = URLRequest(url: url)
+                    DYMedia.headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+                    let (download, response) = try await URLSession.shared.download(for: request)
+                    defer { try? FileManager.default.removeItem(at: download) }
+                    guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+                        throw DYError.bad("音频下载失败，请稍后重试")
+                    }
+                    let mime = response.mimeType ?? ""
+                    let ext = mime.contains("mpeg") ? "mp3" : mime.contains("wav") ? "wav" : "m4a"
+                    let title = music.title.components(separatedBy: CharacterSet(charactersIn: "/\\:*?\"<>|")).joined(separator: "_")
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("dd-audio-" + UUID().uuidString)
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let target = directory.appendingPathComponent(String((title.isEmpty ? "原声" : title).prefix(80))).appendingPathExtension(ext)
+                    try FileManager.default.copyItem(at: download, to: target)
+                    export = DYAudioExport(url: target)
+                }
+            } catch { message = error.localizedDescription }
+        }
+    }
+}
+
+private struct DYAudioExport: Identifiable { let id = UUID(); let url: URL }
+
+private struct DYAudioExportSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+        return controller
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

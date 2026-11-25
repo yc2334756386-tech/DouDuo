@@ -6,6 +6,11 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     typealias Page = (items: [DYAweme], cursor: String, hasMore: Bool)
     let web: WKWebView
     private let keyword: String
+    private let bridge: DouyinBridge?
+    private let musicID: String?
+    private var apiCursor = "0"
+    private var fallback: Task<Void, Never>?
+    private var pageRequest: Task<Void, Never>?
     private var pending: CheckedContinuation<Page, Error>?
     private var timeout: Task<Void, Never>?
     private var settle: Task<Void, Never>?
@@ -16,8 +21,10 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     private var started = false
     private var generation = 0
 
-    init(keyword: String) {
+    init(keyword: String, bridge: DouyinBridge? = nil, musicID: String? = nil) {
         self.keyword = keyword
+        self.bridge = bridge
+        self.musicID = musicID
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.preferredContentMode = .desktop
@@ -40,11 +47,25 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
             seen.removeAll()
             delivered = 0
             hasMore = true
+            apiCursor = "0"
         }
         if !buffered.isEmpty { return takeBuffered() }
         guard hasMore else { return ([], String(delivered), false) }
         return try await withCheckedThrowingContinuation { continuation in
             pending = continuation
+            let requestGeneration = generation
+            let requestCursor = apiCursor
+            fallback = Task { [weak self] in
+                guard let self, let bridge = self.bridge else { return }
+                do {
+                    let result: Page
+                    if let musicID = self.musicID { result = try await bridge.musicVideos(musicID, cursor: requestCursor) }
+                    else { result = try await bridge.search(self.keyword, offset: requestCursor) }
+                    guard self.generation == requestGeneration else { return }
+                    self.apiCursor = result.cursor
+                    self.accept(result.items, more: result.hasMore)
+                } catch {}
+            }
             timeout = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(12)) } catch { return }
                 guard let self else { return }
@@ -54,8 +75,11 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
                 started = true
                 Task { [weak self] in
                     _ = await DYAccountStore.shared.restoreCurrentSessionIfMissing()
-                    guard let self, self.pending != nil,
-                          let url = DYSearchScreen.videoSearchURL(self.keyword) else { return }
+                    guard let self, self.pending != nil else { return }
+                    let url: URL?
+                    if let musicID = self.musicID { url = URL(string: "https://www.douyin.com/music/")?.appendingPathComponent(musicID) }
+                    else { url = DYSearchScreen.videoSearchURL(self.keyword) }
+                    guard let url else { return }
                     self.web.load(URLRequest(url: url))
                 }
             } else {
@@ -68,6 +92,8 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
         generation += 1
         timeout?.cancel()
         settle?.cancel()
+        fallback?.cancel()
+        pageRequest?.cancel()
         pending?.resume(throwing: CancellationError())
         pending = nil
         buffered.removeAll()
@@ -83,14 +109,17 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
               let text = value as? String, let data = text.data(using: .utf8),
               let result = try? JSONDecoder().decode(SearchResponse.self, from: data),
               requestGeneration == generation else { return }
-        if let code = result.code, code != 0 {
-            fail(code == 8 ? "搜索需要登录，请在「我的」中完成登录。" : "搜索暂时不可用，请稍后重试。")
-            return
-        }
-        for item in result.items where item.play != nil || !item.images.isEmpty {
+        guard result.code == nil || result.code == 0 else { return }
+        if let cursor = result.cursor, !cursor.isEmpty { apiCursor = cursor }
+        accept(result.items, more: result.hasMore)
+    }
+
+    private func accept(_ items: [DYAweme], more: Bool?) {
+        if items.isEmpty, buffered.isEmpty, delivered == 0 { return }
+        for item in items where item.play != nil || !item.images.isEmpty {
             if seen.insert(item.id).inserted { buffered.append(item) }
         }
-        if let more = result.hasMore { hasMore = more }
+        if let more { hasMore = more }
         guard !buffered.isEmpty || !hasMore else { return }
         settle?.cancel()
         settle = Task { [weak self] in
@@ -126,15 +155,36 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
         fail("搜索页面已暂停，点重试搜索。")
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let requestGeneration = generation
+        pageRequest = Task { [weak self] in
+            guard let self else { return }
+            if let raw = try? await self.web.evaluateJavaScript(Self.harvestJS) as? String {
+                await self.receive(raw)
+            }
+            guard self.generation == requestGeneration, self.pending != nil else { return }
+            let body = self.musicID == nil ? DouyinBridge.searchJS : DouyinBridge.musicWorksJS
+            let arguments = ["kw": self.keyword, "mid": self.musicID ?? "", "cursor": self.apiCursor]
+            guard let value = try? await self.web.callAsyncJavaScript(DouyinBridge.requestJS + body,
+                arguments: arguments, contentWorld: .page), let text = value as? String,
+                  let data = text.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(SearchResponse.self, from: data),
+                  self.generation == requestGeneration, result.code == nil || result.code == 0 else { return }
+            if let cursor = result.cursor { self.apiCursor = cursor }
+            self.accept(result.items, more: result.hasMore)
+        }
+    }
+
     private struct SearchResponse: Decodable {
         let items: [DYAweme]
         let hasMore: Bool?
         let code: Int?
+        let cursor: String?
     }
 
     private static let captureJS = #"""
     (() => {
-      const wanted = url => /\/(?:search\/item|general\/search\/(?:single|stream))(?:[/?]|$)/.test(String(url));
+      const wanted = url => /\/(?:search\/item|general\/search\/(?:single|stream)|music\/aweme)(?:[/?]|$)/.test(String(url));
       const post = text => { try { window.webkit.messageHandlers.ddNativeSearch.postMessage(text); } catch (_) {} };
       const fetch = window.fetch;
       window.fetch = function(input) {
@@ -162,6 +212,7 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     const ddFrames = ddRoot ? [ddRoot] : String(responseText).split(/\r?\n/).map(line => parse(line.replace(/^data:\s*/, ''))).filter(Boolean);
     const ddItems = [], ddSeen = new Set();
     const ddVisit = (node, depth) => {
+      if (typeof node === 'string' && /^\s*[\[{]/.test(node)) { const nested = parse(node); if (nested && depth < 10) ddVisit(nested, depth + 1); return; }
       if (!node || typeof node !== 'object' || depth > 10) return;
       if (node.aweme_id && (node.video || node.images)) {
         const id = String(node.aweme_id);
@@ -173,8 +224,31 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     for (const frame of ddFrames) ddVisit(frame, 0);
     const ddMeta = ddFrames.find(frame => frame && frame.has_more != null);
     const ddCode = ddFrames.find(frame => frame && frame.status_code != null);
+    const ddCursor = ddFrames.find(frame => frame && frame.cursor != null);
     return JSON.stringify({ items: ddItems, hasMore: ddMeta ? Number(ddMeta.has_more) === 1 : null,
-      code: ddCode ? Number(ddCode.status_code) : null });
+      code: ddCode ? Number(ddCode.status_code) : null, cursor:ddCursor ? String(ddCursor.cursor) : null });
+    """#
+
+    private static let harvestJS = #"""
+    (() => {
+      const roots = [];
+      for (const script of document.querySelectorAll('script#RENDER_DATA,script#__NEXT_DATA__,script[type="application/json"]')) {
+        let text = script.textContent || '';
+        try { text = decodeURIComponent(text); } catch (_) {}
+        try { roots.push(JSON.parse(text)); } catch (_) {}
+      }
+      for (const value of [window._ROUTER_DATA, window.__INITIAL_STATE__]) if (value && typeof value === 'object') roots.push(value);
+      const scoped = [];
+      const select = (node, depth) => {
+        if (!node || typeof node !== 'object' || depth > 5) return;
+        for (const [key, value] of Object.entries(node)) {
+          if (/search|musicaweme|music_aweme/i.test(key) && value && typeof value === 'object') scoped.push(value);
+          else select(value, depth + 1);
+        }
+      };
+      roots.forEach(root => select(root, 0));
+      return JSON.stringify(scoped.length ? scoped : roots);
+    })();
     """#
 
     private static let scrollJS = #"""

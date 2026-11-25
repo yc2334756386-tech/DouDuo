@@ -4,6 +4,7 @@ import SwiftUI
 import Combine
 import AVFoundation
 import Photos
+import ImageIO
 
 // MARK: - 数据
 
@@ -1032,6 +1033,37 @@ struct DYDanmakuLayer: View {
 // MARK: - 保存到相册
 
 enum DYSaver {
+    static func saveCommentImage(_ value: String) async throws {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else { throw SaveError.denied }
+        guard let url = URL(string: value) else { throw SaveError.noURL }
+        let original = try await download(url)
+        let data = try await Task.detached(priority: .utility) { () throws -> Data in
+            guard let source = CGImageSourceCreateWithData(original as CFData, nil),
+                  let type = CGImageSourceGetType(source) as String?, type.contains("webp") else { return original }
+            let frames = CGImageSourceGetCount(source)
+            let output = NSMutableData()
+            let format = frames > 1 ? "com.compuserve.gif" : "public.png"
+            guard let destination = CGImageDestinationCreateWithData(output, format as CFString, frames, nil) else { return original }
+            if frames > 1 {
+                CGImageDestinationSetProperties(destination,
+                    [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+            }
+            for index in 0..<frames {
+                guard let image = CGImageSourceCreateImageAtIndex(source, index, nil) else { throw DYError.bad("表情图片解码失败") }
+                let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any] ?? [:]
+                let metadata = properties.values.compactMap { $0 as? [String: Any] }
+                let delay = metadata.compactMap { ($0["UnclampedDelayTime"] ?? $0["DelayTime"]) as? Double }.first ?? 0.1
+                let options: [CFString: Any] = frames > 1 ? [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] : [:]
+                CGImageDestinationAddImage(destination, image, options as CFDictionary)
+            }
+            guard CGImageDestinationFinalize(destination) else { throw DYError.bad("表情图片转换失败") }
+            return output as Data
+        }.value
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: nil)
+        }
+    }
     enum SaveError: LocalizedError {
         case denied, noURL
         var errorDescription: String? {
@@ -1882,7 +1914,7 @@ struct DYSearchScreen: View {
         h.insert(w, at: 0)
         historyRaw = h.prefix(15).joined(separator: "\n")
         state.transport?.close()
-        let transport = DYNativeSearchTransport(keyword: w)
+        let transport = DYNativeSearchTransport(keyword: w, bridge: bridge)
         state.transport = transport
         let m = DYPagedModel { cur in try await transport.page(cur) }
         state.model = m

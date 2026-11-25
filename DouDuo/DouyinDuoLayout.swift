@@ -823,13 +823,6 @@ struct DYCommentPlayerLayout<Video: View>: View {
                     .environment(\.dyRestrictsPlaybackToPane, layout.showsPane)
                     // 侧栏评论时裁边：播放器环境光底铺满整屏，会盖住右侧评论栏（同推荐页 DYCommentStage）
                     .modifier(DDClipIf(on: layout.showsPane))
-                    .overlay {
-                        if showsComments {
-                            Color.clear.contentShape(Rectangle()).onTapGesture { showComments = false }
-                                .accessibilityLabel("关闭评论")
-                                .accessibilityAddTraits(.isButton)
-                        }
-                    }
                 if layout.showsPane, let aweme = commentItem {
                     DYCommentPanel(bridge: bridge, aweme: aweme,
                                    onClose: layout.resident && captionItem == nil ? nil : { showComments = false },
@@ -846,6 +839,16 @@ struct DYCommentPlayerLayout<Video: View>: View {
                         .offset(x: layout.paneOrigin.x, y: layout.paneOrigin.y)
                         .accessibilityIdentifier("douyin.list.commentPane")
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if showsComments {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { showComments = false }
+                    } label: { Color.clear.contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .frame(width: layout.videoSize.width, height: layout.videoSize.height)
+                        .accessibilityLabel("关闭评论")
+                        .accessibilityIdentifier("douyin.comments.dismissAbove")
+                        .zIndex(1000)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
@@ -864,7 +867,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
             .onChange(of: layout.resident && layout.sideBySide, initial: true) { _, bookFold in
                 bookFoldComments = bookFold
             }
-            .animation(searchPresented ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: showComments)
+            .animation(searchPresented ? nil : .easeInOut(duration: 0.25), value: showComments)
             .animation(searchPresented ? nil : .snappy, value: layout.resident)
             .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: commentItem,
                                              focus: focus, onClose: { showComments = false }))

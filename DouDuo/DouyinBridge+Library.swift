@@ -216,6 +216,38 @@ extension DouyinBridge {
         return try await page(Self.musicListCollectionJS, ["cursor": cursor], DYMusicInfo.self)
     }
 
+    func originalSound(_ item: DYAweme) async throws -> DYMusicInfo {
+        if let id = item.musicID, !id.isEmpty,
+           let result = try? await page(Self.musicDetailJS, ["mid": id], DYMusicInfo.self),
+           let music = result.items.first { return music }
+        guard item.musicID != nil || item.musicURL != nil else { throw DYError.bad("这条作品没有可用的原声") }
+        return DYMusicInfo(id: item.musicID ?? "", title: item.music, author: "", cover: item.cover,
+                           duration: 0, playURL: item.musicURL)
+    }
+
+    func musicVideos(_ id: String, cursor: String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
+        try await page(Self.musicWorksJS, ["mid": id, "cursor": cursor], DYAweme.self)
+    }
+
+    static let musicDetailJS = #"""
+    const r = await req('GET', '/aweme/v1/web/music/detail/?' + q({music_id: mid, scene: '1'}));
+    const d = parse(r.t) || {}, m = d.music_info || d.music;
+    const items = m ? [{ id: String(m.id_str || m.mid || mid), title: m.title || '', author: m.author || '',
+      cover: first(m.cover_medium) || first(m.cover_thumb), duration: Number(m.duration || 0),
+      playURL: typeof m.play_url === 'string' ? m.play_url : first(m.play_url) || null }] : [];
+    return JSON.stringify({status:r.s, code:d.status_code ?? -1, items, cursor:'0', hasMore:false});
+    """#
+
+    static let musicWorksJS = #"""
+    if (typeof sdkReady === 'function') await sdkReady(6000);
+    const r = await req('GET', '/aweme/v1/web/music/aweme/?' + q({music_id:mid,cursor:cursor,count:'20'}));
+    const d = parse(r.t) || {};
+    return JSON.stringify({status:r.s, code:d.status_code ?? -1,
+      msg:d.status_msg || '原声视频暂时没有返回，请稍后重试',
+      items:(d.aweme_list || []).filter(a => a && (a.video || a.images) && !a.is_ads).map(mapA),
+      cursor:String(d.cursor ?? 0),hasMore:Number(d.has_more) === 1});
+    """#
+
     /// 收藏 / 取消收藏音乐（music/collect，type=action=1/0；3007005 = 已收藏过，当成功）
     func collectMusic(_ musicID: String, on: Bool) async throws -> DYActionResult {
         let r = try await writeCall(Self.musicCollectJS, ["mid": musicID, "action": on ? "1" : "0"], tag: on ? "music-collect" : "music-uncollect")

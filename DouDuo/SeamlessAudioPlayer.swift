@@ -531,6 +531,7 @@ final class DDSeamlessController {
     private var handoffAllowed = false
     private var handoffGen: UInt64 = 0
     private var handoffPending = false
+    private var handoffPreparation: Task<Void, Never>?
     /// 声音交接要等流准备好；等太久（在线流首包慢）就先按原生方式变速，交接完成后接着无缝
     private let handoffNativeFallbackDelay: Double = 0.35
 
@@ -561,11 +562,14 @@ final class DDSeamlessController {
             mode = .fallbackAVPlayer
             handoffAllowed = engineHandoff
             if let asset = player.currentItem?.asset as? AVURLAsset {
-                DDAudioPreloadPool.shared.take(for: asset)?.cancel()
+                let prepared = DDAudioPreloadPool.shared.take(for: asset)
+                if engineHandoff { stream = prepared ?? DDAudioStream(asset: asset) }
+                else { prepared?.cancel() }
             }
             if let it = player.currentItem { DDAudioStream.enableAudioTracks(on: it) }
             player.isMuted = !wantPlaying || muted
             if wantPlaying { player.rate = targetRate } else { player.pause() }
+            warmHandoff()
             return
         }
 
@@ -670,6 +674,20 @@ final class DDSeamlessController {
         case .fallbackAVPlayer:
             videoPlayer?.isMuted = muted
             if wantPlaying { videoPlayer?.rate = targetRate }
+            warmHandoff()
+        }
+    }
+
+    private func warmHandoff() {
+        guard handoffAllowed, wantPlaying, !handoffPending, handoffPreparation == nil,
+              let stream, stream.pcmFormat == nil else { return }
+        let generation = bindGen
+        handoffPreparation = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
+            guard let self else { return }
+            defer { if self.bindGen == generation { self.handoffPreparation = nil } }
+            guard self.bindGen == generation, self.wantPlaying, !self.handoffPending else { return }
+            _ = await stream.prepareAndPrewarm(prewarm: false)
         }
     }
 
@@ -1107,6 +1125,8 @@ final class DDSeamlessController {
     }
 
     func reset() {
+        handoffPreparation?.cancel()
+        handoffPreparation = nil
         bindGen &+= 1
         wantPlaying = false
         stopEngineOutput()
