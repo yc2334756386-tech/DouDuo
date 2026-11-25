@@ -64,6 +64,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
         return ZStack(alignment: .topLeading) {
             feed()
                 .environment(\.dyTouchpadEngaged, padActive)
+                .geometryGroup()
                 .frame(width: layout.videoSize.width, height: layout.videoSize.height, alignment: .topLeading)
                 .accessibilityIdentifier("douyin.comments.mediaPane")
                 .environment(\.dyRestrictsPlaybackToPane, layout.showsPane)
@@ -93,6 +94,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                 }
                 .padding(.top, !DYDuoMetrics.isDuoHardware && layout.sideBySide ? DYDuoMetrics.windowSafeTop : 0)
                 .frame(width: layout.paneSize.width, height: layout.paneSize.height)
+                .geometryGroup()
                 .clipped()
                 // 触控板压在评论上面、倒影下面：桌面倒影照样投在黑底上（不重复挂第二层投光）
                 .overlay {

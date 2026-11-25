@@ -966,6 +966,7 @@ struct DYDanmakuClock {
         let predicted = self.now(now)
         let err = t - predicted
         let settling = now < settleUntil
+        #if DEBUG
         if p, playing {
             Self.errSamples.append(err)
             if Self.errSamples.count >= 40 {
@@ -976,6 +977,7 @@ struct DYDanmakuClock {
                 Self.errSamples.removeAll()
             }
         }
+        #endif
         // 冷静期里播放器短暂报「暂停」（缓冲）不跟着停；其余情况状态/倍速变了就硬对齐
         let pausedBlip = settling && !p && playing
         let stateChanged = !pausedBlip && (p != playing || r != rate)

@@ -226,7 +226,12 @@ extension DouyinBridge {
     }
 
     func musicVideos(_ id: String, cursor: String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
-        try await page(Self.musicWorksJS, ["mid": id, "cursor": cursor], DYAweme.self)
+        let data = try await call(Self.musicWorksJS, args: ["mid": id, "cursor": cursor], attempts: 1)
+        let result = try JSONDecoder().decode(DYPageResp<DYAweme>.self, from: data)
+        guard result.status == 200, result.code == 0 else {
+            throw DYError.bad(result.msg ?? "原声作品接口暂时不可用，请重试")
+        }
+        return (result.items, result.cursor, result.hasMore)
     }
 
     static let musicDetailJS = #"""
@@ -239,17 +244,20 @@ extension DouyinBridge {
     """#
 
     static let musicWorksJS = #"""
-    if (typeof sdkReady === 'function') await sdkReady(6000);
-    const r = await req('GET', '/aweme/v1/web/music/aweme/?' + q({music_id:mid,cursor:cursor,count:'20'}));
+    if (typeof sdkReady === 'function') await sdkReady(1500);
+    const params = {music_id:mid,cursor:cursor,count:'20',scene:'1'};
+    // 作品接口与主页作品一样去掉 os_name，避免部分 WebKit 会话返回空包。
+    const r = await req('GET', '/aweme/v1/web/music/aweme/?' + qPost(params));
     const d = parse(r.t) || {};
     return JSON.stringify({status:r.s, code:d.status_code ?? -1,
       msg:d.status_msg || '原声视频暂时没有返回，请稍后重试',
-      items:(d.aweme_list || []).filter(a => a && (a.video || a.images) && !a.is_ads).map(mapA),
+      items:(d.aweme_list || d.item_list || []).filter(a => a && (a.video || a.images) && !a.is_ads).map(mapA),
       cursor:String(d.cursor ?? 0),hasMore:Number(d.has_more) === 1});
     """#
 
     /// 收藏 / 取消收藏音乐（music/collect，type=action=1/0；3007005 = 已收藏过，当成功）
     func collectMusic(_ musicID: String, on: Bool) async throws -> DYActionResult {
+        DYActionHaptics.play(adding: on)
         let r = try await writeCall(Self.musicCollectJS, ["mid": musicID, "action": on ? "1" : "0"], tag: on ? "music-collect" : "music-uncollect")
         if r.status == 200, r.statusCode == 3_007_005 { return .ok }
         return Self.manageResult(r)

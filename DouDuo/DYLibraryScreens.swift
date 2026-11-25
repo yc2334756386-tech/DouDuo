@@ -450,6 +450,7 @@ struct DYCollectedMusicScreen: View {
     @StateObject private var preview = DYCollectedMusicPlayer()
     @State private var message: String?
     @State private var musicWorks: DYMusicInfo?
+    @State private var removing: Set<String> = []
 
     let embedded: Bool
 
@@ -495,6 +496,14 @@ struct DYCollectedMusicScreen: View {
                             .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        Button(role: .destructive) { Task { await uncollect(m) } } label: {
+                            Image(systemName: "trash")
+                                .frame(width: 40, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(removing.contains(m.id))
+                        .accessibilityLabel("删除收藏音乐")
+                        .accessibilityIdentifier("douyin.music.delete")
                       }
                       .contentShape(Rectangle())
                     .accessibilityValue(preview.playingID == m.id ? "正在播放" : "播放")
@@ -532,6 +541,8 @@ struct DYCollectedMusicScreen: View {
     }
 
     private func uncollect(_ m: DYMusicInfo) async {
+        guard removing.insert(m.id).inserted else { return }
+        defer { removing.remove(m.id) }
         do {
             switch try await bridge.collectMusic(m.id, on: false) {
             case .ok:
@@ -925,6 +936,7 @@ struct DYMusicVideosScreen: View {
             try await transport.page(cursor)
         }
         .background { DYNativeSearchHost(transport: transport).frame(width: 1, height: 1).opacity(0.01).accessibilityHidden(true) }
+        .onDisappear { transport.close() }
         .sheet(item: $author) { person in
             NavigationStack {
                 DYAuthorScreen(bridge: bridge, author: person, onWeb: { url in

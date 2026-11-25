@@ -818,6 +818,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
                     .environment(\.duoInlineVideoNavigation, layout.showsPane || showsComments)
                     .environment(\.duoCleanScreen, cleanScreen)
                     .environment(\.dyCommentsOpen, showsComments || layout.showsPane)
+                    .geometryGroup()
                     .frame(width: layout.videoSize.width, height: layout.videoSize.height)
                     .accessibilityIdentifier("douyin.comments.mediaPane")
                     .environment(\.dyRestrictsPlaybackToPane, layout.showsPane)
@@ -831,6 +832,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
                                    horizontalStatus: horizontalCommentStatus)
                         .id(aweme.id)
                         .frame(width: layout.paneSize.width, height: layout.paneSize.height)
+                        .geometryGroup()
                         .clipped()
                         .dyDeskLight(layout.resident && !layout.sideBySide, videoHeight: layout.videoSize.height)
                         .overlay(alignment: .leading) {

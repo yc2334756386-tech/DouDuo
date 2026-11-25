@@ -305,6 +305,19 @@ final class PageLife {
 /// 长按加速的触发时长。原来 0.5 秒，用户反馈比抖音原版慢、不跟手（issue #4），改 0.3。
 enum DYBoostTiming {
     static let holdSeconds: Double = 0.3
+    static let playbackRate: Double = 3
+}
+
+@MainActor
+enum DYActionHaptics {
+    private static let add = UIImpactFeedbackGenerator(style: .medium)
+    private static let remove = UIImpactFeedbackGenerator(style: .soft)
+
+    static func play(adding: Bool) {
+        let generator = adding ? add : remove
+        generator.impactOccurred(intensity: adding ? 0.8 : 0.55)
+        generator.prepare()
+    }
 }
 
 /// 简洁/极简模式的右侧栏画在首页最外层，拿不到每一页自己的 DYBoostControl。
@@ -480,7 +493,7 @@ struct PlayerPage: View {
         let v = UserDefaults.standard.double(forKey: "douyin_playback_rate_v1")
         return v > 0 ? v : 1.0
     }
-    private var effectiveRate: Double { lockedBoost ? 2 : liveRate }
+    private var effectiveRate: Double { lockedBoost ? DYBoostTiming.playbackRate : liveRate }
     private func rateText(_ r: Double) -> String {
         r == r.rounded() ? String(format: "%.0f×", r) : String(format: "%g×", r)
     }
@@ -522,8 +535,8 @@ struct PlayerPage: View {
     private var showsVideoAboveComments: Bool { isActive && commentVideoFrame != nil }
 
     private var fillsVideoPlane: Bool { fillWidth && !showsVideoAboveComments && !restrictsPlaybackToPane }
-    /// 实际播放速度（含按住的临时 2 倍）：播放器、音频引擎、弹幕时钟和倍速角标都认这一个值
-    private var actualRate: Double { rateBoost ? 2 : effectiveRate }
+    /// 实际播放速度（含按住的临时 3 倍）。
+    private var actualRate: Double { rateBoost ? DYBoostTiming.playbackRate : effectiveRate }
     private var playRate: Float { Float(actualRate) }
 
     private var offlineContext: DYOfflinePlaybackContext? {
@@ -850,7 +863,7 @@ struct PlayerPage: View {
             // 只有当前这一页自己响应：预加载的相邻页不动，滑过去时由 isActive 路径按新速度起播
             guard isActive else { return }
             if !rateBoost { lockedBoost = false }
-            let target = rateBoost ? 2 : newRate
+            let target = rateBoost ? DYBoostTiming.playbackRate : newRate
             // 起播一律原生声音；播放中改速度交给 seamAudio.setRate：原生时就地交接给独立引擎（不断声），
             // 已在引擎上就直接改引擎速率。不再按 1x / 非 1x 换声音通路（换通路要重绑，会断一下声，#52-1）。
             if let v = vlc { v.setRate(Float(target)); dmClock.sync(v.current, playing: v.isPlaying, rate: target) }
@@ -983,14 +996,15 @@ struct PlayerPage: View {
     private func handleLongPress(_ pressing: Bool) {
 
         if let v = vlc {
-            if pressing { v.setRate(2); rateBoost = true } else if rateBoost { v.setRate(Float(effectiveRate)); rateBoost = false }
+            if pressing { v.setRate(Float(DYBoostTiming.playbackRate)); rateBoost = true } else if rateBoost { v.setRate(Float(effectiveRate)); rateBoost = false }
+            dmClock.userToggle(v.current, playing: v.isPlaying, rate: actualRate)
             return
         }
         guard let p = player else { return }
         DYBoostProbe.begin(pressing ? "on" : "off", mode: "\(seamAudio.mode)", player: p)
         // PR #42（@ImSingee）：1x 原生声音下第一次变速，就地把声音交给独立引擎（AVPlayer 带音轨改速率会冲刷音频队列、画面停 50~110ms）。
         // 之后这一条留在引擎上，松手/再按都是 0ms 变速。所以这里统一走 seamAudio.setRate，不再直接调 AVPlayer.softRate。
-        if pressing { rateBoost = true; seamAudio.setRate(2) }
+        if pressing { rateBoost = true; seamAudio.setRate(Float(DYBoostTiming.playbackRate)) }
         else if rateBoost {
             rateBoost = false
             if isPlaying { seamAudio.setRate(Float(effectiveRate)) } else { seamAudio.pause() }
@@ -1869,7 +1883,9 @@ struct PlayerPage: View {
                     Task { await DYVideoCache.shared.completeLong(id: id) }
                 }
                 if playbackIsActive { DDNowPlaying.note(id, pos, owner: playbackID); DYStreamStore.shared.setPlayhead(id, t.seconds) }
-                dmClock.sync(pos, playing: isPlaying && p.rate > 0 && !seeking, rate: Double(playRate))
+                // 音频交接尚在准备时按画面真实速率走，避免弹幕提前加速又被时钟拉回。
+                dmClock.sync(pos, playing: isPlaying && p.rate > 0 && !seeking,
+                             rate: Double(p.rate > 0 ? p.rate : playRate))
                 refreshNowPlaying(pos)
                 // 原生声音模式下每 0.25s 拉回锁定倍速（交给 seamAudio：能交接给独立引擎就不走会卡一下的原生变速）；
                 // engaged 模式下由 seamAudio 的 Soft PLL 维护速率

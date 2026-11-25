@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        DDD137000000000000000001 /* DYDanmakuCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DDD137000000000000000002 /* DYDanmakuCore.cpp */; };
 		00669F41D44BEE3156182096 /* DYLibraryScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0185B9017379CF22080BF73 /* DYLibraryScreens.swift */; };
 		048E8F57A5AF2A24EAF5087C /* DYShareLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EBC24E22E6E1F086E8D31C5 /* DYShareLinkTests.swift */; };
 		065AE3AEC98F2839DD0FB364 /* DYSignGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C41CFF8DFF40A68B9BA4DAE /* DYSignGateTests.swift */; };
@@ -170,6 +171,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        DDD137000000000000000002 /* DYDanmakuCore.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = DYDanmakuCore.cpp; sourceTree = "<group>"; };
+        DDD137000000000000000003 /* DYDanmakuCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DYDanmakuCore.h; sourceTree = "<group>"; };
+        DDD137000000000000000004 /* DouDuo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "DouDuo-Bridging-Header.h"; sourceTree = "<group>"; };
 		001C015957CC2755309F4EE5 /* DouyinPeopleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DouyinPeopleCache.swift; sourceTree = "<group>"; };
 		008B7FB68E974359DCF77E02 /* DouyinVideoCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DouyinVideoCache.swift; sourceTree = "<group>"; };
 		016E32A4CC2CC36574CF1639 /* DouyinMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DouyinMessages.swift; sourceTree = "<group>"; };
@@ -387,6 +391,9 @@
 				EAF4B2FFB5C313A3D71F7F05 /* DYChatWebBridge.swift */,
 				968925023F7C6A72604D1298 /* DYCommentPending.swift */,
 				AFC1D9BDEA8CFD52E90C4CD6 /* DYCommentStage.swift */,
+                DDD137000000000000000002 /* DYDanmakuCore.cpp */,
+                DDD137000000000000000003 /* DYDanmakuCore.h */,
+                DDD137000000000000000004 /* DouDuo-Bridging-Header.h */,
 				45F438BF3690CFD4BD6A0051 /* DYConversationCell.swift */,
 				74F646B31DAD1BDD97D97FBA /* DYConversationStreak.swift */,
 				2C43FA3C5D8DB75D2826682B /* DYConversationSync.swift */,
@@ -665,6 +672,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                DDD137000000000000000001 /* DYDanmakuCore.cpp in Sources */,
 				48F46B135907F902C9B20475 /* CachedAsyncImage.swift in Sources */,
 				6279D68970644B3297B72542 /* DDAppearance.swift in Sources */,
 				115E503A4451900455784A66 /* DDAppearanceProbe.swift in Sources */,
@@ -851,6 +859,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = me.rrmm.douduo;
 				PRODUCT_NAME = DouDuo;
+                SWIFT_OBJC_BRIDGING_HEADER = "DouDuo/DouDuo-Bridging-Header.h";
+                CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -897,6 +907,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = me.rrmm.douduo;
 				PRODUCT_NAME = DouDuo;
+                SWIFT_OBJC_BRIDGING_HEADER = "DouDuo/DouDuo-Bridging-Header.h";
+                CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

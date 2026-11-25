@@ -26,8 +26,7 @@ enum DYDanmakuStyle {
     /// 一条弹幕从右边进屏到左边完全出屏用的时间：短的偏慢、长的偏快（抖音观感）
     /// 过屏时长按长度线性插值：屏宽的弹幕约 8.5s，宽度为屏宽 60% 以上的长弹幕约 6.0s
     static func travelSeconds(width: CGFloat, screen: CGFloat) -> Double {
-        let ratio = Double(max(0, min(1, width / max(screen * 0.6, 1))))
-        return 8.5 - 2.5 * ratio
+        DYDMTravelSeconds(Double(width), Double(screen))
     }
     /// 同一条轨道上后一条与前一条的最小间距（pt）
     static let gap: CGFloat = 24
@@ -37,20 +36,19 @@ enum DYDanmakuStyle {
 
 /// 一条正在屏上飞的弹幕
 private struct DYFlying {
-    let id: String
     let layer: CALayer
-    let width: CGFloat
-    let lane: Int
-    let born: Double        // 出场时的视频时间
-    let speed: CGFloat      // pt / 视频秒
-    let screen: CGFloat
-    func x(at t: Double) -> CGFloat { screen - CGFloat(t - born) * speed }
-    /// 尾巴完全进屏、并且留够间距的时刻：之后同轨道才能放下一条（并且考虑后一条更快会追上）
-    func tailX(at t: Double) -> CGFloat { x(at: t) + width }
+    let end: Double
 }
 
 final class DYDanmakuEngineView: UIView {
     private let clip = CALayer()
+    private let core = DYDMCreate()
+    private var coreWidth: CGFloat = 0
+    private var timelineRate: Float = -1
+    private var lastItemCount = -1
+    private var lastFirstID: String?
+    private var lastLastID: String?
+    private var normalized: [String: String] = [:]
     private var queue: [DYDanmaku] = []        // 已拉到的全部弹幕（按 offset 排序）；跳回前面时从这里重排
     private var queued = Set<String>()        // 已收进 queue 的 id，防重复
     private var cursor = 0                    // queue 中下一条要看的位置
@@ -83,24 +81,49 @@ final class DYDanmakuEngineView: UIView {
         isUserInteractionEnabled = false
         backgroundColor = .clear
         clip.masksToBounds = true
+        clip.speed = 0
+        flying.reserveCapacity(256)
+        pool.reserveCapacity(64)
         layer.addSublayer(clip)
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { DYDMDestroy(core) }
 
     func update(items: [DYDanmaku], clock c: DYDanmakuClock, regionTop: CGFloat, regionHeight: CGFloat,
                 lanes l: Int, density: DYDanmakuPolicy.Density, deduplicate dd: Bool) {
         let jumped = c.epoch != clock.epoch
+        let layoutChanged = l != lanes || abs(coreWidth - bounds.width) > 0.5
         clock = c
         lanes = l
+        coreWidth = bounds.width
+        DYDMConfigure(core, Double(coreWidth), Int32(max(0, min(l, 64))), Double(DYDanmakuStyle.gap))
         deduplicate = dd
         maxPerSecond = density.maxPerSecond * 3   // 抖音密度：每秒能出的条数比原来宽
         CATransaction.begin(); CATransaction.setDisableActions(true)
         clip.frame = CGRect(x: 0, y: regionTop, width: bounds.width, height: regionHeight)
         CATransaction.commit()
         merge(items)
-        if jumped { restart(at: clock.now(Date())) }
+        let now = clock.now(Date())
+        syncTimeline(at: now, force: jumped)
+        if jumped || layoutChanged { restart(at: now) }
         if clock.playing && hasWork { start() } else { stop() }
-        render(clock.now(Date()))
+        render(clip.convertTime(CACurrentMediaTime(), from: nil))
+    }
+
+    // Core Animation 在渲染进程平移字形。主线程只调度新弹幕，不再逐帧修改每个图层的位置。
+    private func syncTimeline(at time: Double, force: Bool) {
+        let rate = clock.playing ? Float(clock.rate * (1 + clock.slew)) : 0
+        let host = CACurrentMediaTime()
+        let current = clip.convertTime(host, from: nil)
+        guard force || abs(rate - timelineRate) > 0.0005 || abs(current - time) > 0.35 else { return }
+        let position = force || timelineRate < 0 || abs(current - time) > 0.35 ? time : current
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        clip.speed = rate
+        clip.timeOffset = rate > 0 ? 0 : position
+        clip.beginTime = rate > 0 ? layer.convertTime(host, from: nil) - position / Double(rate) : 0
+        CATransaction.commit()
+        timelineRate = rate
     }
 
     /// 没有在飞的、也没有待出场的弹幕时不跑逐帧刷新（否则 120 帧空转。真机：弹幕刷新占主线程约 1 成）
@@ -108,9 +131,16 @@ final class DYDanmakuEngineView: UIView {
 
     /// 新到的弹幕并入队列；已经在飞的不受影响，过去时间点的不倒着补（跟抖音一样）
     private func merge(_ items: [DYDanmaku]) {
+        guard items.count != lastItemCount || items.first?.id != lastFirstID || items.last?.id != lastLastID else { return }
+        lastItemCount = items.count
+        lastFirstID = items.first?.id
+        lastLastID = items.last?.id
         let fresh = items.filter { $0.offset.isFinite && $0.offset >= 0 && !$0.id.isEmpty && !queued.contains($0.id) }
         guard !fresh.isEmpty else { return }
-        for d in fresh { queued.insert(d.id) }
+        for d in fresh {
+            queued.insert(d.id)
+            normalized[d.id] = DYDanmakuPolicy.normalized(d.text)
+        }
         let resumeFrom = cursor < queue.count ? queue[cursor].offset : (lastT >= 0 ? lastT : 0)
         queue = (queue + fresh).sorted { $0.offset == $1.offset ? $0.id < $1.id : $0.offset < $1.offset }
         cursor = queue.firstIndex { $0.offset >= resumeFrom } ?? queue.count
@@ -119,9 +149,11 @@ final class DYDanmakuEngineView: UIView {
     /// 跳转/重新开始：清屏，从 t 往后排
     private func restart(at t: Double) {
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        for f in flying { f.layer.removeFromSuperlayer(); pool.append(f.layer) }
+        for f in flying { f.layer.removeAllAnimations(); f.layer.removeFromSuperlayer(); pool.append(f.layer) }
         CATransaction.commit()
         flying.removeAll()
+        DYDMReset(core)
+        lastWarmTime = -1
         spawnedAt.removeAll()
         lastShown.removeAll()
         done.removeAll()
@@ -140,8 +172,9 @@ final class DYDanmakuEngineView: UIView {
         let l = CADisplayLink(target: DYDanmakuEngineTick(self), selector: #selector(DYDanmakuEngineTick.tick(_:)))
         // 发热（serious 及以上）时降到 60 帧：弹幕平移 60 帧肉眼也是顺的
         let hot = ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-        l.preferredFrameRateRange = hot ? CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-                                        : CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        // 调度器 30Hz 即可，字形动画由合成器按屏幕刷新率独立运行。
+        l.preferredFrameRateRange = hot ? CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+                                        : CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
         l.add(to: .main, forMode: .common)
         link = l
         lastTS = 0
@@ -183,8 +216,7 @@ final class DYDanmakuEngineView: UIView {
         }
         #endif
         lastTS = l.timestamp
-        let lead = l.targetTimestamp - CACurrentMediaTime()
-        render(clock.now(Date().addingTimeInterval(max(0, lead))))
+        render(clip.convertTime(CACurrentMediaTime(), from: nil))
     }
 
     private func render(_ t: Double) {
@@ -198,20 +230,14 @@ final class DYDanmakuEngineView: UIView {
         if lastT >= 0, t + 0.5 < lastT { restart(at: t) }
         lastT = t
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        spawn(upTo: t, screen: w)
-        var keep: [DYFlying] = []
-        keep.reserveCapacity(flying.count)
-        for f in flying {
-            let x = f.x(at: t)
-            if x + f.width < 0 {
-                f.layer.removeFromSuperlayer(); pool.append(f.layer)
-                continue
-            }
-            let s = f.layer.contentsScale
-            f.layer.position = CGPoint(x: (x * s).rounded() / s, y: CGFloat(f.lane) * DYDanmakuStyle.laneHeight)
-            keep.append(f)
+        DYDMAdvance(core, t)
+        for index in flying.indices.reversed() where flying[index].end <= t {
+            let old = flying.remove(at: index).layer
+            old.removeAllAnimations()
+            old.removeFromSuperlayer()
+            pool.append(old)
         }
-        flying = keep
+        spawn(upTo: t, screen: w)
         maxOn = max(maxOn, flying.count)
         CATransaction.commit()
         // 屏上没有在飞的：队列排完就停；下一条还早（>0.4s）就停掉、到点前再起（不在等待期间 120 帧空转）
@@ -233,7 +259,7 @@ final class DYDanmakuEngineView: UIView {
             cursor += 1
             if done.contains(d.id) { continue }
             if t - d.offset > DYDanmakuStyle.maxDelay { done.insert(d.id); dropped += 1; continue }   // 太迟了，丢掉
-            let key = DYDanmakuPolicy.normalized(d.text)
+            let key = normalized[d.id] ?? ""
             if key.isEmpty { continue }
             if deduplicate, let last = lastShown[key], d.offset - last < 10 { done.insert(d.id); continue }
             if spawnedAt.count >= maxPerSecond { cursor -= 1; break }   // 这一秒满了，下一帧再看
@@ -242,9 +268,9 @@ final class DYDanmakuEngineView: UIView {
                 cursor -= 1
                 break
             }
-            let travel = DYDanmakuStyle.travelSeconds(width: size.width, screen: screen)
-            let speed = (screen + size.width) / CGFloat(travel)
-            guard let lane = freeLane(at: t, width: size.width, speed: speed, screen: screen) else {
+            let travel = DYDMTravelSeconds(Double(size.width), Double(screen))
+            let lane = Int(DYDMTrySpawn(core, t, Double(size.width)))
+            guard lane >= 0 else {
                 // 轨道都满：先放回队列，下一帧再试（最多等 maxDelay）
                 cursor -= 1
                 break
@@ -254,36 +280,21 @@ final class DYDanmakuEngineView: UIView {
             layer.contentsScale = UIScreen.main.scale
             layer.contents = raster
             layer.bounds = CGRect(origin: .zero, size: size)
-            layer.position = CGPoint(x: screen, y: CGFloat(lane) * DYDanmakuStyle.laneHeight)
+            layer.position = CGPoint(x: -size.width, y: CGFloat(lane) * DYDanmakuStyle.laneHeight)
             clip.addSublayer(layer)
-            flying.append(DYFlying(id: d.id, layer: layer, width: size.width, lane: lane, born: t, speed: speed, screen: screen))
+            let motion = CABasicAnimation(keyPath: "position.x")
+            motion.fromValue = screen
+            motion.toValue = -size.width
+            motion.duration = travel
+            motion.beginTime = t
+            motion.timingFunction = CAMediaTimingFunction(name: .linear)
+            layer.add(motion, forKey: "douduo.danmaku.motion")
+            flying.append(DYFlying(layer: layer, end: t + travel))
             lastShown[key] = d.offset
             done.insert(d.id)
             spawnedAt.append(t)
             spawned += 1
         }
-    }
-
-    /// 一条轨道能放：上一条的尾巴已经离开右边缘至少 gap，且新的（可能更快）在上一条离屏之前追不上它
-    private func freeLane(at t: Double, width: CGFloat, speed: CGFloat, screen: CGFloat) -> Int? {
-        var lastOn = [DYFlying?](repeating: nil, count: lanes)
-        for f in flying where f.lane < lanes {
-            if let cur = lastOn[f.lane], cur.born >= f.born { continue }
-            lastOn[f.lane] = f
-        }
-        for lane in 0..<lanes {
-            guard let prev = lastOn[lane] else { return lane }
-            let tail = prev.tailX(at: t)
-            guard tail + DYDanmakuStyle.gap <= screen else { continue }
-            if speed > prev.speed {
-                // 新的更快：算它追上前一条尾巴的时刻，必须晚于前一条完全离开左边
-                let prevExit = Double((prev.x(at: t) + prev.width) / prev.speed)          // 前一条还要多久离屏
-                let catchUp = Double((screen - tail - DYDanmakuStyle.gap) / (speed - prev.speed))
-                if catchUp < prevExit { continue }
-            }
-            return lane
-        }
-        return nil
     }
 
     private func prepareRaster(_ item: DYDanmaku) {

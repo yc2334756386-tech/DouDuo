@@ -25,6 +25,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.rrmm.douduo
         PRODUCT_NAME: DouDuo
+        SWIFT_OBJC_BRIDGING_HEADER: DouDuo/DouDuo-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
         INFOPLIST_KEY_CFBundleDisplayName: DouDuo
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic

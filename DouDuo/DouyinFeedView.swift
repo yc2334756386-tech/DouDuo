@@ -613,6 +613,7 @@ final class DouyinBridge: NSObject, ObservableObject, WKNavigationDelegate {
 
     /// 真点赞（走网页端同一个接口，页面 SDK 自动签名）
     func digg(_ id: String, like: Bool) async throws -> DYActionResult {
+        DYActionHaptics.play(adding: like)
         let d = try await call(Self.diggJS, args: ["id": id, "type": like ? "1" : "0"])
         let r = try JSONDecoder().decode(DYActionResp.self, from: d)
         #if DEBUG
@@ -640,6 +641,7 @@ final class DouyinBridge: NSObject, ObservableObject, WKNavigationDelegate {
 
     /// 真收藏 / 取消收藏
     func favorite(_ id: String, add: Bool) async throws -> DYActionResult {
+        DYActionHaptics.play(adding: add)
         #if DEBUG
         ddWrite("DDACT fav start id=\(id) add=\(add)")
         #endif
@@ -1069,7 +1071,11 @@ final class DouyinBridge: NSObject, ObservableObject, WKNavigationDelegate {
       browser_name: 'Safari', browser_version: '26.0', browser_online: 'true', engine_name: 'WebKit', engine_version: '605.1.15',
       os_name: 'Mac OS', os_version: '10.15.7', cpu_core_num: '8', device_memory: '8', platform: 'PC', downlink: '10',
       effective_type: '4g', round_trip_time: '50' };
-    const parse = t => { try { return JSON.parse(t) } catch (e) { return null } };
+    // 平台 ID 超出 JS 安全整数范围，先转字符串，避免原声列表/收藏请求使用被四舍五入的 ID。
+    const parse = t => { try {
+      const exact = String(t).replace(/("(?:id|mid|music_id|aweme_id|uid|user_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g, '$1"$2"');
+      return JSON.parse(exact);
+    } catch (e) { return null } };
     // 抖音安全 SDK 在 load 之后还要一会儿才接管 XHR；没接管就发写请求会不带 a_bogus 签名，
     // 服务端直接丢弃（200 空 body 或 403），而读接口不受影响。写接口一律先等它就绪。
     const sdkReady = async (ms) => {
@@ -4667,7 +4673,6 @@ struct DYClassicVideoPage: View {
         .overlay(alignment: .bottom) {
             if dm.showInput { DYDanmakuBar(model: dm, focused: $danmakuFocused, onSend: sendDanmaku).padding(.bottom, max(insets.bottom, 0) + 4) }
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: liked) { old, new in !old && new }
         .dyBottomSheet(isPresented: $showShare, kind: .share) {
             DYForwardScreen(item: item, fromOfflineLibrary: usesOfflineFile,
                             onlineActionsAllowed: offlinePlayback?.onlineActionsAllowed != false)
@@ -4955,6 +4960,10 @@ private struct DYHorizontalCommentCloseButton: UIViewRepresentable {
     }
 }
 
+private final class DYCommentVisiblePosition {
+    var topID: String?
+}
+
 struct DYCommentPanel: View {
     // Shared by the message notification reply flow.
     static let waitSignText = "等待签名完成才可以发送评论"
@@ -4979,12 +4988,13 @@ struct DYCommentPanel: View {
     @State private var replyMore: [String: Bool] = [:]
     @State private var replyLoading: Set<String> = []
     @State private var replyErrors: [String: String] = [:]
-    @State private var topVisibleID: String?
+    @State private var visiblePosition = DYCommentVisiblePosition()
     @State private var restoreID: String?
     @State private var restored = false
     @State private var listAtTop = true
     @State private var commentAuthor: DYAweme.Author?
     @State private var profileWeb: DYWebTarget?
+    @State private var readyForContent = false
 
     init(bridge: DouyinBridge, aweme: DYAweme, onClose: (() -> Void)?, focus: DYCommentFocus? = nil,
          fillsPane: Bool = false, trailingInset: CGFloat = 0, horizontalStatus: Bool = false) {
@@ -5055,7 +5065,9 @@ struct DYCommentPanel: View {
                 }
                 .modifier(DYScrollTopObserver(atTop: $listAtTop))
                 .modifier(DYPanelDismissGesture(isAtTop: listAtTop, allowsSwipeRight: true, onClose: onClose))
-                .modifier(DYCommentTopTracker(ids: items.map(\.id), top: $topVisibleID, paused: restoreID != nil))
+                .modifier(DYCommentTopTracker(ids: items.map(\.id),
+                    top: Binding(get: { visiblePosition.topID }, set: { visiblePosition.topID = $0 }),
+                    paused: restoreID != nil))
                 .accessibilityIdentifier("douyin.comments.list")
                 .task(id: restoreID) {
                     guard let id = restoreID else { return }
@@ -5073,7 +5085,12 @@ struct DYCommentPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("douyin.comments.panel")
-        .task(id: aweme.id) { await load() }
+        .task(id: aweme.id) {
+            // 先让评论抽屉完成合成动画，再更新列表和图片，避免首屏创建与动画争抢主线程。
+            do { try await Task.sleep(for: .milliseconds(280)) } catch { return }
+            readyForContent = true
+            await load()
+        }
         .onDisappear { savePosition() }
         .sheet(item: $commentAuthor) { author in
             NavigationStack {
@@ -5158,7 +5175,7 @@ struct DYCommentPanel: View {
     }
 
     private func load() async {
-        guard !loading, hasMore else { return }
+        guard readyForContent, !loading, hasMore else { return }
         if !restored, items.isEmpty, focus == nil, let saved = DYCommentMemory.shared.take(aweme.id) {
             restored = true
             items = saved.items
@@ -5197,7 +5214,7 @@ struct DYCommentPanel: View {
         guard focus == nil, !items.isEmpty else { return }
         DYCommentMemory.shared.put(aweme.id, .init(items: items, cursor: cursor, hasMore: hasMore, total: total,
             replies: replies, replyCursor: replyCursor, replyMore: replyMore,
-            digged: [], diggShown: [:], topID: topVisibleID))
+            digged: [], diggShown: [:], topID: visiblePosition.topID))
     }
 }
 
@@ -5298,6 +5315,12 @@ private struct DYCommentCoverBackdrop: View {
     let source: String?
     @Environment(\.colorScheme) private var scheme
     @State private var image: UIImage?
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 24
+        return cache
+    }()
+    private static let context = CIContext(options: [.cacheIntermediates: false])
 
     var body: some View {
         GeometryReader { geometry in
@@ -5310,20 +5333,27 @@ private struct DYCommentCoverBackdrop: View {
         }
         .allowsHitTesting(false)
         .task(id: source) {
-            guard let source, let url = URL(string: source),
+            guard let source else { image = nil; return }
+            if let cached = Self.cache.object(forKey: source as NSString) { image = cached; return }
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let url = URL(string: source),
                   let (data, _) = try? await URLSession.shared.data(from: url) else { image = nil; return }
+            let context = Self.context
             let prepared = await Task.detached(priority: .utility) { () -> UIImage? in
                 guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                       let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0,
                         [kCGImageSourceCreateThumbnailFromImageAlways: true,
                          kCGImageSourceCreateThumbnailWithTransform: true,
-                         kCGImageSourceThumbnailMaxPixelSize: 480] as CFDictionary) else { return nil }
+                         kCGImageSourceThumbnailMaxPixelSize: 320] as CFDictionary) else { return nil }
                 let input = CIImage(cgImage: thumbnail)
                 let blurred = input.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: ["inputRadius": 14]).cropped(to: input.extent)
-                guard let result = CIContext().createCGImage(blurred, from: input.extent) else { return nil }
+                guard let result = context.createCGImage(blurred, from: input.extent) else { return nil }
                 return UIImage(cgImage: result)
             }.value
-            if !Task.isCancelled { image = prepared }
+            if !Task.isCancelled, let prepared {
+                Self.cache.setObject(prepared, forKey: source as NSString)
+                image = prepared
+            }
         }
     }
 }
