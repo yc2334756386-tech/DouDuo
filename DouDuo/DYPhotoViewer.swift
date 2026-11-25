@@ -15,23 +15,30 @@ struct DYPhotoViewerTarget: Identifiable {
 
 struct DYPhotoViewer: UIViewControllerRepresentable {
     let target: DYPhotoViewerTarget
+    var usesZoomTransition = false
     let onClose: () -> Void
 
     func makeUIViewController(context: Context) -> DYPhotoPagerController {
-        DYPhotoPagerController(urls: target.urls, fallbacks: target.fallbacks, start: target.start, onClose: onClose)
+        DYPhotoPagerController(urls: target.urls, fallbacks: target.fallbacks, start: target.start,
+                               usesZoomTransition: usesZoomTransition, onClose: onClose)
     }
     func updateUIViewController(_ vc: DYPhotoPagerController, context: Context) {}
 }
 
 extension View {
     /// 挂原生看大图：item 非 nil 时全屏淡入
-    func dyPhotoViewer(_ item: Binding<DYPhotoViewerTarget?>) -> some View {
+    func dyPhotoViewer(_ item: Binding<DYPhotoViewerTarget?>, zoomNamespace: Namespace.ID? = nil) -> some View {
         fullScreenCover(item: item) { t in
-            DYPhotoViewer(target: t) { item.wrappedValue = nil }
-                .ignoresSafeArea()
-                .presentationBackground(.clear)
+            if let zoomNamespace, t.urls.indices.contains(t.start) {
+                DYPhotoViewer(target: t, usesZoomTransition: true) { item.wrappedValue = nil }
+                    .ignoresSafeArea().presentationBackground(.clear)
+                    .navigationTransition(.zoom(sourceID: t.urls[t.start].absoluteString, in: zoomNamespace))
+            } else {
+                DYPhotoViewer(target: t) { item.wrappedValue = nil }
+                    .ignoresSafeArea().presentationBackground(.clear)
+            }
         }
-        .transaction { if item.wrappedValue != nil { $0.disablesAnimations = true } }
+        .transaction { if item.wrappedValue != nil && zoomNamespace == nil { $0.disablesAnimations = true } }
     }
 }
 
@@ -40,18 +47,21 @@ final class DYPhotoPagerController: UIViewController, UIPageViewControllerDataSo
     private let fallbacks: [Data?]
     private var index: Int
     private let onClose: () -> Void
+    private let usesZoomTransition: Bool
     private let pager = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal,
                                             options: [.interPageSpacing: 20])
     private let backdrop = UIView()
     private let closeButton = UIButton(type: .system)
+    private let saveButton = UIButton(type: .system)
     private let counter = UILabel()
     private var chromeHidden = false
 
-    init(urls: [URL], fallbacks: [Data?] = [], start: Int, onClose: @escaping () -> Void) {
+    init(urls: [URL], fallbacks: [Data?] = [], start: Int, usesZoomTransition: Bool = false, onClose: @escaping () -> Void) {
         self.urls = urls
         self.fallbacks = fallbacks
         self.index = min(max(start, 0), max(urls.count - 1, 0))
         self.onClose = onClose
+        self.usesZoomTransition = usesZoomTransition
         super.init(nibName: nil, bundle: nil)
         modalPresentationCapturesStatusBarAppearance = true
     }
@@ -89,6 +99,15 @@ final class DYPhotoPagerController: UIViewController, UIPageViewControllerDataSo
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(closeButton)
 
+        var saveConfig = cfg
+        saveConfig.image = UIImage(systemName: "square.and.arrow.down")
+        saveButton.configuration = saveConfig
+        saveButton.accessibilityLabel = "保存当前图片"
+        saveButton.accessibilityIdentifier = "douyin.photo.saveCurrent"
+        saveButton.addAction(UIAction { [weak self] _ in self?.saveCurrentImage() }, for: .touchUpInside)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(saveButton)
+
         counter.textColor = .white
         counter.font = .preferredFont(forTextStyle: .subheadline)
         counter.translatesAutoresizingMaskIntoConstraints = false
@@ -104,6 +123,10 @@ final class DYPhotoPagerController: UIViewController, UIPageViewControllerDataSo
             closeButton.heightAnchor.constraint(equalToConstant: 40),
             counter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             counter.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: g.trailingAnchor, constant: -16),
+            saveButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            saveButton.widthAnchor.constraint(equalToConstant: 44),
+            saveButton.heightAnchor.constraint(equalToConstant: 40),
         ])
     }
 
@@ -119,10 +142,27 @@ final class DYPhotoPagerController: UIViewController, UIPageViewControllerDataSo
 
     private func updateCounter() { counter.text = "\(index + 1) / \(urls.count)" }
 
+    private func saveCurrentImage() {
+        guard urls.indices.contains(index), saveButton.isEnabled else { return }
+        let source = urls[index].absoluteString
+        saveButton.isEnabled = false
+        Task {
+            defer { saveButton.isEnabled = true }
+            let message: String
+            do { try await DYSaver.saveImage(source); message = "已保存到相册" }
+            catch { message = error.localizedDescription }
+            guard view.window != nil else { return }
+            let alert = UIAlertController(title: "保存图片", message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "好", style: .default))
+            present(alert, animated: true)
+        }
+    }
+
     private func toggleChrome() {
         chromeHidden.toggle()
         UIView.animate(withDuration: 0.2) {
             self.closeButton.alpha = self.chromeHidden ? 0 : 1
+            self.saveButton.alpha = self.chromeHidden ? 0 : 1
             self.counter.alpha = self.chromeHidden ? 0 : 1
         }
     }
@@ -132,12 +172,13 @@ final class DYPhotoPagerController: UIViewController, UIPageViewControllerDataSo
         backdrop.alpha = 1 - min(max(f, 0), 1) * 0.9
         let chrome: CGFloat = chromeHidden ? 0 : (f > 0.02 ? 0 : 1)
         closeButton.alpha = chrome
+        saveButton.alpha = chrome
         counter.alpha = chrome
     }
 
     private func close(animatedFromPage: Bool = false) {
         DYLiveModel.log("DDPHOTO close via=\(animatedFromPage ? "swipe" : "button")")
-        if animatedFromPage {
+        if animatedFromPage || usesZoomTransition {
             onClose()
         } else {
             UIView.animate(withDuration: 0.18, animations: { self.view.alpha = 0 }) { _ in self.onClose() }

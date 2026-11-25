@@ -92,7 +92,6 @@ final class DYDanmakuEngineView: UIView {
     func update(items: [DYDanmaku], clock c: DYDanmakuClock, regionTop: CGFloat, regionHeight: CGFloat,
                 lanes l: Int, density: DYDanmakuPolicy.Density, deduplicate dd: Bool) {
         let jumped = c.epoch != clock.epoch
-        let layoutChanged = l != lanes || abs(coreWidth - bounds.width) > 0.5
         clock = c
         lanes = l
         coreWidth = bounds.width
@@ -105,7 +104,7 @@ final class DYDanmakuEngineView: UIView {
         merge(items)
         let now = clock.now(Date())
         syncTimeline(at: now, force: jumped)
-        if jumped || layoutChanged { restart(at: now) }
+        if jumped { restart(at: now) }
         if clock.playing && hasWork { start() } else { stop() }
         render(clip.convertTime(CACurrentMediaTime(), from: nil))
     }
@@ -252,7 +251,7 @@ final class DYDanmakuEngineView: UIView {
 
     /// 让到点的弹幕出场：找右侧空出来、而且不会被追尾的轨道
     private func spawn(upTo t: Double, screen: CGFloat) {
-        guard lanes > 0 else { cursor = queue.count; return }
+        guard lanes > 0 else { return }
         spawnedAt.removeAll { t - $0 > 1 }
         while cursor < queue.count, queue[cursor].offset <= t {
             let d = queue[cursor]

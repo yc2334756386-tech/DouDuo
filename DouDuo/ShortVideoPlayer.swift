@@ -287,6 +287,7 @@ final class PageLife {
         didSet { if DYBoostRouter.shared.control === self { DYBoostRouter.shared.boosting = boosting } }
     }
     var press: (Bool) -> Void = { _ in }
+    var changeRate: (CGFloat, CGFloat) -> Void = { _, _ in }
     private var held = false
     private var lastEnd = Date.distantPast
     /// 按住或刚松手的一小段时间内，按钮自己的点击要忽略（否则长按加速后松手会变成点赞/评论）。
@@ -305,7 +306,26 @@ final class PageLife {
 /// 长按加速的触发时长。原来 0.5 秒，用户反馈比抖音原版慢、不跟手（issue #4），改 0.3。
 enum DYBoostTiming {
     static let holdSeconds: Double = 0.3
-    static let playbackRate: Double = 3
+    static let playbackRate: Double = 1.5
+}
+
+@MainActor
+final class DYBoostSpeed: ObservableObject {
+    @Published private(set) var rate: Double = DYBoostTiming.playbackRate
+    func set(_ value: Double) {
+        let value = max(1.5, min(3, value))
+        if abs(value - rate) >= 0.005 { rate = value }
+    }
+}
+
+private struct DYVariableSpeedBadge: View {
+    @ObservedObject var speed: DYBoostSpeed
+    let detail: String?
+    let locked: Bool
+    var body: some View {
+        DYPlaybackBadge(title: .speed(String(format: "%.1f×", speed.rate)), detail: detail,
+                        showsLockInstructions: locked)
+    }
 }
 
 @MainActor
@@ -353,9 +373,14 @@ struct DYHoldBoost: ViewModifier {
         content
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: DYBoostTiming.holdSeconds)
-                    .sequenced(before: DragGesture(minimumDistance: 0))
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
                     .updating($holding) { value, state, _ in
                         if case .second(true, _) = value { state = true }
+                    }
+                    .onChanged { value in
+                        if case .second(true, let drag?) = value {
+                            control.changeRate(drag.translation.width, max(12, UIScreen.main.bounds.width - drag.startLocation.x))
+                        }
                     })
             .onChange(of: holding) { _, now in now ? control.begin() : control.end() }
     }
@@ -480,12 +505,13 @@ struct PlayerPage: View {
     @State private var lastPreviewAt: Double = 0
     @State private var holdAnchor: Double = 0
     @State private var rateBoost = false
+    @State private var boostSpeed = DYBoostSpeed()
     /// 设置里选的速度（全局、持久化）：所有视频都按它播
     @AppStorage("douyin_playback_rate_v1") private var playbackRate = 1.0
-    /// 长按下滑锁定的 2 倍速：只锁当前这条视频，滑到下一条自动回到设置速度
+    /// 长按下滑锁定当前选中的倍速，滑到下一条恢复设置速度。
     @State private var lockedBoost = false
 
-    /// 当前实际速度：本视频锁了 2 倍就 2 倍，否则跟设置走
+    /// 锁定时使用滑动选择的倍速。
     /// 设置里的倍速，直接读 UserDefaults。
     /// 时间观察器和 VLC 回调是播放器创建（预加载）时挂的闭包，里面拿到的 @AppStorage 是当时的旧值，
     /// 之后在「更多」里改倍速，这些闭包还会把播放速率拉回旧值，于是当前视频不变速，滑到下一条才生效。
@@ -493,7 +519,7 @@ struct PlayerPage: View {
         let v = UserDefaults.standard.double(forKey: "douyin_playback_rate_v1")
         return v > 0 ? v : 1.0
     }
-    private var effectiveRate: Double { lockedBoost ? DYBoostTiming.playbackRate : liveRate }
+    private var effectiveRate: Double { lockedBoost ? boostSpeed.rate : liveRate }
     private func rateText(_ r: Double) -> String {
         r == r.rounded() ? String(format: "%.0f×", r) : String(format: "%g×", r)
     }
@@ -535,8 +561,8 @@ struct PlayerPage: View {
     private var showsVideoAboveComments: Bool { isActive && commentVideoFrame != nil }
 
     private var fillsVideoPlane: Bool { fillWidth && !showsVideoAboveComments && !restrictsPlaybackToPane }
-    /// 实际播放速度（含按住的临时 3 倍）。
-    private var actualRate: Double { rateBoost ? DYBoostTiming.playbackRate : effectiveRate }
+    /// 实际播放速度，长按时为连续的 1.5–3 倍。
+    private var actualRate: Double { rateBoost ? boostSpeed.rate : effectiveRate }
     private var playRate: Float { Float(actualRate) }
 
     private var offlineContext: DYOfflinePlaybackContext? {
@@ -658,6 +684,9 @@ struct PlayerPage: View {
             if !cleanScreen && isActive && !touchpadEngaged && (!danmaku.isEmpty || dmStress) {
                 DYDanmakuLayer(items: danmaku, clock: dmClock, topInset: topInset)
             }
+            DYVideoLoadingSpinner(player: player, active: isActive, ready: firstFrame,
+                                  playing: isPlaying, hasVLC: vlc != nil)
+                .allowsHitTesting(false)
             // 手势层铺满整页（含视频上下黑边）：横滑快进 / 单击 / 双击 / 长按，竖滑漏给分页
             if player != nil || vlc != nil { gestures }
             #if DEBUG
@@ -761,6 +790,7 @@ struct PlayerPage: View {
             }
             #endif
             boost?.press = { handleLongPress($0) }
+            boost?.changeRate = { changeBoost(dx: $0, width: $1) }
             if isActive { bindRemote() }
             // The settings sheet owns a cover while its foreground offline library is playing.
             let playsInsideCover = offlineContext?.inLibrary == true && UIApplication.shared.applicationState == .active
@@ -863,7 +893,7 @@ struct PlayerPage: View {
             // 只有当前这一页自己响应：预加载的相邻页不动，滑过去时由 isActive 路径按新速度起播
             guard isActive else { return }
             if !rateBoost { lockedBoost = false }
-            let target = rateBoost ? DYBoostTiming.playbackRate : newRate
+            let target = rateBoost ? boostSpeed.rate : newRate
             // 起播一律原生声音；播放中改速度交给 seamAudio.setRate：原生时就地交接给独立引擎（不断声），
             // 已在引擎上就直接改引擎速率。不再按 1x / 非 1x 换声音通路（换通路要重绑，会断一下声，#52-1）。
             if let v = vlc { v.setRate(Float(target)); dmClock.sync(v.current, playing: v.isPlaying, rate: target) }
@@ -994,9 +1024,10 @@ struct PlayerPage: View {
 
     /// 长按加速开始/结束。手势层和右侧按钮（DYBoostControl）共用。
     private func handleLongPress(_ pressing: Bool) {
+        if pressing { boostSpeed.set(DYBoostTiming.playbackRate) }
 
         if let v = vlc {
-            if pressing { v.setRate(Float(DYBoostTiming.playbackRate)); rateBoost = true } else if rateBoost { v.setRate(Float(effectiveRate)); rateBoost = false }
+            if pressing { v.setRate(Float(boostSpeed.rate)); rateBoost = true } else if rateBoost { v.setRate(Float(effectiveRate)); rateBoost = false }
             dmClock.userToggle(v.current, playing: v.isPlaying, rate: actualRate)
             return
         }
@@ -1004,11 +1035,20 @@ struct PlayerPage: View {
         DYBoostProbe.begin(pressing ? "on" : "off", mode: "\(seamAudio.mode)", player: p)
         // PR #42（@ImSingee）：1x 原生声音下第一次变速，就地把声音交给独立引擎（AVPlayer 带音轨改速率会冲刷音频队列、画面停 50~110ms）。
         // 之后这一条留在引擎上，松手/再按都是 0ms 变速。所以这里统一走 seamAudio.setRate，不再直接调 AVPlayer.softRate。
-        if pressing { rateBoost = true; seamAudio.setRate(Float(DYBoostTiming.playbackRate)) }
+        if pressing { rateBoost = true; seamAudio.setRate(Float(boostSpeed.rate)) }
         else if rateBoost {
             rateBoost = false
             if isPlaying { seamAudio.setRate(Float(effectiveRate)) } else { seamAudio.pause() }
         }
+    }
+
+    private func changeBoost(dx: CGFloat, width: CGFloat) {
+        guard rateBoost else { return }
+        let rate = DYCoreBoostRate(Double(dx), Double(width))
+        guard abs(rate - boostSpeed.rate) >= 0.005 else { return }
+        boostSpeed.set(rate)
+        if let vlc { vlc.setRate(Float(rate)) }
+        else { seamAudio.setRate(Float(rate)) }
     }
 
     // MARK: 手势（视频区和半折叠触控板共用）
@@ -1072,7 +1112,8 @@ struct PlayerPage: View {
             onSingleTap: { togglePlay() },
             onDoubleTap: { _, _ in onDoubleTap?() },
             onLongPress: { pressing in handleLongPress(pressing) },
-            // 下滑：锁住本条视频的 2 倍速（不写设置、不影响下一条）
+            onLongPressRateChanged: { changeBoost(dx: $0, width: $1) },
+            // 下滑锁定本条当前倍速。
             onLongPressLock: { lockedBoost = true },
             // 上滑：立刻取消倍速，回到设置里的速度
             onLongPressUnlock: { unlockBoost() },
@@ -1118,8 +1159,13 @@ struct PlayerPage: View {
         } else {
             detail = lockedBoost ? "已锁定本条 · 长按上滑取消" : nil
         }
-        return DYPlaybackBadge(title: .speed(rateText(actualRate)), detail: detail,
-                               showsLockInstructions: lockedBoost && !rateBoost)
+        return Group {
+            if rateBoost || lockedBoost {
+                DYVariableSpeedBadge(speed: boostSpeed, detail: detail, locked: lockedBoost && !rateBoost)
+            } else {
+                DYPlaybackBadge(title: .speed(rateText(actualRate)), detail: detail, showsLockInstructions: false)
+            }
+        }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("douyin.playbackSpeedHint")
     }
@@ -2136,6 +2182,32 @@ func ddWrite(_ s: String) {
     DDLogWriter.queue.async { DDLogWriter.append(line) }
 }
 #endif
+
+private struct DYVideoLoadingSpinner: View {
+    let player: AVPlayer?
+    let active: Bool
+    let ready: Bool
+    let playing: Bool
+    let hasVLC: Bool
+    @State private var waiting = false
+
+    @ViewBuilder var body: some View {
+        if let player {
+            indicator.onReceive(player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main)) {
+                waiting = $0 == .waitingToPlayAtSpecifiedRate
+            }
+        } else { indicator }
+    }
+    private var indicator: some View {
+        Group {
+            if active && (!ready || (playing && waiting && !hasVLC)) {
+                ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
+                    .accessibilityLabel("视频正在加载")
+                    .accessibilityIdentifier("douyin.video.loading")
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 struct VideoSurface: UIViewRepresentable {
     let player: AVPlayer

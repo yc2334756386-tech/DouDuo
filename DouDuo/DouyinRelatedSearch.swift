@@ -1,6 +1,70 @@
 import SwiftUI
 import WebKit
 
+extension DYUser: Identifiable {
+    var id: String { secUid.isEmpty ? uid : secUid }
+}
+
+struct DYUserSearchPage: Decodable {
+    let status: Int
+    let code: Int
+    let items: [DYUser]
+    let cursor: String
+    let hasMore: Bool
+}
+
+struct DYUserSearchResults: View {
+    let bridge: DouyinBridge
+    let query: String
+    let onAuthor: (DYAweme.Author) -> Void
+    @StateObject private var pager: DYSimplePager<DYUser>
+
+    init(bridge: DouyinBridge, query: String, onAuthor: @escaping (DYAweme.Author) -> Void) {
+        self.bridge = bridge
+        self.query = query
+        self.onAuthor = onAuthor
+        _pager = StateObject(wrappedValue: DYSimplePager { cursor in try await bridge.searchUsers(query, cursor: cursor) })
+    }
+    var body: some View {
+        List {
+            ForEach(pager.items) { user in
+                Button {
+                    onAuthor(.init(name: user.name, avatar: user.avatar, secUid: user.secUid.isEmpty ? nil : user.secUid,
+                                   uid: user.uid))
+                } label: {
+                    HStack(spacing: 12) {
+                        CachedAsyncImage(url: user.avatar.flatMap(URL.init(string:)), thumbnailMaxPixel: 144) {
+                            $0.resizable().scaledToFill()
+                        } placeholder: { Color.primary.opacity(0.08) }
+                            .frame(width: 48, height: 48).clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(user.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Text("\(DYFormat.count(user.followers)) 粉丝 · \(DYFormat.count(user.works)) 作品")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if !user.signature.isEmpty { Text(user.signature).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("douyin.search.user")
+            }
+            if let error = pager.error {
+                Button(error + " · 点击重试") { Task { await pager.reload() } }
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else if pager.hasMore {
+                ProgressView().frame(maxWidth: .infinity).onAppear { Task { await pager.more() } }
+            } else if pager.items.isEmpty {
+                Text("没有找到相关用户").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            }
+        }
+        .listStyle(.plain)
+        .refreshable { await pager.reload() }
+        .task { if pager.items.isEmpty { await pager.more() } }
+    }
+}
+
 @MainActor
 final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     typealias Page = (items: [DYAweme], cursor: String, hasMore: Bool)

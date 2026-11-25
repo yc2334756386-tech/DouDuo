@@ -211,7 +211,12 @@ struct DouDuoApp: App {
             .modifier(DYHingeStateRoot())
             .modifier(DYCollectPromptHost(owner: .feed))
             .task(id: scenePhase) {
-                if scenePhase == .active { await DYOfflineDownloads.shared.refreshRetention() }
+                if scenePhase == .active {
+                    DYBrandActivityManager.shared.start()
+                    await DYOfflineDownloads.shared.refreshRetention()
+                } else if scenePhase == .background {
+                    await DYBrandActivityManager.shared.end()
+                }
             }
         }
         // 退到后台 / 锁屏：短视频按「后台播放」停声。直播走同一条恢复，是否出声看「后台直播声音」。

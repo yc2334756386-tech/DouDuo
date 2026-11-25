@@ -840,7 +840,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
                         }
                         .offset(x: layout.paneOrigin.x, y: layout.paneOrigin.y)
                         .accessibilityIdentifier("douyin.list.commentPane")
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
                 }
                 if showsComments {
                     Button {
@@ -854,6 +854,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .modifier(DYCommentGlassContainer())
             .background(Color.ddBackground.ignoresSafeArea())
             .overlayPreferenceValue(DYActiveVideoActionsKey.self) { actions in
                 if #available(iOS 27.1, *), usesClassicLayout {
@@ -869,7 +870,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
             .onChange(of: layout.resident && layout.sideBySide, initial: true) { _, bookFold in
                 bookFoldComments = bookFold
             }
-            .animation(searchPresented ? nil : .easeInOut(duration: 0.25), value: showComments)
+            .animation(searchPresented ? nil : .spring(response: 0.36, dampingFraction: 0.82), value: showComments)
             .animation(searchPresented ? nil : .snappy, value: layout.resident)
             .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: commentItem,
                                              focus: focus, onClose: { showComments = false }))
@@ -916,6 +917,12 @@ private struct DYStandaloneBarPolicy: ViewModifier {
     }
 }
 
+
+struct DYCommentGlassContainer: ViewModifier {
+    func body(content: Content) -> some View {
+        GlassEffectContainer(spacing: 12) { content }
+    }
+}
 
 struct DYScrollTopObserver: ViewModifier {
     @Binding var atTop: Bool

@@ -41,7 +41,7 @@ void DYDMAdvance(DYDanmakuCore *core, double time) {
     int remaining = 0;
     for (int i = 0; i < core->count; ++i) {
         const auto &particle = core->active[i];
-        if (particle.lane < core->lanes && particle.tail(time) >= 0) {
+        if (particle.tail(time) >= 0) {
             core->active[remaining++] = particle;
         }
     }

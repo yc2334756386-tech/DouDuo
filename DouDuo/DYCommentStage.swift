@@ -115,7 +115,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                 }
                 .padding(.leading, layout.paneOrigin.x)
                 .padding(.top, layout.paneOrigin.y)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.scale(scale: 0.88, anchor: .bottom).combined(with: .opacity))
             }
             if showComments, !showsAuthorPane {
                 Button {
@@ -128,6 +128,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                     .zIndex(1000)
             }
         }
+        .modifier(DYCommentGlassContainer())
         .frame(width: w, height: h, alignment: .topLeading)
         .overlayPreferenceValue(DYTouchpadActionsKey.self, alignment: .topLeading) { actions in
             if padActive, aweme != nil, let actions {
@@ -168,7 +169,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
         }
         .background((layout.resident ? Color.black : theme.media.strongScrim.color(for: scheme)).ignoresSafeArea())
         .animation(showSearch ? nil : .snappy, value: layout.resident)
-        .animation(showSearch ? nil : .easeInOut(duration: 0.25), value: showComments)
+        .animation(showSearch ? nil : .spring(response: 0.36, dampingFraction: 0.82), value: showComments)
         .animation(showSearch ? nil : .snappy, value: authorPane?.id)
         .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: aweme,
                                          onClose: { showComments = false }))

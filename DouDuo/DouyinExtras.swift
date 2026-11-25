@@ -233,6 +233,31 @@ extension DouyinBridge {
         try await list(Self.searchJS, ["kw": kw, "cursor": offset])
     }
 
+    func searchUsers(_ word: String, cursor: String) async throws -> (items: [DYUser], cursor: String, hasMore: Bool) {
+        let data = try await call(Self.searchUsersJS, args: ["kw": word, "cursor": cursor], attempts: 1)
+        let page = try JSONDecoder().decode(DYUserSearchPage.self, from: data)
+        guard page.status == 200, page.code == 0 else {
+            throw DYError.bad(page.code == 8 ? "请先在「我的」中登录" : "用户搜索暂时不可用，点击重试")
+        }
+        return (page.items, page.cursor, page.hasMore)
+    }
+
+    private static let searchUsersJS = userMap + #"""
+    await sdkReady(1500);
+    const r = await req('GET', '/aweme/v1/web/discover/search/?' + qPost({
+      keyword:kw, search_channel:'aweme_user_web', search_source:'normal_search',
+      offset:cursor, count:'20', query_correct_type:'1', is_filter_search:'0'
+    }));
+    const d = parse(r.t) || {};
+    const list = d.user_list || (d.data && d.data.user_list) || d.data || [];
+    const users = (Array.isArray(list) ? list : []).map(entry => umap(entry.user_info || entry.user || entry))
+      .filter(user => user && (user.secUid || user.uid));
+    const proposed = Number(d.cursor ?? d.offset ?? 0);
+    const next = proposed > Number(cursor) ? proposed : Number(cursor) + users.length;
+    return JSON.stringify({status:r.s, code:Number(d.status_code ?? -1), items:users,
+      cursor:String(next), hasMore:Number(d.has_more) === 1});
+    """#
+
     /// 抖音热搜
     func hotSearch() async -> [DYHot] {
         guard let d = try? await call(Self.hotJS, args: [:], attempts: 1) else { return [] }
@@ -879,8 +904,9 @@ enum DYDanmakuPolicy {
 
     static func region(height: CGFloat, topInset: CGFloat, density: Density) -> Region {
         guard height.isFinite, height >= 0, topInset.isFinite else { return Region(top: 0, bottom: 0, lanes: 0) }
-        let bottom = height / 3
-        let top = max(0, topInset) + 64
+        let compact = height < 480
+        let bottom = compact ? height * 0.72 : height / 3
+        let top = compact ? min(max(0, topInset) + 8, max(8, height * 0.12)) : max(0, topInset) + 64
         let available = max(0, ((bottom - top) / laneHeight).rounded(.down))
         return Region(top: top, bottom: bottom, lanes: Int(min(CGFloat(density.maxLanes), available)))
     }
@@ -1036,6 +1062,10 @@ struct DYDanmakuLayer: View {
 
 enum DYSaver {
     static func saveCommentImage(_ value: String) async throws {
+        try await saveImage(value)
+    }
+
+    static func saveImage(_ value: String) async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized || status == .limited else { throw SaveError.denied }
         guard let url = URL(string: value) else { throw SaveError.noURL }
@@ -1650,13 +1680,14 @@ final class DYPagedModel: ObservableObject {
     @Published var error: String?
     @Published var hasMore = true
     private var cursor = "0"
+    private let unique = DYCxxUniqueIDs()
     private let fetch: (String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool)
 
     init(fetch: @escaping (String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool)) {
         self.fetch = fetch
     }
 
-    func reset() { items = []; cursor = "0"; hasMore = true; error = nil }
+    func reset() { items = []; cursor = "0"; hasMore = true; error = nil; unique.clear() }
 
     /// 下拉刷新：重新拉第一页。拉到了才替换（旧内容先留着，失败也不清空页面）
     func refresh() async {
@@ -1665,7 +1696,8 @@ final class DYPagedModel: ObservableObject {
         defer { loading = false }
         do {
             let r = try await fetch("0")
-            items = r.items.filter { $0.play != nil || !$0.images.isEmpty }
+            unique.clear()
+            items = r.items.filter { ($0.play != nil || !$0.images.isEmpty) && unique.insert($0.id) }
             hasMore = r.hasMore && !r.items.isEmpty && r.cursor != "0"
             cursor = r.cursor
             error = nil
@@ -1682,8 +1714,7 @@ final class DYPagedModel: ObservableObject {
         defer { loading = false }
         do {
             let r = try await fetch(cursor)
-            let seen = Set(items.map(\.id))
-            let fresh = r.items.filter { !seen.contains($0.id) && ($0.play != nil || !$0.images.isEmpty) }
+            let fresh = r.items.filter { ($0.play != nil || !$0.images.isEmpty) && unique.insert($0.id) }
             items.append(contentsOf: fresh)
             hasMore = r.hasMore && !r.items.isEmpty && r.cursor != cursor
             cursor = r.cursor
@@ -1721,6 +1752,9 @@ struct DYSearchScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var state: DYSearchSession
     @State private var open: DYListTarget?
+    @State private var searchKind = 0
+    @State private var searchAuthor: DYAweme.Author?
+    @State private var searchWeb: DYWebTarget?
 
     init(bridge: DouyinBridge, onAuthor: @escaping (DYAweme) -> Void, initialQuery: String = "",
          session: DYSearchSession? = nil, onClose: (() -> Void)? = nil) {
@@ -1752,7 +1786,7 @@ struct DYSearchScreen: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Color.primary.opacity(0.6))
                         .fixedSize().accessibilityHidden(true)
-                    TextField("", text: $state.keyword, prompt: Text("搜索视频").foregroundStyle(Color.primary.opacity(0.45)))
+                    TextField("", text: $state.keyword, prompt: Text("搜索视频或用户").foregroundStyle(Color.primary.opacity(0.45)))
                         .foregroundStyle(Color.primary)
                         .focused($focused)
                         .submitLabel(.search)
@@ -1777,11 +1811,21 @@ struct DYSearchScreen: View {
             .padding(.top, 18).padding(.bottom, 12)
 
             if let model = state.model {
-                DYSearchResults(model: model, transport: state.transport, onOpen: { i in
-                    state.presentsVideo = true
-                    open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
-                })
-                .id(state.lastRun)
+                Picker("搜索类型", selection: $searchKind) {
+                    Text("视频").tag(0)
+                    Text("用户").tag(1)
+                }
+                .pickerStyle(.segmented).padding(.horizontal, 20).padding(.bottom, 12)
+                if searchKind == 0 {
+                    DYSearchResults(model: model, transport: state.transport, onOpen: { i in
+                        state.presentsVideo = true
+                        open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
+                    })
+                    .id(state.lastRun)
+                } else {
+                    DYUserSearchResults(bridge: bridge, query: state.lastRun, onAuthor: { searchAuthor = $0 })
+                        .id(state.lastRun)
+                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1865,6 +1909,22 @@ struct DYSearchScreen: View {
             DYListPlayer(bridge: bridge, title: t.title, playback: t.playback,
                          loadMore: t.model.map { m in { await m.loadMore() } }, onAuthor: onAuthor, presentsAuthor: true)
         }
+        .onChange(of: searchKind) { _, value in
+            guard value == 0, let model = state.model else { return }
+            Task {
+                if model.error != nil { await model.refresh() }
+                else if model.items.isEmpty { await model.loadMore() }
+            }
+        }
+        .sheet(item: $searchAuthor) { author in
+            NavigationStack {
+                DYAuthorScreen(bridge: bridge, author: author, onWeb: { url in
+                    searchAuthor = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { searchWeb = DYWebTarget(url: url) }
+                })
+            }
+        }
+        .fullScreenCover(item: $searchWeb) { DouyinWebScreen(start: $0.url) }
     }
 
     static func videoSearchURL(_ keyword: String) -> URL? {
@@ -1920,7 +1980,7 @@ struct DYSearchScreen: View {
         state.transport = transport
         let m = DYPagedModel { cur in try await transport.page(cur) }
         state.model = m
-        Task { await m.loadMore() }
+        if searchKind == 0 { Task { await m.loadMore() } }
     }
 }
 
@@ -2536,6 +2596,7 @@ struct DYUserHeader: View {
                 CachedAsyncImage(url: user.avatar.flatMap(URL.init(string:))) { img in img.resizable().scaledToFill() }
                     placeholder: { Color.primary.opacity(0.1) }
                     .frame(width: 72, height: 72).clipShape(Circle())
+                    .modifier(DYSaveImageMenu(source: user.avatar, title: "保存头像"))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(user.name).font(.title3.weight(.bold)).foregroundStyle(Color.primary)
                     if let ip = user.ip, !ip.isEmpty {

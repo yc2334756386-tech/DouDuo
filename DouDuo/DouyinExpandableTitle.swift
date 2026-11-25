@@ -125,6 +125,9 @@ struct DYClassicExpandableTitle: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .accessibilityIdentifier("douyin.description")
+            .contextMenu {
+                Button("复制文案", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
+            }
             .environment(\.openURL, OpenURLAction { url in
                 if url == DYCaptionText.expandURL || url == DYCaptionText.actionURL {
                     if let onExpand { onExpand() } else { expanded.toggle() }

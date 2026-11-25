@@ -11,7 +11,8 @@ struct PlayerGestureView: UIViewRepresentable {
     var onSingleTap: () -> Void
     var onDoubleTap: (CGFloat, CGFloat) -> Void          // (触点x, 宽度)
     var onLongPress: (Bool) -> Void                       // pressing
-    /// 小红书同款：长按 2 倍速后手指下滑一段 → 锁定 2 倍速（松手也不恢复）
+    var onLongPressRateChanged: (CGFloat, CGFloat) -> Void = { _, _ in }
+    /// 长按后下滑锁定当前选中的倍速。
     var onLongPressLock: () -> Void = {}
     /// 长按后手指上滑一段 → 取消锁定、恢复 1 倍
     var onLongPressUnlock: () -> Void = {}
@@ -100,6 +101,7 @@ struct PlayerGestureView: UIViewRepresentable {
         weak var long: UILongPressGestureRecognizer?
         weak var pinch: UIPinchGestureRecognizer?
         private var pressStartY: CGFloat = 0
+        private var pressStartX: CGFloat = 0
         private var pressLocked = false
         private var pressOpensMenu = false
         private var lastLongEnd = Date.distantPast
@@ -125,15 +127,14 @@ struct PlayerGestureView: UIViewRepresentable {
                 longActive = true
                 g.allowableMovement = .greatestFiniteMagnitude
                 pressStartY = g.location(in: view).y; pressLocked = false
+                pressStartX = g.location(in: view).x
                 // 长按期间下滑不能触发外层切视频：先把外层 ScrollView 的滑动关掉，松手再恢复
                 var p = view?.superview
                 while let x = p, !(x is UIScrollView) { p = x.superview }
                 if let sv = p as? UIScrollView { sv.panGestureRecognizer.isEnabled = false; frozenScroll = sv }
                 // The system status column is part of the screen. Its width must
                 // not shift the 30% / 70% boundaries of the video gestures.
-                let coordinateView: UIView? = view?.window ?? view
-                let fraction = g.location(in: coordinateView).x / max(coordinateView?.bounds.width ?? 1, 1)
-                pressOpensMenu = parent.onContextMenu != nil && (0.3...0.7).contains(fraction)
+                pressOpensMenu = false
                 if pressOpensMenu {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     parent.onContextMenu?()
@@ -146,7 +147,9 @@ struct PlayerGestureView: UIViewRepresentable {
             case .changed:
                 guard !pressOpensMenu else { return }
                 let dy = g.location(in: view).y - pressStartY
-                if !pressLocked, abs(dy) > 50 {
+                let dx = g.location(in: view).x - pressStartX
+                parent.onLongPressRateChanged(dx, max(12, (view?.bounds.width ?? 1) - pressStartX))
+                if !pressLocked, abs(dy) > 50, abs(dy) > abs(dx) * 1.2 {
                     pressLocked = true
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     if dy > 0 { parent.onLongPressLock() } else { parent.onLongPressUnlock() }

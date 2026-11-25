@@ -50,18 +50,18 @@ final class DYSimplePager<T: Identifiable & Equatable>: ObservableObject {
     @Published var error: String?
     @Published var hasMore = true
     private var cursor = "0"
+    private let unique = DYCxxUniqueIDs()
     private let fetch: (String) async throws -> (items: [T], cursor: String, hasMore: Bool)
     init(_ fetch: @escaping (String) async throws -> (items: [T], cursor: String, hasMore: Bool)) { self.fetch = fetch }
 
-    func reload() async { cursor = "0"; hasMore = true; items = []; await more() }
+    func reload() async { cursor = "0"; hasMore = true; items = []; unique.clear(); await more() }
     func more() async {
         guard !loading, hasMore else { return }
         loading = true
         defer { loading = false }
         do {
             let r = try await fetch(cursor)
-            let seen = Set(items.map(\.id))
-            items += r.items.filter { !seen.contains($0.id) }
+            items += r.items.filter { unique.insert(String(describing: $0.id)) }
             hasMore = r.hasMore && !r.items.isEmpty && r.cursor != cursor
             cursor = r.cursor
             error = nil

@@ -12,37 +12,82 @@ final class DYGalleryAudio: ObservableObject {
     private var currentURL: URL?
     private var wantsPlay = false
     private var mutedNow = false
+    private let owner = UUID()
+    private var coverLevel = 0
+    private var registered = false
+    private var resolver: (() async -> URL?)?
+    private var resolveTask: Task<Void, Never>?
+    private var status: NSKeyValueObservation?
+    private var generation = 0
+    private var retries = 0
 
     /// 全局静音偏好（设置/菜单里的「静音」）
     static var globalMuted: Bool { UserDefaults.standard.bool(forKey: "douyin_muted_v1") }
 
     /// 只在页面成为当前页时 true；切走/进后台立刻停
-    func sync(url: URL?, active: Bool, muted: Bool) {
+    func sync(url: URL?, active: Bool, muted: Bool, resolve: (() async -> URL?)? = nil) {
         mutedNow = muted
-        if currentURL != url {
-            teardown()
-            currentURL = url
+        if let resolve { resolver = resolve }
+        wantsPlay = active
+        guard active else { apply(); return }
+        if let url, currentURL != url {
+            retries = 0
+            build(url)
         }
-        wantsPlay = active && url != nil
-        guard let url else { return }
-        if player == nil { build(url) }
+        wantsPlay = active
+        if active, !registered {
+            coverLevel = DDPlayback.shared.coverDepth
+            registered = true
+            DDPlayback.shared.register(owner, stop: { [weak self] in self?.player?.pause() },
+                start: { [weak self] in self?.apply() }, playsInsideCover: true, coverLevel: coverLevel)
+        }
+        if player == nil, let currentURL { build(currentURL) }
         apply()
+        if active, player == nil { refreshSound() }
     }
 
     private func build(_ url: URL) {
+        generation += 1
+        status = nil
+        player?.pause()
+        looper?.disableLooping()
+        currentURL = url
         let item = AVPlayerItem(asset: DYMedia.asset(url))
         let q = AVQueuePlayer()
         q.automaticallyWaitsToMinimizeStalling = true
         q.isMuted = mutedNow
         looper = AVPlayerLooper(player: q, templateItem: item)
         player = q
+        status = q.observe(\.currentItem?.status, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.player?.currentItem?.status == .failed { self.refreshSound() }
+                else { self.apply() }
+            }
+        }
+    }
+
+    private func refreshSound() {
+        guard wantsPlay, resolveTask == nil, retries < 2, let resolver else { return }
+        retries += 1
+        let requestGeneration = generation
+        resolveTask = Task { [weak self] in
+            let url = await resolver()
+            guard let self else { return }
+            defer { self.resolveTask = nil }
+            guard !Task.isCancelled, self.generation == requestGeneration, self.wantsPlay,
+                  let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+            self.build(url)
+            self.apply()
+        }
     }
 
     private func apply() {
         guard let p = player else { return }
         p.isMuted = mutedNow
-        if wantsPlay {
-            if DDPlayback.shared.coverHold { return }
+        let allowed = DYCorePlaybackAllowed(wantsPlay, UIApplication.shared.applicationState == .active,
+                                            DDPlayback.shared.isUncovered(level: coverLevel))
+        if allowed {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: DYLaunchMute.sessionOptions)
             try? AVAudioSession.sharedInstance().setActive(true)
             if p.rate == 0 { p.play() }
@@ -52,6 +97,13 @@ final class DYGalleryAudio: ObservableObject {
     }
 
     func teardown() {
+        generation += 1
+        resolveTask?.cancel()
+        resolveTask = nil
+        status = nil
+        wantsPlay = false
+        retries = 0
+        if registered { DDPlayback.shared.unregister(owner); registered = false }
         player?.pause()
         looper?.disableLooping()
         looper = nil
@@ -66,6 +118,8 @@ struct DYImageGallery: View {
     let musicURL: URL?
     let isActive: Bool
     let muted: Bool
+    var source: DYAweme? = nil
+    var bridge: DouyinBridge? = nil
     var hidesIndex = false
     /// 双击点赞（视频页是播放器手势处理的；图集原来没接 → 老板说「图文无法双击点赞」）
     var onDoubleTap: (() -> Void)? = nil
@@ -80,6 +134,7 @@ struct DYImageGallery: View {
                 } placeholder: {
                     ProgressView()
                 }
+                .modifier(DYSaveImageMenu(source: s, title: "保存这张图片"))
             }
         }
         .tabViewStyle(.page(indexDisplayMode: hidesIndex ? .never : .always))
@@ -88,20 +143,56 @@ struct DYImageGallery: View {
         .accessibilityIdentifier("douyin.gallery")
         .onAppear {
             DYLiveModel.log("DDGALLERY 打开 n=\(images.count) music=\(musicURL?.host ?? "-") active=\(isActive) muted=\(muted)")
-            audio.sync(url: musicURL, active: isActive, muted: muted)
+            syncAudio()
         }
         .onDisappear { audio.teardown() }
         .onChange(of: isActive) { _, active in
-            audio.sync(url: musicURL, active: active, muted: muted)
+            syncAudio()
         }
         .onChange(of: muted) { _, m in
-            audio.sync(url: musicURL, active: isActive, muted: m)
+            syncAudio()
         }
+        .onChange(of: musicURL) { _, _ in syncAudio() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
             audio.sync(url: musicURL, active: false, muted: muted)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            audio.sync(url: musicURL, active: isActive, muted: muted)
+            syncAudio()
         }
+    }
+
+    private func syncAudio() {
+        audio.sync(url: musicURL, active: isActive, muted: muted, resolve: {
+            guard let bridge, let source,
+                  let music = try? await bridge.originalSound(source),
+                  let value = music.playURL else { return nil }
+            return URL(string: value)
+        })
+    }
+}
+
+struct DYSaveImageMenu: ViewModifier {
+    let source: String?
+    let title: String
+    @State private var saving = false
+    @State private var message: String?
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            if let source {
+                Button(title, systemImage: "square.and.arrow.down") {
+                    guard !saving else { return }
+                    saving = true
+                    Task {
+                        defer { saving = false }
+                        do { try await DYSaver.saveImage(source); message = "已保存到相册" }
+                        catch { message = error.localizedDescription }
+                    }
+                }.disabled(saving)
+            }
+        }
+        .alert("保存图片", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+            Button("好") { message = nil }
+        } message: { Text(message ?? "") }
     }
 }

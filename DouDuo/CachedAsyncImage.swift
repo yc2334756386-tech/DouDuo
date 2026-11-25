@@ -219,6 +219,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     private var phaseContent: ((CachedImagePhase) -> Content)?
     /// 非 nil = 只要缩略图（后台按此像素上限下采样解码），库卡片这类小框用
     private var thumbnailMaxPixel: Int?
+    private var ephemeral = false
 
     // 初始值直接用同步缓存命中：view 重建时缓存里有图就当帧显示，不闪。
     @State private var uiImage: UIImage?
@@ -228,6 +229,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     init(
         url: URL?,
         thumbnailMaxPixel: Int? = nil,
+        ephemeral: Bool = false,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -235,9 +237,10 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         self.content = content
         self.placeholder = placeholder
         self.thumbnailMaxPixel = thumbnailMaxPixel
+        self.ephemeral = ephemeral
         // 关键：初始化时同步命中缓存，作为 @State 的初始值。
         // 这样 view 一构建（含滚动回收后的重建）就有图，body 首帧不会走 placeholder。
-        _uiImage = State(initialValue: url.flatMap { Self.memoryHit($0, thumbnailMaxPixel) })
+        _uiImage = State(initialValue: ephemeral ? nil : url.flatMap { Self.memoryHit($0, thumbnailMaxPixel) })
     }
 
     private static func memoryHit(_ url: URL, _ maxPixel: Int?) -> UIImage? {
@@ -261,9 +264,11 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         // 关键：body 同步读缓存作为兜底。即使 @State 因 view 重建被重置，
         // 只要缓存里有图，当前帧也能立刻显示，不会闪回 placeholder。
         // 只读内存缓存——磁盘读改异步（diskCachedAsync），主线程不碰盘（2026-08-07 卡顿修复）。
-        let display = uiImage ?? url.flatMap { Self.memoryHit($0, thumbnailMaxPixel) }
+        let display = uiImage ?? (ephemeral ? nil : url.flatMap { Self.memoryHit($0, thumbnailMaxPixel) })
         return Group {
-            if let phaseContent {
+            if ephemeral {
+                DYViewportThumbnail(url: url, maxPixel: thumbnailMaxPixel ?? 384)
+            } else if let phaseContent {
                 if let img = display {
                     phaseContent(.success(Image(uiImage: img)))
                 } else if failed {
@@ -280,6 +285,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         .task(id: url) {
             failed = false
             guard let url else { failed = true; return }
+            if ephemeral { return }
             // 始终按当前 url 取图：
             //  - 命中当前 url 的缓存（内存/磁盘）→ 显示（幂等，无网络）
             //  - 未命中（= cacheBust 换了 URL 或首次）→ 后台下载，完成后替换
