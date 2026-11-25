@@ -49,10 +49,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
     var body: some View {
         let authorOpen = authorPane?.id != nil
         let showsAuthorPane = (authorPane?.supportsSidePanel ?? false) && authorOpen
-        let placement = showComments && !showSearch && !authorOpen && !isLive
-            ? DYInlineCommentPlacement(geo, aweme: aweme, enabled: stacksLandscapeComments,
-                                       showsCaption: showsCaption, usesCompactPanel: stacksLandscapeComments)
-            : nil
+        let placement: DYInlineCommentPlacement? = nil
         let layout = DYCommentPaneMetrics(geo, isPresented: !showSearch && (showsAuthorPane || (showComments && placement == nil)),
                                           allowsResident: !showSearch && !isLive,
                                           paneFraction: showsAuthorPane ? 0.5 : nil,
@@ -68,10 +65,11 @@ struct DYCommentStage<Feed: View, Author: View>: View {
             feed()
                 .environment(\.dyTouchpadEngaged, padActive)
                 .frame(width: layout.videoSize.width, height: layout.videoSize.height, alignment: .topLeading)
-                .environment(\.dyRestrictsPlaybackToPane, layout.showsPane && layout.sideBySide)
+                .accessibilityIdentifier("douyin.comments.mediaPane")
+                .environment(\.dyRestrictsPlaybackToPane, layout.showsPane)
                 // 侧栏评论时视频区要裁边：播放器的环境光底（DYAmbientBackdrop）会铺满整屏宽，盖住右侧评论栏
                 //（内屏横屏评论纯黑的根因；dd405e6 拿掉这个裁边后 11-18 晚复发，老板 11-19 指出之前修过）。
-                .modifier(DDClipIf(on: layout.showsPane && layout.sideBySide))
+                .modifier(DDClipIf(on: layout.showsPane))
             if layout.showsPane {
                 Group {
                     if showsAuthorPane {
@@ -162,7 +160,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
         .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: aweme,
                                          onClose: { showComments = false }))
         .dyBottomSheet(isPresented: Binding(
-            get: { !showSearch && showComments && placement == nil && !layout.sideBySide && !layout.resident },
+            get: { !showSearch && showComments && !layout.showsPane && placement == nil && !layout.sideBySide && !layout.resident },
             set: { if placement == nil && !(authorPane?.supportsSidePanel ?? false) && !layout.resident { showComments = $0 } }
         ), kind: .comments, hidesStatusBar: hidesCommentStatus) {
             if let cur = aweme {
@@ -236,6 +234,6 @@ struct DDClipIf: ViewModifier {
 private struct DDPaneClipShape: Shape {
     let on: Bool
     func path(in rect: CGRect) -> Path {
-        Path(rect.insetBy(dx: on ? 0 : -200, dy: -200))
+        Path(rect.insetBy(dx: on ? 0 : -200, dy: on ? 0 : -200))
     }
 }

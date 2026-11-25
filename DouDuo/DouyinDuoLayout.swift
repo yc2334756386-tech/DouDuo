@@ -698,6 +698,16 @@ struct DYCommentPaneMetrics {
             return
         }
         let tableFold = resident && w <= h
+        if isPresented, paneFraction == nil {
+            sideBySide = false
+            showsPane = true
+            let mediaHeight = h * 0.4
+            videoSize = CGSize(width: w, height: mediaHeight)
+            paneOrigin = CGPoint(x: 0, y: mediaHeight)
+            paneSize = CGSize(width: w, height: h - mediaHeight + DYDuoMetrics.bottomSafeAreaExtension(in: geo))
+            trailingInset = geo.safeAreaInsets.trailing
+            return
+        }
         sideBySide = keepsSideBySide || w >= DYDuoMetrics.legacyWideMin || (resident && w > h)
         showsPane = resident || (sideBySide && isPresented)
         // Preserve v1.3.11's comment width. Author panes still split in half.
@@ -798,10 +808,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
 
     private var playerLayout: some View {
         GeometryReader { geo in
-            let placement = showsComments
-                ? DYInlineCommentPlacement(geo, aweme: commentItem, enabled: presentsLandscapeComments,
-                                          showsCaption: captionItem != nil, usesCompactPanel: stacksLandscapeComments)
-                : nil
+            let placement: DYInlineCommentPlacement? = nil
             let layout = DYCommentPaneMetrics(geo, isPresented: showsComments && placement == nil,
                                               allowsResident: !searchPresented && allowsComments && allowsResidentComments)
             ZStack(alignment: .topLeading) {
@@ -812,9 +819,10 @@ struct DYCommentPlayerLayout<Video: View>: View {
                     .environment(\.duoCleanScreen, cleanScreen)
                     .environment(\.dyCommentsOpen, showsComments || layout.showsPane)
                     .frame(width: layout.videoSize.width, height: layout.videoSize.height)
-                    .environment(\.dyRestrictsPlaybackToPane, layout.showsPane && layout.sideBySide)
+                    .accessibilityIdentifier("douyin.comments.mediaPane")
+                    .environment(\.dyRestrictsPlaybackToPane, layout.showsPane)
                     // 侧栏评论时裁边：播放器环境光底铺满整屏，会盖住右侧评论栏（同推荐页 DYCommentStage）
-                    .modifier(DDClipIf(on: layout.showsPane && layout.sideBySide))
+                    .modifier(DDClipIf(on: layout.showsPane))
                 if layout.showsPane, let aweme = commentItem {
                     DYCommentPanel(bridge: bridge, aweme: aweme,
                                    onClose: layout.resident && captionItem == nil ? nil : { showComments = false },
@@ -853,7 +861,7 @@ struct DYCommentPlayerLayout<Video: View>: View {
             .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: commentItem,
                                              focus: focus, onClose: { showComments = false }))
             .dyBottomSheet(isPresented: Binding(
-                get: { showsComments && placement == nil && !layout.sideBySide && !layout.resident },
+                get: { showsComments && !layout.showsPane && placement == nil && !layout.sideBySide && !layout.resident },
                 set: { if placement == nil && !layout.sideBySide && !layout.resident { showComments = $0 } }
             ), kind: .comments, hidesStatusBar: hidesCommentStatus) {
                 if let aweme = commentItem {

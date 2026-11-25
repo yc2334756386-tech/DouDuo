@@ -746,13 +746,15 @@ extension DouyinBridge {
     """#
 
     static let searchJS = listTail + #"""
+    if (typeof sdkReady === 'function') await sdkReady(6000);
     const r = await req('GET', '/aweme/v1/web/search/item/?' + q({ search_channel: 'aweme_video_web', keyword: kw, search_source: 'normal_search',
-      query_correct_type: '1', is_filter_search: '0', from_group_id: '', offset: cursor, count: '50', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
+      query_correct_type: '1', is_filter_search: '0', from_group_id: '', offset: cursor, count: '16', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
     const d = parse(r.t) || {};
-    if (r.s === 200 && d.status_code == null && !Array.isArray(d.data)) {
+    const raw = Array.isArray(d.aweme_list) ? d.aweme_list : Array.isArray(d.data) ? d.data : null;
+    if (r.s === 200 && !raw && (d.status_code == null || d.status_code === 0)) {
       return pack(r, { status_code: -1, status_msg: '原生搜索未收到结果，可在网页版继续搜索' }, [], cursor, false);
     }
-    const arr = (Array.isArray(d.data) ? d.data : []).map(x => x && (x.aweme_info || x.aweme)).filter(Boolean);
+    const arr = (raw || []).map(x => x && (x.aweme_info || x.aweme || (x.aweme_id ? x : null))).filter(Boolean);
     const next = Number(d.cursor);
     return pack(r, d, arr, d.cursor, Number(d.has_more) === 1 && Number.isSafeInteger(next) && next > Number(cursor));
     """#
@@ -1742,10 +1744,11 @@ struct DYSearchScreen: View {
             .padding(.top, 18).padding(.bottom, 12)
 
             if let model = state.model {
-                DYSearchResults(model: model, onOpen: { i in
+                DYSearchResults(model: model, keyword: state.lastRun, onOpen: { i in
                     state.presentsVideo = true
                     open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
                 })
+                .id(state.lastRun)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Button("在抖音网页版继续搜索", systemImage: "safari") {
                         guard let url = Self.videoSearchURL(state.lastRun) else { return }
@@ -1900,10 +1903,34 @@ struct DYSearchScreen: View {
 
 private struct DYSearchResults: View {
     @ObservedObject var model: DYPagedModel
+    let keyword: String
     let onOpen: (Int) -> Void
+    @State private var usesWebResults = false
     var body: some View {
-        DYGrid(items: model.items, hasMore: model.hasMore, loading: model.loading, error: model.error,
-               onLoadMore: { Task { await model.loadMore() } }, onOpen: onOpen)
+        Group {
+            if usesWebResults, let url = DYSearchScreen.videoSearchURL(keyword) {
+                DYEmbeddedSearchResults(url: url)
+            } else {
+                DYGrid(items: model.items, hasMore: model.hasMore, loading: model.loading, error: model.error,
+                       onLoadMore: { Task { await model.loadMore() } }, onOpen: onOpen)
+            }
+        }
+        .onChange(of: model.loading, initial: true) { _, loading in
+            if !loading && !model.hasMore && model.items.isEmpty { usesWebResults = true }
+        }
+    }
+}
+
+private struct DYEmbeddedSearchResults: View {
+    let url: URL
+    @StateObject private var model = DouyinWebModel()
+
+    var body: some View {
+        DouyinWebContainer(model: model, zoom: 1, start: url)
+            .accessibilityIdentifier("douyin.search.officialResults")
+            .overlay(alignment: .top) {
+                if model.progress < 1 { ProgressView(value: model.progress).tint(.accentColor) }
+            }
     }
 }
 

@@ -521,7 +521,7 @@ struct PlayerPage: View {
     /// 评论打开且外屏要把横屏视频移到评论上方：四种界面都一样（评论统一用经典几何，老板 2026-11-17 定）
     private var showsVideoAboveComments: Bool { isActive && commentVideoFrame != nil }
 
-    private var fillsVideoPlane: Bool { fillWidth && !showsVideoAboveComments }
+    private var fillsVideoPlane: Bool { fillWidth && !showsVideoAboveComments && !restrictsPlaybackToPane }
     /// 实际播放速度（含按住的临时 2 倍）：播放器、音频引擎、弹幕时钟和倍速角标都认这一个值
     private var actualRate: Double { rateBoost ? 2 : effectiveRate }
     private var playRate: Float { Float(actualRate) }
@@ -583,7 +583,7 @@ struct PlayerPage: View {
             if ambientLevel > 0, vlc == nil, let player {
                 DYAmbientBackdrop(player: player, active: isActive, dim: Double(ambientLevel) / 100, fillWidth: fillWidth)
                     // 侧栏评论时也铺满上下安全区（左右由外层裁剪），底部不留白边 / 黑边
-                    .ignoresSafeArea(edges: restrictsPlaybackToPane ? .vertical : .all)
+                    .ignoresSafeArea(edges: restrictsPlaybackToPane ? [] : .all)
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("douyin.video.ambient")
             }

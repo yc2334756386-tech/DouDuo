@@ -35,6 +35,11 @@ async function main() {
   const empty = await page('16', {s: 200, t: ''});
   assert.notEqual(empty.code, 0);
   assert.equal(empty.hasMore, false);
+  const direct = await page('0', {s: 200, t: JSON.stringify({status_code: 0,
+    aweme_list: [{aweme_id: 'direct', video: {}}], cursor: 1, has_more: 0})});
+  assert.equal(direct.items.length, 1, 'A valid direct aweme_list must reach the result grid');
+  const suppressed = await page('0', {s: 200, t: JSON.stringify({status_code: 0})});
+  assert.notEqual(suppressed.code, 0, 'Missing result data must not be displayed as an empty successful search');
   console.log('Search replay passed (29 distinct results; terminal, stalled and empty responses).');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

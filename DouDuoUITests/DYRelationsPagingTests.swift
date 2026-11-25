@@ -44,3 +44,40 @@ final class DYRelationsPagingTests: XCTestCase {
         add(shot)
     }
 }
+
+final class DYPersonalLayoutTests: XCTestCase {
+    func testCommentsBelowVideoAndPhoto() throws {
+        continueAfterFailure = false
+        for photos in [false, true] {
+            let app = XCUIApplication()
+            app.launchEnvironment = ["DOUDUO_CHROME_MODE": "classic", "DOUDUO_HASHTAG_FIXTURE": "1",
+                                     "DOUDUO_APPEARANCE": "dark"]
+            if photos { app.launchEnvironment["DOUDUO_GRID_FIXTURE"] = "1" }
+            app.launchArguments = ["-douyin_muted_v1", "YES", "-douyin_autoplay_v1", "NO",
+                                   "-douduo_dismissed_update_v1", "9.9.9", "-duoduomain_tab_v1", "首页"]
+            app.launch()
+            let commentButtons = app.buttons.matching(identifier: "douyin.comments")
+            XCTAssertTrue(commentButtons.firstMatch.waitForExistence(timeout: 20))
+            let button = try XCTUnwrap(commentButtons.allElementsBoundByIndex.first { $0.isHittable })
+            button.tap()
+            let comments = app.scrollViews["douyin.comments.list"].firstMatch
+            XCTAssertTrue(comments.waitForExistence(timeout: 10))
+            let media = app.descendants(matching: .any).matching(identifier: "douyin.comments.mediaPane").firstMatch
+            let panel = app.descendants(matching: .any).matching(identifier: "douyin.comments.panel").firstMatch
+            XCTAssertTrue(media.exists)
+            XCTAssertTrue(panel.exists)
+            XCTAssertGreaterThan(media.frame.height, 100)
+            XCTAssertLessThanOrEqual(media.frame.maxY, panel.frame.minY + 2)
+            XCTAssertFalse(app.buttons["douyin.comment.send"].exists)
+            XCTAssertFalse(app.buttons["douyin.comment.digg"].exists)
+            XCTAssertFalse(app.keyboards.firstMatch.exists)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = photos ? "readonly-photo-comments" : "readonly-video-comments"
+            shot.lifetime = .keepAlways
+            add(shot)
+            app.buttons["douyin.comments.close"].firstMatch.tap()
+            XCTAssertTrue(commentButtons.firstMatch.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+}

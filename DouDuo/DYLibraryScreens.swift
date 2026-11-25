@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import SwiftUI
 
 // 「我的」里的收藏夹 / 收藏合集 / 收藏音乐、批量操作确认、点赞名单。接口在 DouyinBridge+Library.swift。
@@ -445,7 +446,6 @@ struct DYCollectedMixesScreen: View {
 struct DYCollectedMusicScreen: View {
     let bridge: DouyinBridge
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var pager: DYSimplePager<DYMusicInfo>
     @StateObject private var preview = DYCollectedMusicPlayer()
     @State private var message: String?
@@ -505,9 +505,8 @@ struct DYCollectedMusicScreen: View {
             }
             .listStyle(.plain)
             .refreshable { await pager.reload() }
-            .onDisappear { preview.stop() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background { preview.stop() }
+            .onDisappear {
+                if UIApplication.shared.applicationState == .active { preview.stop() }
             }
             .alert("音乐无法播放", isPresented: Binding(get: { preview.failure != nil }, set: { if !$0 { preview.failure = nil } })) {
                 Button("好") { preview.failure = nil }
@@ -539,15 +538,20 @@ private final class DYCollectedMusicPlayer: ObservableObject {
     private var player: AVPlayer?
     private var status: NSKeyValueObservation?
     private var endObservers: [NSObjectProtocol] = []
+    private let owner = UUID()
+    private var music: DYMusicInfo?
+    private var timeObserver: Any?
+    private var artwork: MPMediaItemArtwork?
+    private var artworkTask: Task<Void, Never>?
+    private var commands: [(MPRemoteCommand, Any)] = []
+    private var interrupted = false
 
     func toggle(_ music: DYMusicInfo) {
-        if selectedID == music.id, let player {
+        if selectedID == music.id, player != nil {
             if playingID != nil {
-                player.pause()
-                playingID = nil
+                pause()
             } else {
-                playingID = music.id
-                player.play()
+                resume()
             }
             return
         }
@@ -560,7 +564,7 @@ private final class DYCollectedMusicPlayer: ObservableObject {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: DYLaunchMute.sessionOptions)
+            try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
         } catch {
             failure = error.localizedDescription
@@ -572,6 +576,9 @@ private final class DYCollectedMusicPlayer: ObservableObject {
         player = next
         selectedID = music.id
         playingID = music.id
+        self.music = music
+        DDPlayback.shared.register(owner, stop: {}, start: {},
+            retainsAudioSession: { [weak self] in self?.playingID != nil }, playsInsideCover: true)
         status = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard item.status == .failed else { return }
             Task { @MainActor in self?.finish(item, failed: true) }
@@ -581,7 +588,97 @@ private final class DYCollectedMusicPlayer: ObservableObject {
                 Task { @MainActor in self?.finish(item, failed: name == AVPlayerItem.failedToPlayToEndTimeNotification) }
             })
         }
+        endObservers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main) { [weak self] note in
+            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue
+            let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? NSNumber)?.uintValue ?? 0
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if type == AVAudioSession.InterruptionType.began.rawValue {
+                    self.interrupted = self.playingID != nil
+                    self.pause()
+                } else if self.interrupted {
+                    self.interrupted = false
+                    if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) { self.resume() }
+                }
+            }
+        })
+        endObservers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
+            object: nil, queue: .main) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
+            if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
+                Task { @MainActor [weak self] in self?.pause() }
+            }
+        })
+        bindRemote()
+        timeObserver = next.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.publishNowPlaying() }
+        }
+        artworkTask = Task { [weak self] in
+            guard let value = music.cover, let url = URL(string: value),
+                  let (data, _) = try? await URLSession.shared.data(from: url),
+                  !Task.isCancelled, let image = UIImage(data: data), self?.selectedID == music.id else { return }
+            self?.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            self?.publishNowPlaying()
+        }
         next.play()
+        publishNowPlaying()
+    }
+
+    private func pause() {
+        player?.pause()
+        playingID = nil
+        publishNowPlaying()
+    }
+
+    private func resume() {
+        guard let player, let selectedID else { return }
+        do { try AVAudioSession.sharedInstance().setActive(true) }
+        catch { failure = error.localizedDescription; return }
+        playingID = selectedID
+        player.play()
+        publishNowPlaying()
+    }
+
+    private func bindRemote() {
+        let center = MPRemoteCommandCenter.shared()
+        DDRemoteOwner.instance = owner
+        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
+                        center.changePlaybackPositionCommand] {
+            command.removeTarget(nil)
+            command.isEnabled = true
+            let target = command.addTarget { [weak self] event in
+                let position = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime
+                Task { @MainActor [weak self] in
+                    guard let self, DDRemoteOwner.instance == self.owner else { return }
+                    if command === center.playCommand { self.resume() }
+                    else if command === center.pauseCommand { self.pause() }
+                    else if let position {
+                        self.player?.seek(to: CMTime(seconds: max(0, position), preferredTimescale: 600))
+                    } else if self.playingID == nil { self.resume() }
+                    else { self.pause() }
+                }
+                return .success
+            }
+            commands.append((command, target))
+        }
+    }
+
+    private func publishNowPlaying() {
+        guard DDRemoteOwner.instance == owner, let music, let player else { return }
+        let time = player.currentTime().seconds
+        let duration = player.currentItem?.duration.seconds ?? .nan
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: music.title,
+            MPMediaItemPropertyArtist: music.author,
+            MPMediaItemPropertyPlaybackDuration: duration.isFinite ? duration : Double(music.duration),
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: time.isFinite ? time : 0,
+            MPNowPlayingInfoPropertyPlaybackRate: playingID == nil ? 0.0 : 1.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
+        ]
+        if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     private func finish(_ item: AVPlayerItem, failed: Bool) {
@@ -591,6 +688,19 @@ private final class DYCollectedMusicPlayer: ObservableObject {
     }
 
     func stop() {
+        artworkTask?.cancel()
+        artworkTask = nil
+        artwork = nil
+        music = nil
+        if let timeObserver { player?.removeTimeObserver(timeObserver) }
+        timeObserver = nil
+        for (command, target) in commands { command.removeTarget(target) }
+        commands.removeAll()
+        if DDRemoteOwner.instance == owner {
+            DDRemoteOwner.instance = nil
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        }
+        DDPlayback.shared.unregister(owner)
         status = nil
         for observer in endObservers { NotificationCenter.default.removeObserver(observer) }
         endObservers.removeAll()

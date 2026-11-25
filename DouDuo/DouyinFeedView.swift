@@ -2383,6 +2383,7 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                             .font(.headline.weight(tab == t ? .bold : .medium))
                             .foregroundStyle(theme.media.onMedia.color(for: scheme).opacity(tab == t ? 1 : 0.62))
                             .lineLimit(1).fixedSize()
+                            .opacity(0)
                         Capsule()
                             .fill(theme.media.onMedia.color(for: scheme))
                             .frame(width: 16, height: 3)
@@ -2395,6 +2396,7 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("douyin.channel.\(t == .follow ? "follow" : t == .recommend ? "recommend" : "live")")
+                .accessibilityLabel(t.title)
                 .accessibilityValue(t == .recommend && refreshing ? "正在刷新" : tab == t ? "已选择" : "")
             }
             // 「信息」：带字的入口（老板 2026-11-19 要加回来），跟 tab 同款字体；未读红点独立显示
@@ -2406,6 +2408,7 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                         .font(.headline.weight(.medium))
                         .foregroundStyle(theme.media.onMedia.color(for: scheme).opacity(0.62))
                         .lineLimit(1).fixedSize()
+                        .opacity(0)
                     Capsule().frame(width: 16, height: 3).opacity(0)
                 }
                 .padding(.horizontal, hPad)
@@ -3819,6 +3822,7 @@ struct DYClassicFeedScreen: DYRecommendFeedHost {
                     VStack(spacing: 3) {
                         Text(channel.title).font(.headline.weight(tab == channel ? .bold : .medium))
                             .foregroundStyle(.white.opacity(tab == channel ? 1 : 0.62))
+                            .opacity(0)
                         Capsule().fill(.white).frame(width: 16, height: 3)
                             .opacity(tab == channel ? 1 : 0)
                     }
@@ -3827,6 +3831,7 @@ struct DYClassicFeedScreen: DYRecommendFeedHost {
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(channel == .recommend && refreshing ? "正在刷新" : tab == channel ? "已选择" : "")
+                .accessibilityLabel(channel.title)
                 .accessibilityHint(channel == .recommend && tab == .recommend ? "再次点击刷新推荐" : "切换频道")
             }
         }
@@ -4945,1140 +4950,220 @@ private struct DYHorizontalCommentCloseButton: UIViewRepresentable {
 }
 
 struct DYCommentPanel: View {
-    @Environment(\.appTheme) private var theme
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.horizontalSizeClass) private var hSize
-    @Environment(\.dyCommentTrailingCleared) private var trailingCleared
-    @AppStorage(DDChromeMode.key) private var chromeModeRaw = DDChromeMode.classic.rawValue
-    /// 评论面板四种界面统一用经典样式（老板 2026-11-17 定，外屏内屏都一样）。
-    private var usesClassicComments: Bool {
-        if #available(iOS 27.1, *) { return true }
-        return false
-    }
     let bridge: DouyinBridge
     let aweme: DYAweme
     let onClose: (() -> Void)?
-    /// 从消息点评论进来：首屏用 insert_ids 把这条评论顶到第一条并高亮
     let focus: DYCommentFocus?
     let fillsPane: Bool
     let trailingInset: CGFloat
     let horizontalStatus: Bool
+    @Environment(\.dyExpandedCaptionID) private var expandedCaptionID
     @State private var items: [DYComment] = []
     @State private var cursor = 0
-    @State private var hasMore = true
     @State private var total = 0
+    @State private var hasMore = true
     @State private var loading = false
     @State private var error: String?
     @State private var replies: [String: [DYComment]] = [:]
     @State private var replyCursor: [String: Int] = [:]
     @State private var replyMore: [String: Bool] = [:]
     @State private var replyLoading: Set<String> = []
-    @State private var replyErr: [String: String] = [:]
-    @State private var draft = ""
-    @State private var replyTo: DYComment?
-    /// replyTo 是楼中楼时它所在的一级评论 cid（发送走 reply_id=一级、reply_to_reply_id=这条）
-    @State private var replyParent: String?
-    @State private var highlight: String?
-    @State private var focusMiss = false
-    @State private var showEmoji = false
-    @State private var showAt = false
-    @State private var emojis: [DYEmoji] = []
-    @State private var friends: [DYFriend] = []
-    @State private var atLoading = false
-    @State private var atError: String?
-    @State private var sending = false
-    /// 先上屏的本地评论（id 以 local- 开头）：发送中 / 失败可重发 / 结果不明
-    @State private var pending: [String: DYPendingSend] = [:]
-    /// 结果不明的那条要重发：先二次确认，免得发两条
-    @State private var confirmResend: String?
-    /// 草稿当前对应的「作品+回复目标」；切换目标时先把旧草稿存好再换
-    @State private var draftKey: String?
-    @State private var sendErr: String?
-    @State private var showRelogin = false
-    /// 我自己的 sec_uid，用来认出哪些评论能删
-    @State private var mySec: String?
-    @State private var myName: String?
-    @State private var myAvatar: String?
-    @State private var deletingComment: DYComment?
-    @State private var deletingParent: String?
-    @State private var deleteBusy = false
-    /// 评论翻译结果（cid → 译文）
-    @State private var translated: [String: String] = [:]
-    /// 评论配图：相册里选中的那一项 → 处理好等着发的图 → 已经传上去的结果（发评论失败再点发送时不重传）
-    @State private var pickedPhoto: PhotosPickerItem?
-    @State private var imageDraft: DYCommentImageDraft?
-    @State private var imageUploaded: DYImageXUploadResult?
-    @State private var imageLoading = false
-    @State private var digged: Set<String> = []
-    @State private var diggShown: [String: Int] = [:]
-    @State private var relatedWords: [String] = []
-    @State private var relatedQuery: DYRelatedQuery?
-    @Environment(\.dyOpenSearch) private var openSearch
-    @State private var listAtTop = true
-    @State private var bottomSafeArea = DYDuoMetrics.windowBottomInset
-    /// 评论区位置记忆：当前屏幕最上面那条一级评论（关掉再开时滚回这里）
+    @State private var replyErrors: [String: String] = [:]
     @State private var topVisibleID: String?
-    @State private var restoredFromMemory = false
-    /// 恢复完数据后要滚到的那条：数据是在列表出现之后才填进来的，
-    /// 所以不能在列表 onAppear 里滚（那时还是空的），要等数据到了再滚
-    @State private var pendingRestoreID: String?
-    /// 滚回去之前别让可见性回调把「最上面那条」改成第一条
-    @State private var restoringScroll = false
-    @FocusState private var inputFocused: Bool
-    /// 设置里的开关：点评论/名字回复时是否自动弹出键盘（关掉后只进入「回复 @某人」状态，点输入框才弹）
-    @AppStorage(DYCommentKeyboard.autoFocusKey) private var replyAutoKeyboard = true
+    @State private var restoreID: String?
+    @State private var restored = false
+    @State private var listAtTop = true
 
     init(bridge: DouyinBridge, aweme: DYAweme, onClose: (() -> Void)?, focus: DYCommentFocus? = nil,
          fillsPane: Bool = false, trailingInset: CGFloat = 0, horizontalStatus: Bool = false) {
-        self.bridge = bridge; self.aweme = aweme; self.onClose = onClose
+        self.bridge = bridge
+        self.aweme = aweme
+        self.onClose = onClose
+        self.focus = focus?.awemeID == aweme.id ? focus : nil
         self.fillsPane = fillsPane
         self.trailingInset = trailingInset
         self.horizontalStatus = horizontalStatus
-        self.focus = focus?.awemeID == aweme.id ? focus : nil
-    }
-
-    @Environment(\.dyExpandedCaptionID) private var expandedCaptionID
-    private var showsCaption: Bool { usesClassicComments && expandedCaptionID == aweme.id }
-
-    private var headerTrailingInset: CGFloat {
-        horizontalStatus ? max(trailingInset, 184) : trailingInset
-    }
-
-    private var captionHeader: some View {
-        VStack(spacing: 0) {
-            DYVideoCaptionHeader(bridge: bridge, aweme: aweme, onClose: onClose,
-                                 authorTrailingInset: max(0, headerTrailingInset - trailingInset),
-                                 closeAtLeading: horizontalStatus,
-                                 stacksAuthorInfo: horizontalStatus)
-                .padding(.trailing, trailingInset)
-            Divider()
-        }
-    }
-
-    private var commentTitle: some View {
-        Text(total > 0 ? "\(DYFormat.count(total)) 条评论" : "评论")
-            .font(.subheadline.weight(.semibold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityIdentifier("douyin.comments.title")
-    }
-
-    @ViewBuilder
-    private var closeButton: some View {
-        if !showsCaption, let onClose {
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.subheadline.weight(.semibold))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭评论")
-            .accessibilityIdentifier("douyin.comments.close")
-        }
-    }
-
-    private var relatedSearch: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 12) {
-                Text("相关搜索").font(.caption).foregroundStyle(.themeTextSecondary)
-                ForEach(relatedWords, id: \.self) { word in
-                    Button { searchRelated(word) } label: {
-                        Label(word, systemImage: "magnifyingglass")
-                            .font(.footnote).lineLimit(1)
-                            .foregroundStyle(theme.accent.color(for: scheme))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .scrollIndicators(.hidden)
-        .clipped()
-        .accessibilityIdentifier("douyin.comments.relatedSearch")
-    }
-
-    private var commentHeading: some View {
-        VStack(spacing: 0) {
-            Group {
-                if horizontalStatus && !showsCaption {
-                    HStack(spacing: 4) {
-                        if let onClose {
-                            DYHorizontalCommentCloseButton(tint: UIColor(Color.themeTextPrimary), onClose: onClose)
-                                .frame(width: 44, height: 44)
-                        }
-                        HStack(spacing: 0) {
-                            commentTitle
-                            Spacer(minLength: 0)
-                        }
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                        .modifier(DYPanelDismissGesture(allowsSwipeRight: true, onClose: onClose))
-                    }
-                    .frame(minHeight: max(44, DYDuoMetrics.windowSafeTop))
-                } else {
-                    ZStack(alignment: .trailing) {
-                        commentTitle.frame(maxWidth: .infinity)
-                        closeButton
-                    }
-                    .frame(minHeight: showsCaption ? 30 : 44)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.trailing, showsCaption ? trailingInset : headerTrailingInset)
-            if !relatedWords.isEmpty {
-                relatedSearch
-                    .padding(.horizontal, 16)
-                    .padding(.trailing, trailingInset)
-                    .padding(.bottom, showsCaption ? 0 : 4)
-            }
-            if !showsCaption { Divider() }
-        }
-        .foregroundStyle(.themeTextPrimary)
-        .contentShape(Rectangle())
-        .modifier(DYPanelDismissGesture(allowsSwipeRight: true,
-                                        onClose: horizontalStatus && !showsCaption ? nil : onClose))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("douyin.comments.header")
     }
 
     var body: some View {
-        Group {
-            if usesClassicComments { classicBody } else { upstreamBody }
-        }
-        .accessibilityValue(usesClassicComments ? "经典评论" : "上游评论")
-        .dyReloginSheet(isPresented: $showRelogin, bridge: bridge) { ok in
-            sendErr = ok ? "已核验账号资料；评论权限未确认，草稿已保留，请勿连续重发" : "未完成账号核验；原登录和草稿未自动清理"
-        }
-    }
-
-    private var upstreamBody: some View {
         VStack(spacing: 0) {
+            if expandedCaptionID == aweme.id {
+                DYVideoCaptionHeader(bridge: bridge, aweme: aweme, onClose: nil)
+            }
             HStack {
-                Text(total > 0 ? "\(DYFormat.count(total)) 条评论" : "评论").font(.subheadline.weight(.semibold))
+                Text(total > 0 ? "\(DYFormat.count(total)) 条评论" : "评论")
+                    .font(.subheadline.weight(.semibold))
                     .accessibilityIdentifier("douyin.comments.title")
                 Spacer()
                 if let onClose {
-                    Button(action: onClose) { Image(systemName: "xmark").font(.subheadline.weight(.semibold)) }
+                    Button(action: onClose) { Image(systemName: "xmark").frame(width: 44, height: 44) }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("关闭评论")
                         .accessibilityIdentifier("douyin.comments.close")
                 }
             }
-            .foregroundStyle(.themeTextPrimary)
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            // 横屏（侧栏）时关闭键离右缘太近，会和视频时间显示挤在一起，整体左移让位；
-            // 外层已按系统竖栏缩窄过面板时不再重复让位（issue #15）
-            .padding(.trailing, hSize == .regular && !trailingCleared ? 88 : 0)
-            Divider()
-            ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    if focusMiss {
-                        Text("这条评论已删除或暂不可见").font(.caption).foregroundStyle(.themeTextSecondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                    ForEach(items) { c in
-                        VStack(alignment: .leading, spacing: 10) {
-                            row(c, parent: nil)
-                            if c.replies > 0 || !(replies[c.id] ?? []).isEmpty { replyBlock(c) }
-                        }
-                        .id(c.id)
-                    }
-                    if let error {
-                        Text(error).font(.caption).foregroundStyle(theme.status.danger.color(for: scheme))
-                    }
-                    if hasMore {
-                        ProgressView().frame(maxWidth: .infinity)
-                            .onAppear { Task { await load() } }
-                    } else if items.isEmpty {
-                        Text("还没有评论").font(.footnote).foregroundStyle(.themeTextSecondary).frame(maxWidth: .infinity)
-                    }
-                }
-                .scrollTargetLayout()   // 评论位置记忆要知道哪条在屏幕最上面
-                .padding(16)
-            }
-            .accessibilityIdentifier("douyin.comments.list")
-            .modifier(DYCommentTopTracker(ids: items.map(\.id), top: $topVisibleID, paused: restoringScroll))
-            .onChange(of: pendingRestoreID) { _, id in restoreUpstreamCommentPosition(proxy, to: id) }
-            .scrollDismissesKeyboard(.interactively)
-            .simultaneousGesture(TapGesture().onEnded { if inputFocused, !replyAutoKeyboard { inputFocused = false } })
-            .onChange(of: highlight) { _, h in
-                guard let h else { return }
-                withAnimation(.snappy) { proxy.scrollTo(h, anchor: .center) }
-            }
-            }
-            if !relatedWords.isEmpty {
-                Divider()
-                ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
-                        Text("相关搜索").font(.caption).foregroundStyle(.themeTextSecondary)
-                        ForEach(relatedWords, id: \.self) { word in
-                            Button { searchRelated(word) } label: {
-                                Label(word, systemImage: "magnifyingglass")
-                                    .font(.footnote).lineLimit(1)
-                                    .foregroundStyle(theme.accent.color(for: scheme))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                }
-                .scrollIndicators(.hidden)
-                .accessibilityIdentifier("douyin.comments.relatedSearch")
-            }
-            Divider()
-            inputBar
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("douyin.comments.panel")
-        .padding(.trailing, fillsPane ? trailingInset : 0)
-        .background {
-            if fillsPane { Color.ddBackground } else { GlassBackground() }
-        }
-        .modifier(DYRailReservedNudge(disabled: fillsPane))
-        .task(id: aweme.id) { relatedWords = await bridge.relatedSearch(for: aweme) }
-        .fullScreenCover(item: $relatedQuery) { query in
-            DYRelatedSearchScreen(bridge: bridge, word: query.word)
-        }
-        .onDisappear { saveCommentPosition() }
-        .onReceive(bridge.$signReady) { ok in signDone(ok) }
-    }
-
-    private var classicBody: some View {
-        panelContent
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(fillsPane ? Color(uiColor: .secondarySystemBackground) : .clear)
-            .clipped()
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("douyin.comments.panel")
-            .onGeometryChange(for: CGFloat.self) { geo in
-                DYDuoMetrics.bottomSafeAreaOverlap(in: geo)
-            } action: { bottomSafeArea = $0 }
-            .task(id: aweme.id) { relatedWords = await bridge.relatedSearch(for: aweme) }
-            .fullScreenCover(item: $relatedQuery) { query in
-                DYRelatedSearchScreen(bridge: bridge, word: query.word)
-            }
-            .onDisappear { saveCommentPosition() }
-            .onReceive(bridge.$signReady) { ok in signDone(ok) }
-    }
-
-    private var panelContent: some View {
-        VStack(spacing: 0) {
-            if !showsCaption { commentHeading }
+            .frame(minHeight: 48)
+            .padding(.horizontal, 16)
+            .padding(.trailing, horizontalStatus ? max(trailingInset, 100) : trailingInset)
+            .contentShape(Rectangle())
+            .modifier(DYPanelDismissGesture(allowsSwipeRight: true, onClose: onClose))
+            .accessibilityIdentifier("douyin.comments.header")
+            Divider().opacity(0.4)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if showsCaption {
-                            VStack(spacing: 0) {
-                                captionHeader
-                                commentHeading
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        ForEach(items) { comment in
+                            VStack(alignment: .leading, spacing: 12) {
+                                commentRow(comment)
+                                if comment.replies > 0 || replies[comment.id] != nil { replyBlock(comment) }
                             }
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.bottom, 8)
+                            .id(comment.id)
                         }
-                        Group {
-                            if focusMiss {
-                                Text("这条评论已删除或暂不可见").font(.footnote).foregroundStyle(.themeTextSecondary)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            ForEach(items) { c in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    row(c, parent: nil)
-                                    if c.replies > 0 || !(replies[c.id] ?? []).isEmpty { replyBlock(c) }
-                                }
-                                .id(c.id)
-                            }
-                            if let error {
-                                Text(error).font(.caption).foregroundStyle(.themeTextSecondary)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            if hasMore {
-                                ProgressView().frame(maxWidth: .infinity)
-                                    .onAppear { Task { await load() } }
-                            } else if items.isEmpty {
-                                Text("还没有评论").font(.footnote).foregroundStyle(.themeTextSecondary)
-                                    .frame(maxWidth: .infinity)
-                            }
+                        if let error {
+                            Button(error + " · 点此重试") {
+                                self.error = nil
+                                hasMore = true
+                                Task { await load() }
+                            }.font(.footnote).foregroundStyle(.secondary)
+                        } else if hasMore {
+                            ProgressView().frame(maxWidth: .infinity).onAppear { Task { await load() } }
+                        } else if items.isEmpty {
+                            Text("还没有评论").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.trailing, trailingInset)
-                        .padding(.bottom, 16)
                     }
                     .scrollTargetLayout()
-                    .padding(.top, showsCaption ? 0 : 16)
+                    .padding(16)
+                    .padding(.trailing, trailingInset)
+                    .padding(.bottom, DYDuoMetrics.windowBottomInset)
                 }
-                .clipped()
                 .modifier(DYScrollTopObserver(atTop: $listAtTop))
                 .modifier(DYPanelDismissGesture(isAtTop: listAtTop, allowsSwipeRight: true, onClose: onClose))
+                .modifier(DYCommentTopTracker(ids: items.map(\.id), top: $topVisibleID, paused: restoreID != nil))
                 .accessibilityIdentifier("douyin.comments.list")
-                .modifier(DYCommentTopTracker(ids: items.map(\.id), top: $topVisibleID, paused: restoringScroll))
-                .task(id: pendingRestoreID) {
-                    guard !showsCaption, let id = pendingRestoreID else { return }
-                    await restoreCommentPosition(proxy, to: id)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .simultaneousGesture(TapGesture().onEnded { if inputFocused, !replyAutoKeyboard { inputFocused = false } })
-                .onChange(of: highlight) { _, h in
-                    guard !showsCaption, let h else { return }
-                    withAnimation(.snappy) { proxy.scrollTo(h, anchor: .center) }
-                }
-            }
-            .id(showsCaption)
-            .transition(.identity)
-            .onChange(of: showsCaption) { _, expanded in
-                guard expanded else { return }
-                restoringScroll = false
-                pendingRestoreID = nil
-                listAtTop = true
-            }
-            VStack(spacing: 0) {
-                Divider()
-                inputBar
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .background(fillsPane ? Color.ddBackground : .clear)
-        }
-    }
-
-    /// 关掉评论区：把已加载的评论、楼中楼和当前位置存下，同一条视频再打开时原样恢复
-    private func saveCommentPosition() {
-        guard focus == nil, !items.isEmpty else { return }
-        // 没确认的本地评论不进记忆：重开评论区时它会变成一条看起来已发出的普通评论
-        let keep = { (c: DYComment) in !DYPendingSend.isLocal(c.id) }
-        DYCommentMemory.shared.put(aweme.id, .init(
-            items: items.filter(keep), cursor: cursor, hasMore: hasMore, total: total,
-            replies: replies.mapValues { $0.filter(keep) }, replyCursor: replyCursor, replyMore: replyMore,
-            digged: digged, diggShown: diggShown, topID: topVisibleID))
-        DYLiveModel.log("DDCOMMENTMEM save aweme=\(aweme.id.suffix(6)) n=\(items.count) top=\(topVisibleID?.suffix(6) ?? "-")")
-    }
-
-    /// 打开评论区：数据恢复后滚回上次看到的那条（不带动画）。
-    /// LazyVStack 第一次布局还没量出远处行的高度，单次 scrollTo 可能停在半路，
-    /// 所以下一帧和稍后各补一次，最后再放开「最上面那条」的跟踪。
-    private func restoreCommentPosition(_ proxy: ScrollViewProxy, to id: String) async {
-        defer {
-            if !Task.isCancelled {
-                restoringScroll = false
-                pendingRestoreID = nil
-            }
-        }
-        guard items.contains(where: { $0.id == id }) else { return }
-        var tx = Transaction()
-        tx.disablesAnimations = true
-        await Task.yield()
-        for interval in [80, 120, 0] {
-            guard !Task.isCancelled else { return }
-            withTransaction(tx) { proxy.scrollTo(id, anchor: .top) }
-            if interval > 0 { try? await Task.sleep(for: .milliseconds(interval)) }
-        }
-        DYLiveModel.log("DDCOMMENTMEM scrolled aweme=\(aweme.id.suffix(6)) to=\(id.suffix(6)) top_now=\(topVisibleID?.suffix(6) ?? "-")")
-    }
-
-    private func restoreUpstreamCommentPosition(_ proxy: ScrollViewProxy, to id: String?) {
-        guard let id, items.contains(where: { $0.id == id }) else { restoringScroll = false; return }
-        var tx = Transaction(); tx.disablesAnimations = true
-        DispatchQueue.main.async {
-            withTransaction(tx) { proxy.scrollTo(id, anchor: .top) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                withTransaction(tx) { proxy.scrollTo(id, anchor: .top) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                    withTransaction(tx) { proxy.scrollTo(id, anchor: .top) }
-                    restoringScroll = false
-                    pendingRestoreID = nil
-                    DYLiveModel.log("DDCOMMENTMEM scrolled aweme=\(aweme.id.suffix(6)) to=\(id.suffix(6)) top_now=\(topVisibleID?.suffix(6) ?? "-")")
+                .task(id: restoreID) {
+                    guard let id = restoreID else { return }
+                    await Task.yield()
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { proxy.scrollTo(id, anchor: .top) }
+                    restoreID = nil
                 }
             }
         }
-    }
-
-    private func searchRelated(_ word: String) {
-        guard let openSearch else { relatedQuery = DYRelatedQuery(word: word); return }
-        onClose?()
-        // Let a compact comment sheet dismiss before the video host presents search.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { openSearch(word) }
-    }
-
-    private var inputBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if showAt { atPanel }
-            if let r = replyTo {
-                HStack {
-                    Text("回复 @\(r.name)").font(.caption).foregroundStyle(.themeTextSecondary).lineLimit(1)
-                    Spacer()
-                    Button { replyTo = nil; replyParent = nil; inputFocused = false } label: { Image(systemName: "xmark.circle.fill").font(.caption) }
-                        .buttonStyle(.plain).foregroundStyle(.themeTextSecondary)
-                }
-            }
-            if sendErr == Self.waitSignText {
-                DYSignWaitHint(bridge: bridge, color: theme.status.danger.color(for: scheme))
-                    .accessibilityIdentifier("douyin.comment.sendErr")
-            } else if let e = sendErr {
-                Text(e).font(.caption2)
-                    .foregroundStyle(e == Self.signDoneText ? theme.status.success.color(for: scheme) : theme.status.danger.color(for: scheme))
-                    .accessibilityIdentifier("douyin.comment.sendErr")
-            }
-            if imageLoading {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.mini)
-                    Text("处理图片…").font(.caption2).foregroundStyle(.themeTextSecondary)
-                }
-            } else if let img = imageDraft {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: img.preview).resizable().scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    Button { clearCommentImage() } label: {
-                        Image(systemName: "xmark.circle.fill").font(.body)
-                            .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .offset(x: 6, y: -6)
-                    .disabled(sending)
-                    .accessibilityLabel("移除图片")
-                    .accessibilityIdentifier("douyin.comment.image.remove")
-                }
-                .padding(.top, 6)
-                .accessibilityIdentifier("douyin.comment.image.preview")
-            }
-            HStack(spacing: 8) {
-                Button {
-                    showEmoji.toggle()
-                    showAt = false
-                    if showEmoji, emojis.isEmpty { Task { emojis = await bridge.emojiList() } }
-                } label: {
-                    Image(systemName: showEmoji ? "keyboard" : "face.smiling")
-                        .font(.body).foregroundStyle(showEmoji ? theme.accent.color(for: scheme) : .themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("douyin.comment.emoji")
-                Button {
-                    showAt.toggle()
-                    showEmoji = false
-                    if showAt { Task { await loadFriends() } }
-                } label: {
-                    Image(systemName: "at").font(.body.weight(.medium))
-                        .foregroundStyle(showAt ? theme.accent.color(for: scheme) : .themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("douyin.comment.at")
-                PhotosPicker(selection: $pickedPhoto, matching: .images, photoLibrary: .shared()) {
-                    Image(systemName: "photo").font(.body)
-                        .foregroundStyle(imageDraft != nil ? theme.accent.color(for: scheme) : .themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .disabled(sending)
-                .accessibilityLabel("添加图片")
-                .accessibilityIdentifier("douyin.comment.image")
-                .onChange(of: pickedPhoto) { _, item in
-                    guard let item else { return }
-                    Task { await loadCommentImage(item) }
-                }
-                TextField(replyTo == nil ? "说点什么…" : "回复 \(replyTo!.name)", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .focused($inputFocused)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .frame(minHeight: usesClassicComments ? 44 : nil)
-                    .background(Capsule().fill(Color.primary.opacity(0.08)))
-                    .accessibilityIdentifier("douyin.comment.input")
-                if inputFocused {
-                    Button { inputFocused = false } label: {
-                        Image(systemName: "keyboard.chevron.compact.down").font(.body)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.themeTextSecondary)
-                    .accessibilityLabel("收起键盘")
-                    .accessibilityIdentifier("douyin.comment.dismissKeyboard")
-                }
-                Button { Task { await send() } } label: {
-                    if sending { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "paperplane.fill").font(.body.weight(.semibold)) }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(hasCommentContent ? theme.accent.color(for: scheme) : Color.secondary)
-                .disabled(!hasCommentContent || sending || imageLoading)
-                .accessibilityIdentifier("douyin.comment.send")
-            }
-            if showEmoji {
-                if emojis.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.mini)
-                        Text("加载表情…").font(.caption2).foregroundStyle(.themeTextSecondary)
-                    }
-                    .frame(height: 60)
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 8) {
-                            ForEach(emojis) { e in
-                                Button { draft += e.displayName } label: {
-                                    CachedAsyncImage(url: e.url.flatMap(URL.init(string:))) { img in
-                                        img.resizable().scaledToFit()
-                                    } placeholder: { Color.clear }
-                                    .frame(width: 30, height: 30)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .frame(height: 150)
-                    .accessibilityIdentifier("douyin.comment.emojis")
-                }
-            }
-        }
-        .padding(.horizontal, 12).padding(.top, usesClassicComments ? 6 : 8)
-        .padding(.bottom, usesClassicComments ? max(18, bottomSafeArea + 4) : 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .dyPanelGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("douyin.comments.composer")
-        .task { await DYEmojiStore.shared.load(bridge: bridge) }
-        .task {
-            guard mySec == nil, let me = try? await bridge.selfProfile() else { return }
-            mySec = me.secUid; myName = me.name; myAvatar = me.avatar
-        }
-        .task { restoreDraft() }
-        .onChange(of: draft) { _, text in DYCommentDraftStore.save(currentDraftKey, text: text) }
-        .onChange(of: replyTo?.id) { _, _ in switchDraftTarget() }
-        // 选着要回复的人 / 输入框里有字：半折叠下半屏不切成触控板（DYTouchpad）
-        .onChange(of: replyTo != nil, initial: true) { _, busy in DYTouchpadHold.shared.composing = busy }
-        .onDisappear { DYTouchpadHold.shared.composing = false }
-        .alert("这条可能已经发出去了", isPresented: Binding(get: { confirmResend != nil }, set: { if !$0 { confirmResend = nil } })) {
-            Button("仍要重发") { if let id = confirmResend { Task { await deliver(id) } }; confirmResend = nil }
-            Button("先不发", role: .cancel) { confirmResend = nil }
-        } message: { Text("抖音没给明确结果。重发前建议先下拉刷新看看评论区有没有这条，否则可能发两条。") }
-        .alert("删除这条评论？", isPresented: Binding(get: { deletingComment != nil }, set: { if !$0 { deletingComment = nil } })) {
-            Button("删除", role: .destructive) {
-                if let c = deletingComment { Task { await deleteComment(c, parent: deletingParent) } }
-                deletingComment = nil
-            }
-            Button("取消", role: .cancel) { deletingComment = nil }
-        } message: { Text("删除后找不回来。") }
-    }
-
-    /// 拉「我关注的人」给 @ 面板用
-    private func loadFriends() async {
-        guard friends.isEmpty, !atLoading else { return }
-        atLoading = true
-        defer { atLoading = false }
-        do {
-            let r = try await bridge.followingUsers()
-            friends = r.items
-            atError = r.items.isEmpty ? "没拿到关注列表（可能未登录）" : nil
-        } catch {
-            atError = "关注列表加载失败：\(error.localizedDescription)"
+        .accessibilityIdentifier("douyin.comments.panel")
+        .task(id: aweme.id) { await load() }
+        .onDisappear { savePosition() }
+        .onReceive(bridge.$signReady) { ready in
+            if ready, items.isEmpty, error != nil { error = nil; hasMore = true; Task { await load() } }
         }
     }
 
-    /// @ 面板：优先「我关注的人」，拿不到时退回本视频评论区里的人
-    @ViewBuilder
-    private var atPanel: some View {
-        let people: [DYFriend] = friends.isEmpty
-            ? atCandidates.map { DYFriend(name: $0.name, avatar: $0.avatar, secUid: $0.id) }
-            : friends
-        // 跟抖音一致：输入框上方一排头像 + 昵称，横滑
-        VStack(alignment: .leading, spacing: 4) {
-            if atLoading {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text("加载朋友…").font(.caption2).foregroundStyle(.themeTextSecondary)
-                }
-                .padding(.vertical, 8)
-            } else if people.isEmpty {
-                Text(atError ?? "没有可 @ 的人").font(.caption2).foregroundStyle(.themeTextSecondary)
-                    .padding(.vertical, 8)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 18) {
-                        ForEach(people, id: \.id) { u in
-                            Button {
-                                draft += "@\(u.name) "
-                                showAt = false
-                                inputFocused = true
-                            } label: {
-                                VStack(spacing: 5) {
-                                    CachedAsyncImage(url: u.avatar.flatMap(URL.init(string:))) { img in
-                                        img.resizable().scaledToFill()
-                                    } placeholder: { Color.primary.opacity(0.08) }
-                                    .frame(width: 50, height: 50).clipShape(Circle())
-                                    Text(u.name)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.themeTextPrimary)
-                                        .lineLimit(1)
-                                        .frame(width: 56)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 6)
-                }
-                .frame(height: 92)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    /// @ 候选：评论作者 + 楼中楼作者，去重
-    private var atCandidates: [DYComment] {
-        var seen = Set<String>()
-        var out: [DYComment] = []
-        for c in items {
-            if seen.insert(c.name).inserted { out.append(c) }
-            for r in replies[c.id] ?? [] where seen.insert(r.name).inserted { out.append(r) }
-        }
-        return Array(out.prefix(30))
-    }
-
-    /// 有字或有图就能发（网页同款：带图时正文可以为空）
-    private var currentDraftKey: String {
-        DYCommentDraftStore.id(aweme.id, top: replyParent ?? replyTo?.id, to: replyParent == nil ? nil : replyTo?.id)
-    }
-
-    /// 打开评论区：把这条作品上次没发的草稿放回来
-    private func restoreDraft() {
-        draftKey = currentDraftKey
-        if draft.isEmpty, let saved = DYCommentDraftStore.load(currentDraftKey) { draft = saved }
-    }
-
-    /// 换了回复对象：旧目标的草稿已随打字存好；新目标有草稿就换上，没有就保留当前输入
-    private func switchDraftTarget() {
-        let key = currentDraftKey
-        guard key != draftKey else { return }
-        if let old = draftKey { DYCommentDraftStore.save(old, text: draft) }
-        draftKey = key
-        if let saved = DYCommentDraftStore.load(key) { draft = saved }
-    }
-
-    private var hasCommentContent: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageDraft != nil
-    }
-
-    private func clearCommentImage() {
-        pickedPhoto = nil; imageDraft = nil; imageUploaded = nil
-    }
-
-    private func loadCommentImage(_ item: PhotosPickerItem) async {
-        imageLoading = true
-        defer { imageLoading = false }
-        imageUploaded = nil
-        guard let raw = try? await item.loadTransferable(type: Data.self) else {
-            imageDraft = nil; pickedPhoto = nil
-            sendErr = "没能读取这张图片"
-            return
-        }
-        let prepared = await Task.detached(priority: .userInitiated) { DYCommentImagePrep.prepare(raw) }.value
-        guard pickedPhoto == item else { return }   // 处理期间又换了一张或点了移除
-        if let prepared {
-            imageDraft = prepared; sendErr = nil
-        } else {
-            imageDraft = nil; pickedPhoto = nil
-            sendErr = "这张图片用不了（格式不支持或太大）"
-        }
-    }
-
-    /// 点发送：先把评论放进列表（发送中），输入框立刻清空可继续操作；结果回来再更新那一行。
-    private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard hasCommentContent, !sending, !imageLoading else { return }
-        guard bridge.signReady else { waitForSigning(); return }
-        // 回楼中楼：reply_id 必须是一级评论，被回的那条放 reply_to_reply_id（网页同款）
-        let top = replyParent ?? replyTo?.id
-        let to = replyParent == nil ? nil : replyTo?.id
-        let localID = DYPendingSend.prefix + UUID().uuidString
-        pending[localID] = DYPendingSend(text: text, imageDraft: imageDraft, uploaded: imageUploaded, top: top, replyTo: to,
-                                         replyTarget: replyTo, sentAt: Date().timeIntervalSince1970)
-        let local = DYComment(id: localID, text: text, name: myName ?? "我", avatar: myAvatar, digg: 0,
-                              time: Date().timeIntervalSince1970, replies: 0, ip: nil, sec: mySec,
-                              parent: top, replyTo: to)
-        if let top { replies[top, default: []].insert(local, at: 0) } else { items.insert(local, at: 0) }
-        DYCommentDraftStore.remove(currentDraftKey)
-        draft = ""; replyTo = nil; replyParent = nil; sendErr = nil
-        clearCommentImage()
-        inputFocused = false
-        await deliver(localID)
-    }
-
-    static let waitSignText = "等待签名完成才可以发送评论"
-    static let signDoneText = "签名完成，现在可以发送了"
-
-    /// 签名完成：等待提示换成「现在可以发送了」，3 秒后自己消失
-    private func signDone(_ ok: Bool) {
-        guard ok, sendErr == Self.waitSignText else { return }
-        sendErr = Self.signDoneText
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            if sendErr == Self.signDoneText { sendErr = nil }
-        }
-    }
-
-    /// 签名没完成：什么都不发、草稿原样留着，提示一句并在后台把签名准备好；完成后提示自动消失
-    private func waitForSigning() {
-        sendErr = Self.waitSignText
-        DYLiveModel.log("DDSIGN send-blocked waiting")
-        Task { await bridge.prepareSigning() }
-    }
-
-    /// 真正发出去。只对这一条本地评论负责：成功换成服务器那条，失败/不明就地标在那一行上。
-    private func deliver(_ localID: String) async {
-        guard bridge.signReady else { waitForSigning(); return }
-        guard var job = pending[localID] else { return }
-        job.state = .sending; pending[localID] = job
-        sending = true
-        defer { sending = false }
-        do {
-            // 先传图再发评论；图传上去了但评论没发成时留着结果，重发不重传
-            var image: DYImageXUploadResult?
-            if let img = job.imageDraft {
-                if job.uploaded == nil {
-                    do { job.uploaded = try await bridge.uploadCommentImage(img.data, fileName: img.fileName, measured: img.measured) }
-                    catch { throw DYError.bad("图片没传上去：\(error.localizedDescription)") }
-                    pending[localID]?.uploaded = job.uploaded
-                }
-                image = job.uploaded
-            }
-            let c = try await bridge.publishComment(aweme.id, text: job.text, replyID: job.top,
-                                                    replyToReplyID: job.replyTo, image: image)
-            replaceLocal(localID, with: c, top: job.top)
-            pending[localID] = nil
-            if job.top == nil { total += 1 }
-        } catch is DYLoginExpired {
-            pending[localID]?.state = .failed("抖音拦下了这条（需要验证或暂时受限）")
-            sendErr = "抖音拦下了这次评论（需要验证或暂时受限）；评论留在列表里，处理后可点重发"
-            DYRelogin.start { showRelogin = true }
-        } catch let e as DYCommentUnconfirmed {
-            pending[localID]?.state = .unknown(e.message)
-        } catch {
-            pending[localID]?.state = .failed(error.localizedDescription)
-        }
-    }
-
-    private func replaceLocal(_ localID: String, with c: DYComment, top: String?) {
-        if let top, let i = replies[top]?.firstIndex(where: { $0.id == localID }) { replies[top]?[i] = c }
-        else if let i = items.firstIndex(where: { $0.id == localID }) { items[i] = c }
-    }
-
-    private func removeLocal(_ localID: String) {
-        guard let job = pending.removeValue(forKey: localID) else { return }
-        if let top = job.top { replies[top]?.removeAll { $0.id == localID } } else { items.removeAll { $0.id == localID } }
-    }
-
-    /// 失败那条「改一改」：拿回输入框（文字、图片、回复目标都还原），列表里那条撤掉
-    private func editLocal(_ localID: String) {
-        guard let job = pending[localID] else { return }
-        removeLocal(localID)
-        replyTo = job.replyTarget; replyParent = job.replyTarget == nil ? nil : (job.top == job.replyTarget?.id ? nil : job.top)
-        draft = job.text; imageDraft = job.imageDraft; imageUploaded = job.uploaded
-        inputFocused = true
-    }
-
-    @ViewBuilder
-    private func row(_ c: DYComment, parent: String?) -> some View {
-        if let job = pending[c.id] {
-            VStack(alignment: .leading, spacing: 6) {
-                rowBody(c).opacity(job.state == .sending ? 0.6 : 1)
-                pendingStatus(c.id, job)
-            }
-            .accessibilityIdentifier("douyin.comment.pending")
-        } else {
-            sentRow(c, parent: parent)
-        }
-    }
-
-    @ViewBuilder
-    private func pendingStatus(_ id: String, _ job: DYPendingSend) -> some View {
-        let danger = theme.status.danger.color(for: scheme)
-        HStack(spacing: 12) {
-            switch job.state {
-            case .sending:
-                ProgressView().controlSize(.mini)
-                Text("发送中…").foregroundStyle(.themeTextSecondary)
-            case .failed(let why):
-                Label("没发出去：\(why)", systemImage: "exclamationmark.circle.fill").foregroundStyle(danger).lineLimit(2)
-                Spacer(minLength: 4)
-                Button("重发") { Task { await deliver(id) } }.disabled(sending).accessibilityIdentifier("douyin.comment.retry")
-                Button("改一改") { editLocal(id) }
-                Button("删除", role: .destructive) { removeLocal(id) }
-            case .unknown(let why):
-                Label(why, systemImage: "questionmark.circle.fill").foregroundStyle(.themeTextSecondary).lineLimit(2)
-                Spacer(minLength: 4)
-                Button("仍要重发") { confirmResend = id }.disabled(sending).accessibilityIdentifier("douyin.comment.retry")
-                Button("删除", role: .destructive) { removeLocal(id) }
-            }
-        }
-        .font(.caption)
-        .buttonStyle(.borderless)
-        .padding(.leading, 42)
-    }
-
-    private func sentRow(_ c: DYComment, parent: String?) -> some View {
-        rowBody(c)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if inputFocused, replyTo?.id == c.id { inputFocused = false; return }   // 再点同一条 = 收键盘
-                replyTo = c; replyParent = parent ?? c.parent
-                if replyAutoKeyboard { inputFocused = true }
-            }
-            .padding(highlight == c.id ? 6 : 0)
-            .background {
-                if highlight == c.id {
-                    RoundedRectangle(cornerRadius: 10).fill(theme.accent.color(for: scheme).opacity(0.16))
-                }
-            }
-            .accessibilityIdentifier(highlight == c.id ? "douyin.comment.focused" : "douyin.comment.row")
-            .contextMenu {
-                Button(translated[c.id] == nil ? "翻译" : "查看原文", systemImage: "character.bubble") {
-                    if translated[c.id] != nil { translated[c.id] = nil } else { Task { await translate(c) } }
-                }
-                .accessibilityIdentifier("douyin.comment.translate")
-                Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = c.text }
-                if canDelete(c) {
-                    Button("删除", systemImage: "trash", role: .destructive) {
-                        deletingParent = parent ?? c.parent
-                        deletingComment = c
-                    }
-                    .accessibilityIdentifier("douyin.comment.delete")
-                }
-            }
-    }
-
-    /// 评论翻译（comment/translate）：结果只放在内存里，关掉评论区就没了
-    private func translate(_ c: DYComment) async {
-        do {
-            let t = try await bridge.translateComment(c)
-            translated[c.id] = t
-        } catch { DYLiveModel.log("DDCOMMENT translate err \(error.localizedDescription)") }
-    }
-
-    /// 能删的评论：我自己发的，或者这条作品是我的（作者能删自己作品下的评论）。认不出我是谁时不给删。
-    private func canDelete(_ c: DYComment) -> Bool {
-        guard !DYPendingSend.isLocal(c.id), let me = mySec, !me.isEmpty else { return false }
-        return c.sec == me || aweme.author.secUid == me
-    }
-
-    /// 删除评论。抖音确认了才从列表里拿掉；失败时原样留着并说明原因。
-    private func deleteComment(_ c: DYComment, parent: String?) async {
-        guard !deleteBusy else { return }
-        deleteBusy = true
-        defer { deleteBusy = false }
-        do {
-            switch try await bridge.deleteComment(c.id) {
-            case .ok:
-                if let parent, replies[parent]?.contains(where: { $0.id == c.id }) == true {
-                    replies[parent]?.removeAll { $0.id == c.id }
-                } else {
-                    items.removeAll { $0.id == c.id }
-                    replies[c.id] = nil
-                }
-                if replyTo?.id == c.id { replyTo = nil; replyParent = nil }
-                if total > 0 { total -= 1 }
-                sendErr = nil
-            case .notLoggedIn:
-                sendErr = "抖音未登录"
-            case .failed(let why):
-                sendErr = "没删掉：" + why
-            }
-        } catch {
-            sendErr = "没删掉：" + error.localizedDescription
-        }
-    }
-
-    private func rowBody(_ c: DYComment) -> some View {
+    private func commentRow(_ comment: DYComment) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            CachedAsyncImage(url: c.avatar.flatMap(URL.init(string:))) { img in img.resizable().scaledToFill() }
+            CachedAsyncImage(url: comment.avatar.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
                 placeholder: { Color.primary.opacity(0.08) }
                 .frame(width: 32, height: 32).clipShape(Circle())
-            VStack(alignment: .leading, spacing: 4) {
-                Text(c.name).font(.caption.weight(.semibold)).foregroundStyle(.themeTextSecondary)
-                if !c.text.isEmpty {
-                    DYEmojiStore.shared.rich(translated[c.id] ?? c.text).font(.subheadline).foregroundStyle(.themeTextPrimary)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(comment.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if !comment.text.isEmpty {
+                    DYEmojiStore.shared.rich(comment.text).font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
-                    if translated[c.id] != nil {
-                        Text("已翻译 · 长按查看原文").font(.caption2).foregroundStyle(.themeTextSecondary)
-                            .accessibilityIdentifier("douyin.comment.translated")
-                    }
                 }
-                DYCommentMedia(comment: c)
-                HStack(spacing: 8) {
-                    Text(DYFormat.time(c.time))
-                    if let ip = c.ip, !ip.isEmpty { Text(ip) }
-                }
-                .font(.caption2).foregroundStyle(.themeTextSecondary)
+                DYCommentMedia(comment: comment)
+                Text([DYFormat.time(comment.time), comment.ip].compactMap { $0 }.joined(separator: "  "))
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            if !DYPendingSend.isLocal(c.id) { commentDigg(c) }
-        }
-    }
-
-    private func commentDigg(_ c: DYComment) -> some View {
-        let on = digged.contains(c.id)
-        let n = diggShown[c.id] ?? c.digg
-        return Button { Task { await toggleDigg(c) } } label: {
-            VStack(spacing: 2) {
-                Image(systemName: on ? "heart.fill" : "heart").font(.caption)
-                Text(DYFormat.count(max(0, n))).font(.caption2)
+            if comment.digg > 0 {
+                Label(DYFormat.count(comment.digg), systemImage: "heart")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
-            .foregroundStyle(on ? theme.status.danger.color(for: scheme) : Color.themeTextSecondary)
-            .frame(minWidth: 32, minHeight: 36)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("douyin.comment.digg")
+        .accessibilityIdentifier("douyin.comment.row")
+        .contextMenu { Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = comment.text } }
     }
 
-    private func toggleDigg(_ c: DYComment) async {
-        let want = !digged.contains(c.id)
-        let before = diggShown[c.id] ?? c.digg
-        if want { digged.insert(c.id) } else { digged.remove(c.id) }
-        diggShown[c.id] = max(0, before + (want ? 1 : -1))
-        do {
-            switch try await bridge.diggComment(c.id, awemeID: aweme.id, like: want) {
-            case .ok:
-                break
-            case .notLoggedIn:
-                revertDigg(c, want: want, before: before)
-                sendErr = "抖音未登录"
-            case .failed(let why):
-                revertDigg(c, want: want, before: before)
-                sendErr = why
-            }
-        } catch {
-            revertDigg(c, want: want, before: before)
-            sendErr = error.localizedDescription
-        }
-    }
-
-    private func revertDigg(_ c: DYComment, want: Bool, before: Int) {
-        if want { digged.remove(c.id) } else { digged.insert(c.id) }
-        diggShown[c.id] = before
-    }
-
-    @ViewBuilder
-    private func replyBlock(_ c: DYComment) -> some View {
-        let got = replies[c.id] ?? []
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(got) { r in row(r, parent: c.id).id(r.id) }
-            if replyErr[c.id] != nil {
-                Button { replyErr[c.id] = nil; Task { await loadReplies(c) } } label: {
-                    Text("回复加载失败，点此重试").font(.caption).foregroundStyle(.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 12)
-            } else if replies[c.id] == nil || (replyMore[c.id] ?? false) {
-                Button { Task { await loadReplies(c) } } label: {
-                    HStack(spacing: 6) {
-                        Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 18, height: 1)
-                        Text(replies[c.id] == nil ? "展开 \(c.replies) 条回复" : "展开更多回复")
-                        if replyLoading.contains(c.id) { ProgressView().controlSize(.mini) }
+    private func replyBlock(_ comment: DYComment) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(replies[comment.id] ?? []) { commentRow($0) }
+            if replies[comment.id] == nil || replyMore[comment.id] == true || replyErrors[comment.id] != nil {
+                Button {
+                    Task { await loadReplies(comment) }
+                } label: {
+                    HStack {
+                        Text(replyErrors[comment.id] != nil ? "回复加载失败，点此重试" :
+                            replies[comment.id] == nil ? "展开 \(comment.replies) 条回复" : "展开更多回复")
+                        if replyLoading.contains(comment.id) { ProgressView().controlSize(.mini) }
                     }
-                    .font(.caption.weight(.medium)).foregroundStyle(.themeTextSecondary)
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                // 和上方回复拉开距离，避免误点到回复评论
-                .padding(.top, 12)
+                .disabled(replyLoading.contains(comment.id))
                 .accessibilityIdentifier("douyin.replies")
             }
-        }
-        .padding(.leading, 42)
+        }.padding(.leading, 42)
     }
 
-    /// insert_ids 回来后：一级评论已在第一条；楼中楼挂在它的 pinned 里，先塞进回复区再高亮
-    private func applyFocus(_ f: DYCommentFocus, page: [DYComment]) {
-        // 接口两种形态（2026-11 实测）：
-        // A. 一级评论排第一，楼中楼挂在它的 reply_comment 里；
-        // B. 一级评论没回来时，楼中楼本身直接排在一级列表第一条（reply_id = 一级评论）。
-        let top = f.parentCid ?? f.cid
-        var target: String?
-        if let head = page.first(where: { $0.id == top }) {
-            if f.parentCid != nil, let pinned = head.pinned, !pinned.isEmpty {
-                replies[top] = pinned
-                replyMore[top] = head.replies > pinned.count
-            }
-            target = (replies[top] ?? []).contains { $0.id == f.cid } ? f.cid : top
-        }
-        if target == nil || target == top, page.contains(where: { $0.id == f.cid }) { target = f.cid }
-        // 「@我的」通知只带被 @ 那条的 cid，不知道它是不是楼中楼（parentCid 为空）。
-        // 接口把它挂在某条一级评论的 reply_comment 里回来时，上面两步都找不到 → 误报「已删除」（粉丝反馈 11-23）。
-        // 兜底：在本页所有一级评论的 pinned 里找它，找到就按楼中楼展开并定位。
-        if target == nil, let owner = page.first(where: { ($0.pinned ?? []).contains { $0.id == f.cid } }), let pinned = owner.pinned {
-            replies[owner.id] = pinned
-            replyMore[owner.id] = owner.replies > pinned.count
-            target = f.cid
-        }
-        guard let target else {
-            focusMiss = true
-            DYLiveModel.log("DDFOCUS miss aweme=\(f.awemeID) cid=\(f.cid) parent=\(f.parentCid ?? "-")")
-            return
-        }
-        let head = page.first(where: { $0.id == top })
-        DYLiveModel.log("DDFOCUS hit aweme=\(f.awemeID) cid=\(f.cid) parent=\(f.parentCid ?? "-") target=\(target) pinned=\(head?.pinned?.count ?? 0) reply=\(f.startReply ? 1 : 0)")
-        if f.startReply, let c = page.first(where: { $0.id == target }) ?? replies[top]?.first(where: { $0.id == target }) {
-            replyTo = c
-            replyParent = target == top ? nil : top
-            inputFocused = true
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            highlight = target
-            try? await Task.sleep(for: .seconds(6))
-            withAnimation(.easeOut(duration: 0.8)) { if highlight == target { highlight = nil } }
-        }
-    }
-
-    private func loadReplies(_ c: DYComment) async {
-        guard !replyLoading.contains(c.id) else { return }
-        replyLoading.insert(c.id)
-        defer { replyLoading.remove(c.id) }
+    private func loadReplies(_ comment: DYComment) async {
+        guard !replyLoading.contains(comment.id) else { return }
+        replyLoading.insert(comment.id)
+        defer { replyLoading.remove(comment.id) }
         do {
-            let r = try await bridge.fetchReplies(aweme.id, commentID: c.id, cursor: replyCursor[c.id] ?? 0)
-            DYLiveModel.log("DDREPLY cid=\(c.id) n=\(r.items.count) first=\(r.items.first?.text ?? "-")")
-            let seen = Set((replies[c.id] ?? []).map(\.id))
-            replies[c.id, default: []].append(contentsOf: r.items.filter { !seen.contains($0.id) })
-            replyCursor[c.id] = r.cursor
-            replyMore[c.id] = r.hasMore && !r.items.isEmpty
-            replyErr[c.id] = nil
-        } catch {
-            DYLiveModel.log("DDREPLY cid=\(c.id) error=\(error)")
-            replyErr[c.id] = "回复加载失败：\(error.localizedDescription)"
-        }
+            let previous = replyCursor[comment.id] ?? 0
+            let page = try await bridge.fetchReplies(aweme.id, commentID: comment.id, cursor: previous)
+            let seen = Set((replies[comment.id] ?? []).map(\.id))
+            replies[comment.id, default: []] += page.items.filter { !seen.contains($0.id) }
+            replyCursor[comment.id] = page.cursor
+            replyMore[comment.id] = page.hasMore && !page.items.isEmpty && page.cursor != previous
+            replyErrors[comment.id] = nil
+        } catch { replyErrors[comment.id] = error.localizedDescription }
     }
 
     private func load() async {
-        if items.isEmpty, focus == nil, !restoredFromMemory, let m = DYCommentMemory.shared.take(aweme.id) {
-            // 关掉再开：直接用上次加载好的评论和楼中楼，不重新拉
-            restoredFromMemory = true
-            items = m.items; cursor = m.cursor; hasMore = m.hasMore; total = m.total
-            replies = m.replies; replyCursor = m.replyCursor; replyMore = m.replyMore
-            digged = m.digged; diggShown = m.diggShown
-            topVisibleID = m.topID
-            if !showsCaption, let t = m.topID, t != m.items.first?.id {
-                restoringScroll = true
-                pendingRestoreID = t
-            }
-            DYLiveModel.log("DDCOMMENTMEM restore aweme=\(aweme.id.suffix(6)) n=\(m.items.count) top=\(m.topID?.suffix(6) ?? "-")")
+        guard !loading, hasMore else { return }
+        if !restored, items.isEmpty, focus == nil, let saved = DYCommentMemory.shared.take(aweme.id) {
+            restored = true
+            items = saved.items
+            cursor = saved.cursor
+            total = saved.total
+            hasMore = saved.hasMore
+            replies = saved.replies
+            replyCursor = saved.replyCursor
+            replyMore = saved.replyMore
+            restoreID = saved.topID
             return
         }
-        guard !loading, hasMore else { return }
         loading = true
         defer { loading = false }
         do {
-            let first = cursor == 0 && items.isEmpty
-            let ins = first ? focus.map { f in [f.parentCid, f.cid].compactMap { $0 }.joined(separator: ",") } : nil
-            let r = try await bridge.fetchComments(aweme.id, cursor: cursor, insert: ins)
+            let firstPage = items.isEmpty
+            let insert = firstPage ? focus.map { [$0.parentCid, $0.cid].compactMap { $0 }.joined(separator: ",") } : nil
+            let page = try await bridge.fetchComments(aweme.id, cursor: cursor, insert: insert)
             let seen = Set(items.map(\.id))
-            items.append(contentsOf: r.items.filter { !seen.contains($0.id) })
-            if let f = focus, first { applyFocus(f, page: r.items) }
-            for c in r.items where c.userDigged == 1 { digged.insert(c.id) }
-            cursor = r.cursor
-            hasMore = r.hasMore && !r.items.isEmpty
-            total = max(total, r.total, aweme.stats.comment)
-            error = nil
-            #if DEBUG
-            if ProcessInfo.processInfo.environment["DOUDUO_AUTOREPLY"] == "1", let c = items.first(where: { $0.replies > 0 }), replies[c.id] == nil {
-                Task { await loadReplies(c) }
+            items += page.items.filter { !seen.contains($0.id) }
+            hasMore = page.hasMore && !page.items.isEmpty && page.cursor != cursor
+            cursor = page.cursor
+            total = max(page.total, aweme.stats.comment)
+            if firstPage, let focus {
+                for comment in page.items where !(comment.pinned ?? []).isEmpty {
+                    replies[comment.id] = comment.pinned
+                    replyMore[comment.id] = comment.replies > (comment.pinned?.count ?? 0)
+                }
+                restoreID = page.items.first(where: { $0.id == (focus.parentCid ?? focus.cid) || ($0.pinned ?? []).contains { $0.id == focus.cid } })?.id
             }
-            #endif
-        } catch {
-            self.error = error.localizedDescription
-            hasMore = false
-        }
+            error = nil
+        } catch { self.error = error.localizedDescription; hasMore = false }
+    }
+
+    private func savePosition() {
+        guard focus == nil, !items.isEmpty else { return }
+        DYCommentMemory.shared.put(aweme.id, .init(items: items, cursor: cursor, hasMore: hasMore, total: total,
+            replies: replies, replyCursor: replyCursor, replyMore: replyMore,
+            digged: [], diggShown: [:], topID: topVisibleID))
     }
 }
 
