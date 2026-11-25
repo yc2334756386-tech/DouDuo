@@ -16,6 +16,7 @@ for forbidden in ('publishComment', 'deleteComment', 'diggComment', 'TextField('
 
 swift = r'''
 import Foundation
+import CoreGraphics
 struct Insets { var top: CGFloat = 0; var bottom: CGFloat = 34; var leading: CGFloat = 0; var trailing: CGFloat = 0 }
 struct GeometryProxy { let size: CGSize; var safeAreaInsets = Insets() }
 enum DYDuoMetrics {

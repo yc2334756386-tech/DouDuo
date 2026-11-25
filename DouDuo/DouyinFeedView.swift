@@ -4950,6 +4950,9 @@ private struct DYHorizontalCommentCloseButton: UIViewRepresentable {
 }
 
 struct DYCommentPanel: View {
+    // Shared by the message notification reply flow.
+    static let waitSignText = "等待签名完成才可以发送评论"
+    static let signDoneText = "签名完成，现在可以发送了"
     let bridge: DouyinBridge
     let aweme: DYAweme
     let onClose: (() -> Void)?
