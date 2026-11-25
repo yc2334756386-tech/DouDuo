@@ -514,6 +514,14 @@ struct DYCollectedMusicScreen: View {
             .navigationTitle("收藏的音乐")
             .navigationBarTitleDisplayMode(.inline)
             .task { if pager.items.isEmpty { await pager.more() } }
+            .overlay(alignment: .bottomLeading) {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["DOUDUO_MUSIC_FIXTURE_URL"] != nil {
+                    Text(preview.debugSnapshot).font(.caption2).frame(width: 1, height: 1).opacity(0.01)
+                        .accessibilityIdentifier("douyin.music.playbackProbe")
+                }
+                #endif
+            }
     }
 
     private func uncollect(_ m: DYMusicInfo) async {
@@ -679,7 +687,25 @@ private final class DYCollectedMusicPlayer: ObservableObject {
         ]
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DOUDUO_MUSIC_FIXTURE_URL"] != nil { objectWillChange.send() }
+        #endif
     }
+
+    #if DEBUG
+    var debugSnapshot: String {
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        let seconds = player?.currentTime().seconds ?? 0
+        let result: [String: Any] = [
+            "seconds": seconds.isFinite ? seconds : 0,
+            "rate": player?.rate ?? 0,
+            "title": info[MPMediaItemPropertyTitle] as? String ?? "",
+            "remoteOwner": DDRemoteOwner.instance == owner,
+            "category": AVAudioSession.sharedInstance().category.rawValue
+        ]
+        return (try? String(data: JSONSerialization.data(withJSONObject: result), encoding: .utf8)) ?? "{}"
+    }
+    #endif
 
     private func finish(_ item: AVPlayerItem, failed: Bool) {
         guard player?.currentItem === item else { return }

@@ -754,6 +754,13 @@ final class DouyinBridge: NSObject, ObservableObject, WKNavigationDelegate {
     /// insert：要「插到最前」的评论 cid（逗号分隔，一级评论在前、楼中楼在后）。网页从消息点评论跳视频就是这么定位的，
     /// 实测传楼中楼 cid 时会把它的一级评论顶到第一条，并把那条回复放进 reply_comment。
     func fetchComments(_ id: String, cursor: Int, insert: String? = nil) async throws -> (items: [DYComment], cursor: Int, hasMore: Bool, total: Int) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DOUDUO_PERSONAL_LAYOUT"] == "1" {
+            return ([DYComment(id: "readonly-comment", text: "Comments remain below the complete video or photo.",
+                name: "Layout test", avatar: nil, digg: 2, time: Date().timeIntervalSince1970,
+                replies: 0, ip: nil)], 1, false, 1)
+        }
+        #endif
         let d = try await call(Self.commentJS, args: ["id": id, "cursor": String(cursor), "ins": insert ?? ""])
         let p = try JSONDecoder().decode(DYCommentPage.self, from: d)
         guard p.status == 200 else { throw DYError.blocked("HTTP \(p.status)") }
@@ -5010,6 +5017,7 @@ struct DYCommentPanel: View {
             .padding(.trailing, horizontalStatus ? max(trailingInset, 100) : trailingInset)
             .contentShape(Rectangle())
             .modifier(DYPanelDismissGesture(allowsSwipeRight: true, onClose: onClose))
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("douyin.comments.header")
             Divider().opacity(0.4)
             ScrollViewReader { proxy in
@@ -5299,6 +5307,7 @@ extension DYFeedModel {
         let regionFixture = ProcessInfo.processInfo.environment["DOUDUO_REGION_FIXTURE"] == "1"
         let video = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("search-playback-fixture.mp4")
+        let photo = ProcessInfo.processInfo.environment["DOUDUO_PHOTO_FIXTURE_URL"]
         return [("hashtag-cat", "日常 #猫咪 #旅行\n" + String(repeating: "这段简介用于检查展开后的标签点击与换行。", count: 8) + " #摄影"),
          ("hashtag-travel", "周末记录 #旅行"),
          ("hashtag-plain", "这是一段没有标签的普通简介，提到猫咪也不会被屏蔽。")].map { id, text in
@@ -5307,7 +5316,7 @@ extension DYFeedModel {
                     desc: text, width: playable ? (portrait ? 360 : 640) : 1080,
                     height: playable ? (portrait ? 640 : 360) : 1920, duration: playable ? 60 : 0,
                     play: offlineFixture ?? (playable ? video.absoluteString : nil),
-                    cover: nil, images: grid ? ["data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271%27 height=%271%27/%3E"] : [], author: .init(name: "标签功能测试", avatar: nil, secUid: nil),
+                    cover: nil, images: grid ? [photo ?? "data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271%27 height=%271%27/%3E"] : [], author: .init(name: "标签功能测试", avatar: nil, secUid: nil),
                     stats: .init(digg: 0, comment: 0, collect: 0, share: 0), music: "",
                     userDigged: nil, isCollect: nil, publishedAt: 1,
                     hashtagNames: id == "hashtag-cat" ? ["猫咪", "旅行", "摄影", "美食", "科技", "自然", "城市漫步", "运动"] : nil)

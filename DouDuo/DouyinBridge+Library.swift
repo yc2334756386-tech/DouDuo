@@ -207,7 +207,13 @@ extension DouyinBridge {
     }
 
     func collectedMusic(cursor: String) async throws -> (items: [DYMusicInfo], cursor: String, hasMore: Bool) {
-        try await page(Self.musicListCollectionJS, ["cursor": cursor], DYMusicInfo.self)
+        #if DEBUG
+        if let url = ProcessInfo.processInfo.environment["DOUDUO_MUSIC_FIXTURE_URL"] {
+            return ([DYMusicInfo(id: "music-regression", title: "Background audio test", author: "DouDuo",
+                cover: nil, duration: 120, playURL: url)], "0", false)
+        }
+        #endif
+        return try await page(Self.musicListCollectionJS, ["cursor": cursor], DYMusicInfo.self)
     }
 
     /// 收藏 / 取消收藏音乐（music/collect，type=action=1/0；3007005 = 已收藏过，当成功）

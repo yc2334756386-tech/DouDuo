@@ -178,7 +178,9 @@ struct DouDuoApp: App {
         WindowGroup {
             Group {
                 #if DEBUG
-                if ProcessInfo.processInfo.environment["DOUDUO_SHARE_LAYOUT"] == "1" {
+                if ProcessInfo.processInfo.environment["DOUDUO_MUSIC_FIXTURE_URL"] != nil {
+                    DYCollectedMusicScreen(bridge: actTestBridge)
+                } else if ProcessInfo.processInfo.environment["DOUDUO_SHARE_LAYOUT"] == "1" {
                     DYForwardLayoutProbe()
                 } else if let rel = ProcessInfo.processInfo.environment["DOUDUO_RELATIONS_PROBE"],
                           rel == "following" || rel == "followers" {
