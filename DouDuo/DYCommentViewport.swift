@@ -337,7 +337,7 @@ private final class DYReusableCommentCell: UITableViewCell {
 struct DYViewportThumbnail: UIViewRepresentable {
     let url: URL?
     let maxPixel: Int
-    func makeUIView(context: Context) -> DYViewportImageView { DYViewportImageView() }
+    func makeUIView(context: Context) -> DYViewportImageView { DYViewportImageView(frame: .zero) }
     func updateUIView(_ view: DYViewportImageView, context: Context) { view.configure(url: url, maxPixel: maxPixel) }
     static func dismantleUIView(_ view: DYViewportImageView, coordinator: ()) { view.releaseImage() }
 }
