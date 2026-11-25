@@ -70,6 +70,13 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                 // 侧栏评论时视频区要裁边：播放器的环境光底（DYAmbientBackdrop）会铺满整屏宽，盖住右侧评论栏
                 //（内屏横屏评论纯黑的根因；dd405e6 拿掉这个裁边后 11-18 晚复发，老板 11-19 指出之前修过）。
                 .modifier(DDClipIf(on: layout.showsPane))
+                .overlay {
+                    if showComments, !showsAuthorPane {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { showComments = false }
+                            .accessibilityLabel("关闭评论")
+                            .accessibilityAddTraits(.isButton)
+                    }
+                }
             if layout.showsPane {
                 Group {
                     if showsAuthorPane {
@@ -113,6 +120,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                 }
                 .padding(.leading, layout.paneOrigin.x)
                 .padding(.top, layout.paneOrigin.y)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .frame(width: w, height: h, alignment: .topLeading)
@@ -155,7 +163,7 @@ struct DYCommentStage<Feed: View, Author: View>: View {
         }
         .background((layout.resident ? Color.black : theme.media.strongScrim.color(for: scheme)).ignoresSafeArea())
         .animation(showSearch ? nil : .snappy, value: layout.resident)
-        .animation(!showSearch && layout.sideBySide ? .snappy : nil, value: showComments)
+        .animation(showSearch ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: showComments)
         .animation(showSearch ? nil : .snappy, value: authorPane?.id)
         .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: aweme,
                                          onClose: { showComments = false }))

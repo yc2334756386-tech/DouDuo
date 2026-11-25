@@ -1687,7 +1687,6 @@ struct DYSearchScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var state: DYSearchSession
     @State private var open: DYListTarget?
-    @State private var webSearch: DYWebTarget?
 
     init(bridge: DouyinBridge, onAuthor: @escaping (DYAweme) -> Void, initialQuery: String = "",
          session: DYSearchSession? = nil, onClose: (() -> Void)? = nil) {
@@ -1726,7 +1725,7 @@ struct DYSearchScreen: View {
                         .onSubmit { run(state.keyword) }
                         .accessibilityIdentifier("douyin.search.field")
                     if !state.keyword.isEmpty {
-                        Button { state.keyword = ""; state.lastRun = ""; state.model = nil; focused = true } label: {
+                        Button { state.transport?.close(); state.transport = nil; state.keyword = ""; state.lastRun = ""; state.model = nil; focused = true } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(Color.primary.opacity(0.5))
                         }
                         .accessibilityLabel("清空搜索")
@@ -1744,23 +1743,11 @@ struct DYSearchScreen: View {
             .padding(.top, 18).padding(.bottom, 12)
 
             if let model = state.model {
-                DYSearchResults(model: model, keyword: state.lastRun, onOpen: { i in
+                DYSearchResults(model: model, transport: state.transport, onOpen: { i in
                     state.presentsVideo = true
                     open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
                 })
                 .id(state.lastRun)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Button("在抖音网页版继续搜索", systemImage: "safari") {
-                        guard let url = Self.videoSearchURL(state.lastRun) else { return }
-                        state.presentsVideo = true
-                        webSearch = DYWebTarget(url: url)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial)
-                    .accessibilityIdentifier("douyin.search.web")
-                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1830,6 +1817,8 @@ struct DYSearchScreen: View {
             }
             guard value != state.lastRun else { return }
             state.model = nil
+            state.transport?.close()
+            state.transport = nil
             #if DEBUG
             if ProcessInfo.processInfo.environment["DOUDUO_SEARCH_FIXTURE"] == "1" { return }
             #endif
@@ -1841,9 +1830,6 @@ struct DYSearchScreen: View {
         .fullScreenCover(item: $open, onDismiss: { state.presentsVideo = false }) { t in
             DYListPlayer(bridge: bridge, title: t.title, playback: t.playback,
                          loadMore: t.model.map { m in { await m.loadMore() } }, onAuthor: onAuthor, presentsAuthor: true)
-        }
-        .fullScreenCover(item: $webSearch, onDismiss: { state.presentsVideo = false }) { target in
-            DouyinWebScreen(start: target.url)
         }
     }
 
@@ -1895,7 +1881,10 @@ struct DYSearchScreen: View {
         var h = history.filter { $0 != w }
         h.insert(w, at: 0)
         historyRaw = h.prefix(15).joined(separator: "\n")
-        let m = DYPagedModel { [bridge] cur in try await bridge.search(w, offset: cur) }
+        state.transport?.close()
+        let transport = DYNativeSearchTransport(keyword: w)
+        state.transport = transport
+        let m = DYPagedModel { cur in try await transport.page(cur) }
         state.model = m
         Task { await m.loadMore() }
     }
@@ -1903,34 +1892,24 @@ struct DYSearchScreen: View {
 
 private struct DYSearchResults: View {
     @ObservedObject var model: DYPagedModel
-    let keyword: String
+    let transport: DYNativeSearchTransport?
     let onOpen: (Int) -> Void
-    @State private var usesWebResults = false
     var body: some View {
-        Group {
-            if usesWebResults, let url = DYSearchScreen.videoSearchURL(keyword) {
-                DYEmbeddedSearchResults(url: url)
-            } else {
-                DYGrid(items: model.items, hasMore: model.hasMore, loading: model.loading, error: model.error,
-                       onLoadMore: { Task { await model.loadMore() } }, onOpen: onOpen)
+        VStack(spacing: 0) {
+            DYGrid(items: model.items, hasMore: model.hasMore, loading: model.loading, error: model.error,
+                   onLoadMore: { Task { await model.loadMore() } }, onOpen: onOpen,
+                   onRefresh: { await model.refresh() })
+            if model.error != nil {
+                Button("重试搜索") { Task { await model.refresh() } }
+                    .padding(.vertical, 12)
             }
         }
-        .onChange(of: model.loading, initial: true) { _, loading in
-            if !loading && !model.hasMore && model.items.isEmpty { usesWebResults = true }
-        }
-    }
-}
-
-private struct DYEmbeddedSearchResults: View {
-    let url: URL
-    @StateObject private var model = DouyinWebModel()
-
-    var body: some View {
-        DouyinWebContainer(model: model, zoom: 1, start: url)
-            .accessibilityIdentifier("douyin.search.officialResults")
-            .overlay(alignment: .top) {
-                if model.progress < 1 { ProgressView(value: model.progress).tint(.accentColor) }
+        .background(alignment: .topLeading) {
+            if let transport {
+                DYNativeSearchHost(transport: transport).frame(width: 1, height: 1)
+                    .opacity(0.01).allowsHitTesting(false).accessibilityHidden(true)
             }
+        }
     }
 }
 

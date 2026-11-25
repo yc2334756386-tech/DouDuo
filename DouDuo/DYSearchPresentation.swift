@@ -9,6 +9,7 @@ final class DYSearchSession: Identifiable {
     var suggestions: [DYSug] = []
     var hot: [DYHot] = []
     var model: DYPagedModel?
+    var transport: DYNativeSearchTransport?
     var lastRun = ""
     var initialized = false
     // Keep the host suspended through the result player's dismissal animation.

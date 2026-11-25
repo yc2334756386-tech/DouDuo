@@ -2390,7 +2390,6 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                             .font(.headline.weight(tab == t ? .bold : .medium))
                             .foregroundStyle(theme.media.onMedia.color(for: scheme).opacity(tab == t ? 1 : 0.62))
                             .lineLimit(1).fixedSize()
-                            .opacity(0)
                         Capsule()
                             .fill(theme.media.onMedia.color(for: scheme))
                             .frame(width: 16, height: 3)
@@ -2415,7 +2414,6 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                         .font(.headline.weight(.medium))
                         .foregroundStyle(theme.media.onMedia.color(for: scheme).opacity(0.62))
                         .lineLimit(1).fixedSize()
-                        .opacity(0)
                     Capsule().frame(width: 16, height: 3).opacity(0)
                 }
                 .padding(.horizontal, hPad)
@@ -2619,7 +2617,7 @@ struct DYUpstreamFeedScreen: DYRecommendFeedHost {
                         messagesStartOnMine = false; showMessages = true
                     }
                     minimalMenuRow("我的", "person.crop.circle", id: "douyin.module.mine") {
-                        messagesStartOnMine = true; showMessages = true
+                        showMine = true
                     }
                 }
                 .padding(.vertical, 8)
@@ -3829,7 +3827,6 @@ struct DYClassicFeedScreen: DYRecommendFeedHost {
                     VStack(spacing: 3) {
                         Text(channel.title).font(.headline.weight(tab == channel ? .bold : .medium))
                             .foregroundStyle(.white.opacity(tab == channel ? 1 : 0.62))
-                            .opacity(0)
                         Capsule().fill(.white).frame(width: 16, height: 3)
                             .opacity(tab == channel ? 1 : 0)
                     }
@@ -4968,6 +4965,7 @@ struct DYCommentPanel: View {
     let trailingInset: CGFloat
     let horizontalStatus: Bool
     @Environment(\.dyExpandedCaptionID) private var expandedCaptionID
+    @Environment(\.colorScheme) private var commentScheme
     @State private var items: [DYComment] = []
     @State private var cursor = 0
     @State private var total = 0
@@ -4996,6 +4994,16 @@ struct DYCommentPanel: View {
     }
 
     var body: some View {
+        ZStack {
+            GeometryReader { geometry in
+                CachedAsyncImage(url: (aweme.images.first ?? aweme.cover).flatMap(URL.init(string:))) {
+                    $0.resizable().scaledToFill()
+                } placeholder: { Color.clear }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .blur(radius: 28)
+                    .overlay(commentScheme == .dark ? Color.black.opacity(0.48) : Color.white.opacity(0.65))
+                    .clipped()
+            }
         VStack(spacing: 0) {
             if expandedCaptionID == aweme.id {
                 DYVideoCaptionHeader(bridge: bridge, aweme: aweme, onClose: nil)
@@ -5063,6 +5071,8 @@ struct DYCommentPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .dyPanelGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("douyin.comments.panel")

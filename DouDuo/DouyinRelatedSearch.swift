@@ -1,4 +1,213 @@
 import SwiftUI
+import WebKit
+
+@MainActor
+final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
+    typealias Page = (items: [DYAweme], cursor: String, hasMore: Bool)
+    let web: WKWebView
+    private let keyword: String
+    private var pending: CheckedContinuation<Page, Error>?
+    private var timeout: Task<Void, Never>?
+    private var settle: Task<Void, Never>?
+    private var buffered: [DYAweme] = []
+    private var seen: Set<String> = []
+    private var delivered = 0
+    private var hasMore = true
+    private var started = false
+    private var generation = 0
+
+    init(keyword: String) {
+        self.keyword = keyword
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        config.defaultWebpagePreferences.preferredContentMode = .desktop
+        config.mediaTypesRequiringUserActionForPlayback = .all
+        DYLogoutBlock.install(in: config)
+        let receiver = DYNativeSearchReceiver()
+        config.userContentController.add(receiver, name: "ddNativeSearch")
+        config.userContentController.addUserScript(WKUserScript(source: Self.captureJS,
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        web = WKWebView(frame: CGRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
+        super.init()
+        receiver.owner = self
+        web.customUserAgent = DouyinWeb.userAgent
+        web.navigationDelegate = self
+    }
+
+    func page(_ cursor: String) async throws -> Page {
+        if cursor == "0" {
+            close()
+            seen.removeAll()
+            delivered = 0
+            hasMore = true
+        }
+        if !buffered.isEmpty { return takeBuffered() }
+        guard hasMore else { return ([], String(delivered), false) }
+        return try await withCheckedThrowingContinuation { continuation in
+            pending = continuation
+            timeout = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(12)) } catch { return }
+                guard let self else { return }
+                self.fail("搜索请求超时，点重试搜索。如账号需要验证，请先在「我的」中登录。")
+            }
+            if !started {
+                started = true
+                Task { [weak self] in
+                    _ = await DYAccountStore.shared.restoreCurrentSessionIfMissing()
+                    guard let self, self.pending != nil,
+                          let url = DYSearchScreen.videoSearchURL(self.keyword) else { return }
+                    self.web.load(URLRequest(url: url))
+                }
+            } else {
+                web.evaluateJavaScript(Self.scrollJS, completionHandler: nil)
+            }
+        }
+    }
+
+    func close() {
+        generation += 1
+        timeout?.cancel()
+        settle?.cancel()
+        pending?.resume(throwing: CancellationError())
+        pending = nil
+        buffered.removeAll()
+        started = false
+        web.stopLoading()
+    }
+
+    fileprivate func receive(_ raw: String) async {
+        let requestGeneration = generation
+        let script = DouyinBridge.requestJS + Self.mapJS
+        guard let value = try? await web.callAsyncJavaScript(script,
+            arguments: ["responseText": raw], contentWorld: .page),
+              let text = value as? String, let data = text.data(using: .utf8),
+              let result = try? JSONDecoder().decode(SearchResponse.self, from: data),
+              requestGeneration == generation else { return }
+        if let code = result.code, code != 0 {
+            fail(code == 8 ? "搜索需要登录，请在「我的」中完成登录。" : "搜索暂时不可用，请稍后重试。")
+            return
+        }
+        for item in result.items where item.play != nil || !item.images.isEmpty {
+            if seen.insert(item.id).inserted { buffered.append(item) }
+        }
+        if let more = result.hasMore { hasMore = more }
+        guard !buffered.isEmpty || !hasMore else { return }
+        settle?.cancel()
+        settle = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard let self, let continuation = self.pending else { return }
+            self.pending = nil
+            self.timeout?.cancel()
+            continuation.resume(returning: self.takeBuffered())
+        }
+    }
+
+    private func takeBuffered() -> Page {
+        let items = buffered
+        buffered.removeAll()
+        delivered += items.count
+        return (items, String(delivered), hasMore)
+    }
+
+    private func fail(_ message: String) {
+        guard let continuation = pending else { return }
+        pending = nil
+        timeout?.cancel()
+        settle?.cancel()
+        continuation.resume(throwing: DYError.bad(message))
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code != NSURLErrorCancelled { fail("搜索连接失败，点重试搜索。") }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        started = false
+        fail("搜索页面已暂停，点重试搜索。")
+    }
+
+    private struct SearchResponse: Decodable {
+        let items: [DYAweme]
+        let hasMore: Bool?
+        let code: Int?
+    }
+
+    private static let captureJS = #"""
+    (() => {
+      const wanted = url => /\/(?:search\/item|general\/search\/(?:single|stream))(?:[/?]|$)/.test(String(url));
+      const post = text => { try { window.webkit.messageHandlers.ddNativeSearch.postMessage(text); } catch (_) {} };
+      const fetch = window.fetch;
+      window.fetch = function(input) {
+        const url = typeof input === 'string' ? input : input && input.url;
+        return fetch.apply(this, arguments).then(response => {
+          if (wanted(url) || wanted(response.url)) response.clone().text().then(post).catch(() => {});
+          return response;
+        });
+      };
+      const open = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        if (wanted(url)) this.addEventListener('load', function() {
+          try { post(typeof this.response === 'string' ? this.response : JSON.stringify(this.response)); } catch (_) {}
+        });
+        return open.apply(this, arguments);
+      };
+      const stopMedia = () => document.querySelectorAll('video,audio').forEach(media => { media.muted = true; media.pause(); });
+      document.addEventListener('play', stopMedia, true);
+      document.addEventListener('DOMContentLoaded', stopMedia);
+    })();
+    """#
+
+    private static let mapJS = #"""
+    const ddRoot = parse(responseText);
+    const ddFrames = ddRoot ? [ddRoot] : String(responseText).split(/\r?\n/).map(line => parse(line.replace(/^data:\s*/, ''))).filter(Boolean);
+    const ddItems = [], ddSeen = new Set();
+    const ddVisit = (node, depth) => {
+      if (!node || typeof node !== 'object' || depth > 10) return;
+      if (node.aweme_id && (node.video || node.images)) {
+        const id = String(node.aweme_id);
+        if (!ddSeen.has(id) && !node.is_ads) { ddSeen.add(id); ddItems.push(mapA(node)); }
+        return;
+      }
+      for (const value of Object.values(node)) ddVisit(value, depth + 1);
+    };
+    for (const frame of ddFrames) ddVisit(frame, 0);
+    const ddMeta = ddFrames.find(frame => frame && frame.has_more != null);
+    const ddCode = ddFrames.find(frame => frame && frame.status_code != null);
+    return JSON.stringify({ items: ddItems, hasMore: ddMeta ? Number(ddMeta.has_more) === 1 : null,
+      code: ddCode ? Number(ddCode.status_code) : null });
+    """#
+
+    private static let scrollJS = #"""
+    (() => {
+      const candidates = [...document.querySelectorAll('main,[role="main"],div')]
+        .filter(element => element.clientHeight > 180 && element.scrollHeight > element.clientHeight + 80);
+      candidates.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
+      for (const element of candidates.slice(0, 4)) { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event('scroll', {bubbles:true})); }
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      window.dispatchEvent(new Event('scroll'));
+    })();
+    """#
+}
+
+private final class DYNativeSearchReceiver: NSObject, WKScriptMessageHandler {
+    weak var owner: DYNativeSearchTransport?
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let text = message.body as? String else { return }
+        Task { @MainActor [weak owner] in await owner?.receive(text) }
+    }
+}
+
+struct DYNativeSearchHost: UIViewRepresentable {
+    let transport: DYNativeSearchTransport
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView(frame: .zero)
+        container.clipsToBounds = true
+        container.isUserInteractionEnabled = false
+        container.addSubview(transport.web)
+        return container
+    }
+    func updateUIView(_ view: UIView, context: Context) {}
+}
 
 extension DouyinBridge {
     /// 网页真实的 related_search 推荐词；接口无词时不展示，不用标题或本地词凑数。

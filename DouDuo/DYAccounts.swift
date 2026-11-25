@@ -21,6 +21,8 @@ final class DYAccountStore: ObservableObject {
     @Published private(set) var accounts: [DYSavedAccount] = []
     /// 当前登录的账号 uid（只是记录，真实登录态以 cookie 为准）
     @Published private(set) var currentID: String?
+    private var restoringSession = false
+    private var lastSessionRestore = Date.distantPast
 
     private static let listKey = "douduo_accounts_v1"
     private static let currentKey = "douduo_account_current_v1"
@@ -114,11 +116,35 @@ final class DYAccountStore: ObservableObject {
     }
 
     /// 当前账号的 cookie 刷新一份进 Keychain（只有当前 sessionid 属于记录的那个账号才存）
-    private func refreshCurrentSnapshot() async {
+    func refreshCurrentSnapshot() async {
         guard let id = currentID, accounts.contains(where: { $0.id == id }) else { return }
         let cookies = await Self.douyinCookies()
         guard cookies.contains(where: { $0.name == "sessionid" && !$0.value.isEmpty }), let blob = Self.encode(cookies) else { return }
         Self.keychainSet(blob, account: id)
+    }
+
+    func restoreCurrentSessionIfMissing() async -> Bool {
+        guard !restoringSession, DYSessionWatch.shared.suppressed == 0,
+              !DYSessionWatch.shared.loginScreenOpen,
+              Date().timeIntervalSince(lastSessionRestore) > 300,
+              let id = currentID, let blob = Self.keychainGet(account: id),
+              let saved = Self.decode(blob), !(await DYLoginState.hasSession()) else { return false }
+        let valid = saved.filter { $0.expiresDate.map { $0 > Date() } ?? true }
+        guard valid.contains(where: { $0.name == "sessionid" && !$0.value.isEmpty }) else { return false }
+        restoringSession = true
+        DYSessionWatch.shared.suppressed += 1
+        defer { restoringSession = false; DYSessionWatch.shared.suppressed -= 1 }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        let present = await store.allCookies()
+        for cookie in valid where !present.contains(where: {
+            $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path && !$0.value.isEmpty
+        }) { await store.setCookie(cookie) }
+        let restored = await DYLoginState.hasSession()
+        if restored {
+            lastSessionRestore = Date()
+            DYLiveModel.log("DDSESSION restored valid current-account cookies")
+        }
+        return restored
     }
 
     private func persist() {

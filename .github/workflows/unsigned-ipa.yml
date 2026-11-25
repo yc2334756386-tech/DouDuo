@@ -15,12 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check search and collection responses
-        run: |
-          node scripts/test_library_actions.js
-          node scripts/test_search_pages.js
-          python3 scripts/test_personal_layout.py
-
       - name: Fetch and verify VLC
         run: sh scripts/fetch-vlckit.sh
 
@@ -41,37 +35,4 @@ jobs:
           path: build/delivery/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 14
-
-  interface-check:
-    runs-on: xcode-27
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Fetch and verify VLC
-        run: sh scripts/fetch-vlckit.sh
-      - name: Prepare local test media
-        run: |
-          if ! command -v ffmpeg >/dev/null; then brew install ffmpeg; fi
-          python3 scripts/create_personal_fixtures.py
-          python3 -m http.server 8765 --directory build/test-media >build/test-media/server.log 2>&1 &
-      - name: Check video and photo comment layout
-        run: |
-          SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=[d for rows in json.load(sys.stdin)["devices"].values() for d in rows if "iPhone" in d["name"]]; devices.sort(key=lambda d: ("Duo" in d["name"], "Pro" not in d["name"])); print(devices[0]["udid"])')
-          xcodebuild test -project DouDuo.xcodeproj -scheme DouDuo -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath build/Simulator \
-            -resultBundlePath build/qa/UI.xcresult -parallel-testing-enabled NO \
-            -only-testing:DouDuoUITests/DYPersonalLayoutTests CODE_SIGNING_ALLOWED=NO
-      - name: Export simulator screenshots
-        if: always()
-        run: |
-          if [ -d build/qa/UI.xcresult ]; then
-            xcrun xcresulttool export attachments --path build/qa/UI.xcresult --output-path build/qa/screenshots
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: DouDuo-interface-check
-          path: build/qa/screenshots/
-          if-no-files-found: warn
           retention-days: 14

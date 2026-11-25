@@ -536,6 +536,7 @@ struct DouyinWebContainer: UIViewRepresentable {
                             scheme: ColorScheme? = nil) -> WKWebView {
         let isChat = DDWebAppearance.isChatURL(start)
         let cfg = WKWebViewConfiguration()
+        DYLogoutBlock.install(in: cfg)
         DDWebAppearance.install(in: cfg)
         cfg.websiteDataStore = .default()            // 登录态持久化
         DYKeyStateProbe.install(in: cfg, tag: isChat ? "chat" : "web")

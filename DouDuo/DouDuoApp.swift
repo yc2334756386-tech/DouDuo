@@ -10,6 +10,7 @@ final class DouDuoAppDelegate: NSObject, UIApplicationDelegate {
     }
     func applicationDidEnterBackground(_ application: UIApplication) {
         DDPlayback.shared.pauseAll()
+        Task { @MainActor in await DYAccountStore.shared.refreshCurrentSnapshot() }
     }
     func applicationDidBecomeActive(_ application: UIApplication) {
         // 只有「之前真被切过后台」才恢复，避免启动时抢跑播放

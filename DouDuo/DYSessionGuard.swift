@@ -42,6 +42,22 @@ enum DYLogoutBlock {
 
     /// 后台网页的配置里挂上拦截；规则还没编译完就记下来，编译完补挂
     @MainActor static func install(in cfg: WKWebViewConfiguration) {
+        cfg.userContentController.addUserScript(WKUserScript(source: #"""
+        (() => {
+          const blocked = u => { try { return /douyin\.com\/passport\/(?:web\/)?(?:logout|log_out)(?:[/?]|$)/i.test(new URL(u, location.href).href); } catch (_) { return false; } };
+          const fetch = window.fetch;
+          window.fetch = function(input, options) {
+            if (blocked(typeof input === 'string' ? input : input && input.url)) return Promise.reject(new TypeError('Background logout blocked'));
+            return fetch.apply(this, arguments);
+          };
+          const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function(method, url) { this.__ddLogoutBlocked = blocked(url); return open.apply(this, arguments); };
+          XMLHttpRequest.prototype.send = function() {
+            if (this.__ddLogoutBlocked) { this.abort(); this.dispatchEvent(new Event('error')); return; }
+            return send.apply(this, arguments);
+          };
+        })();
+        """#, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         if let list { cfg.userContentController.add(list); return }
         waiting.append(WeakController(cfg.userContentController))
         prepare()
@@ -53,6 +69,7 @@ final class DYSessionWatch: NSObject, WKHTTPCookieStoreObserver {
     static let shared = DYSessionWatch()
     private var last: String??
     private var started = false
+    private var pendingCheck: Task<Void, Never>?
     /// App 自己在退出 / 切换账号 / 登录页里：这时 sessionid 消失是预期内的，不弹
     var suppressed = 0
     var loginScreenOpen = false
@@ -61,15 +78,30 @@ final class DYSessionWatch: NSObject, WKHTTPCookieStoreObserver {
         guard !started else { return }
         started = true
         WKWebsiteDataStore.default().httpCookieStore.add(self)
-        Task { last = .some(await DYLoginState.sessionValue()) }
+        Task {
+            if await DYAccountStore.shared.restoreCurrentSessionIfMissing() { DouyinBridge.primary?.reload() }
+            last = .some(await DYLoginState.sessionValue())
+            await DYAccountStore.shared.refreshCurrentSnapshot()
+        }
     }
 
     nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        Task { @MainActor in await self.check() }
+        Task { @MainActor in
+            self.pendingCheck?.cancel()
+            self.pendingCheck = Task {
+                do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+                await self.check()
+            }
+        }
     }
 
     private func check() async {
-        let now = await DYLoginState.sessionValue()
+        var now = await DYLoginState.sessionValue()
+        if now == nil, await DYAccountStore.shared.restoreCurrentSessionIfMissing() {
+            now = await DYLoginState.sessionValue()
+            DouyinBridge.primary?.reload()
+        }
+        if now != nil, suppressed == 0, !loginScreenOpen { await DYAccountStore.shared.refreshCurrentSnapshot() }
         defer { last = .some(now) }
         guard case .some(let before) = last else { return }
         if Self.isLoss(before: before, now: now, suppressed: suppressed > 0 || loginScreenOpen) {
