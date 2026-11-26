@@ -17,18 +17,18 @@
     try { return typeof window.byted_acrawler !== 'undefined' && !/native code/.test(XMLHttpRequest.prototype.send.toString()) && !/native code/.test(window.fetch.toString()); }
     catch (_) { return false; }
   };
+  const readHooked=()=>{try{return typeof window.byted_acrawler!=='undefined'&&!/native code/.test(XMLHttpRequest.prototype.send.toString());}catch(_){return false;}};
   // One background wait, rather than an eight-second wait for every read operation.
   const initialization = (async () => {
-    const deadline = Date.now()+16000;
-    while (!hooked() && Date.now()<deadline) await delay(150);
+    const deadline = Date.now()+8000;
+    while (!readHooked() && Date.now()<deadline) await delay(150);
     // Keep the official page DOM and its security/session lifecycle intact.
-    if(hooked()) await delay(400);
-    return hooked();
+    if(readHooked()) await delay(400);
+    return readHooked();
   })();
   async function writeReady() {
     if(hooked()) return;
-    const prepared=await initialization;
-    if(!prepared)throw new Error('网页安全组件尚未就绪，请点重新加载；登录信息不会因此清除');
+    await initialization;
     const until=Date.now()+2500;
     while(!hooked() && Date.now()<until) await delay(150);
     if(!hooked()) throw new Error('账号签名页尚未就绪，请稍后再试或打开登录网页完成验证');
@@ -51,7 +51,7 @@
     const data=parse(response.body);
     if(data && Number(data.status_code)===8) throw new Error('登录已失效，请重新登录');
     const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
-    const actualContent=data&&(Array.isArray(data.aweme_list)||Array.isArray(data.comments)||data.user||data.user_info||Array.isArray(data.data));
+    const actualContent=data&&((Array.isArray(data.aweme_list)&&data.aweme_list.length)||(Array.isArray(data.comments)&&data.comments.length)||data.user||data.user_info||(Array.isArray(data.data)&&data.data.length));
     if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
     if(data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) throw new Error('平台要求安全验证，请在登录页完成后返回');
     if(options.strict && (!data||data.status_code==null)) throw new Error('操作结果未确认，请刷新核对，避免连续重试');
@@ -108,6 +108,7 @@
     try {
       if(operation==='feed'){
         const data=await get('/aweme/v1/web/tab/feed/',{count:'10',refresh_index:String(params.refresh||1),video_type_select:'1',aweme_pc_rec_raw_data:JSON.stringify({is_client:false,ff_danmaku_status:0,danmaku_switch_status:0}),globalwid:'',pull_type:Number(params.refresh||1)<3?'0':'2',min_window:'0',free_right:'0',ug_source:'',creative_id:''});
+        if(!Array.isArray(data.aweme_list))throw new Error('推荐接口没有返回作品，请稍后刷新；当前登录信息会保留');
         return page(data,data.aweme_list,data.cursor||params.refresh||'0',data.has_more==null?true:data.has_more);
       }
       if(operation==='followFeed'){

@@ -24,6 +24,7 @@ void DGSessionCapture(void (^completion)(void)){
  }];
 }
 void DGSessionRestore(void (^completion)(void)){
+ static BOOL attempted=NO;if(attempted){if(completion)completion();return;}attempted=YES;
  [WKWebsiteDataStore.defaultDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){
   if(DGHasSession(cookies)){if(completion)completion();return;}
   NSMutableDictionary *query=[DGKey() mutableCopy];query[(__bridge id)kSecReturnData]=@YES;query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;CFTypeRef value=NULL;OSStatus status=SecItemCopyMatching((__bridge CFDictionaryRef)query,&value);NSData *data=status==errSecSuccess?CFBridgingRelease(value):nil;
