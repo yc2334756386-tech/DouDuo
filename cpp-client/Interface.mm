@@ -169,7 +169,7 @@ static AVURLAsset *Asset(NSString *url) {
 }
 @end
 
-@interface DGFeedCell : UICollectionViewCell <UIScrollViewDelegate>
+@interface DGFeedCell : UICollectionViewCell <UIScrollViewDelegate, UIGestureRecognizerDelegate>
 @property(nonatomic, copy) void (^commentsAction)(void);
 - (void)display:(const Work &)work;
 - (void)active:(BOOL)active;
@@ -224,7 +224,7 @@ static AVURLAsset *Asset(NSString *url) {
         [_slider addTarget:self action:@selector(seekEnd) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
         [self.contentView addSubview:_slider];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
-        tap.cancelsTouchesInView = NO; [self.contentView addGestureRecognizer:tap];
+        tap.cancelsTouchesInView = NO; tap.delegate = self; [self.contentView addGestureRecognizer:tap];
     }
     return self;
 }
@@ -321,6 +321,12 @@ static AVURLAsset *Asset(NSString *url) {
 - (void)toggle {
     if (_observedItem.status == AVPlayerItemStatusFailed) { _alternateUsed = NO; [self playURL:Text(_work.play)]; return; }
     _manuallyPaused = !_manuallyPaused; _pause.hidden = !_manuallyPaused; [self active:_active];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
+    for (UIView *view = touch.view; view && view != self.contentView; view = view.superview) {
+        if ([view isKindOfClass:UIControl.class]) return NO;
+    }
+    return YES;
 }
 - (void)comments { if (self.commentsAction) self.commentsAction(); }
 - (void)loadPhotos {

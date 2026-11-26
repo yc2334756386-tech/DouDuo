@@ -27,7 +27,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "$OUTPUT/Core.o" "$CLIENT/DGBridge.mm" "$CLIENT/Interface.mm" "$CLIENT/main.mm" \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
-  -framework CoreMedia -framework QuartzCore -framework ImageIO -framework AudioToolbox \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$ROOT/LICENSE" "$APP/DOUDUO-LICENSE.txt"
