@@ -1,5 +1,33 @@
 import SwiftUI
 
+enum DYSearchOrder: String, CaseIterable, Identifiable {
+    case standard = "默认"
+    case plays = "最高播放量"
+    case latest = "最新日期"
+    var id: String { rawValue }
+    var apiSort: String { self == .latest ? "2" : "0" }
+    func sorted(_ items: [DYAweme]) -> [DYAweme] {
+        guard self != .standard, items.count > 1 else { return items }
+        let metrics = items.map { item -> Double in
+            if self == .plays { return item.stats.play.map { Double($0) } ?? .nan }
+            return item.publishedAt ?? .nan
+        }
+        var indices = [Int32](repeating: 0, count: items.count)
+        metrics.withUnsafeBufferPointer { values in
+            indices.withUnsafeMutableBufferPointer { DYCoreRank(values.baseAddress, $0.baseAddress, $0.count) }
+        }
+        return indices.map { items[Int($0)] }
+    }
+}
+
+struct DYSearchVerificationRequired: LocalizedError {
+    var errorDescription: String? { "需要完成人机验证" }
+    static func check(_ data: Data) throws {
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if object?["verification"] as? Bool == true { throw Self() }
+    }
+}
+
 /// Owned by the video host so moving between displays keeps the query and results.
 @Observable @MainActor
 final class DYSearchSession: Identifiable {
@@ -12,6 +40,13 @@ final class DYSearchSession: Identifiable {
     var transport: DYNativeSearchTransport?
     var lastRun = ""
     var initialized = false
+    var order: DYSearchOrder = .standard
+    var requiresVerification = false
+    var verificationAttempted = false
+    var verificationSucceeded = false
+    var verificationForUsers = false
+    var verificationRetry = 0
+    let verificationCoverOwner = UUID()
     // Keep the host suspended through the result player's dismissal animation.
     var presentsVideo = false
 

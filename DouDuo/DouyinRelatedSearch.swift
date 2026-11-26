@@ -17,12 +17,15 @@ struct DYUserSearchResults: View {
     let bridge: DouyinBridge
     let query: String
     let onAuthor: (DYAweme.Author) -> Void
+    let onVerification: () -> Void
     @StateObject private var pager: DYSimplePager<DYUser>
 
-    init(bridge: DouyinBridge, query: String, onAuthor: @escaping (DYAweme.Author) -> Void) {
+    init(bridge: DouyinBridge, query: String, onAuthor: @escaping (DYAweme.Author) -> Void,
+         onVerification: @escaping () -> Void = {}) {
         self.bridge = bridge
         self.query = query
         self.onAuthor = onAuthor
+        self.onVerification = onVerification
         _pager = StateObject(wrappedValue: DYSimplePager { cursor in try await bridge.searchUsers(query, cursor: cursor) })
     }
     var body: some View {
@@ -62,6 +65,7 @@ struct DYUserSearchResults: View {
         .listStyle(.plain)
         .refreshable { await pager.reload() }
         .task { if pager.items.isEmpty { await pager.more() } }
+        .onChange(of: pager.needsVerification) { _, required in if required { onVerification() } }
     }
 }
 
@@ -72,6 +76,13 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     private let keyword: String
     private let bridge: DouyinBridge?
     private let musicID: String?
+    private let order: DYSearchOrder
+    var onNeedsVerification: (() -> Bool)?
+    var onVerificationSucceeded: (() -> Void)?
+    private(set) var isVerifying = false
+    private var verificationCompleted = false
+    private var verificationUsers = false
+    private var verificationMonitor: Task<Void, Never>?
     private var apiCursor = "0"
     private var fallback: Task<Void, Never>?
     private var pageRequest: Task<Void, Never>?
@@ -89,10 +100,11 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     private var started = false
     private var generation = 0
 
-    init(keyword: String, bridge: DouyinBridge? = nil, musicID: String? = nil) {
+    init(keyword: String, bridge: DouyinBridge? = nil, musicID: String? = nil, order: DYSearchOrder = .standard) {
         self.keyword = keyword
         self.bridge = bridge
         self.musicID = musicID
+        self.order = order
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.preferredContentMode = .desktop
@@ -133,11 +145,14 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
                 do {
                     let result: Page
                     if let musicID = self.musicID { result = try await bridge.musicVideos(musicID, cursor: requestCursor) }
-                    else { result = try await bridge.search(self.keyword, offset: requestCursor) }
+                    else { result = try await bridge.search(self.keyword, offset: requestCursor, sortType: self.order.apiSort) }
                     guard self.generation == requestGeneration, self.requestSerial == serial else { return }
                     self.apiCursor = result.cursor
                     self.accept(result.items, more: result.hasMore, validEmpty: true)
-                } catch {}
+                } catch {
+                    guard self.generation == requestGeneration, self.requestSerial == serial else { return }
+                    if error is DYSearchVerificationRequired { self.requestVerification() }
+                }
             }
             timeout = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(self?.musicID == nil ? 18 : 24)) } catch { return }
@@ -157,7 +172,7 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
                     guard let self, self.generation == requestGeneration, self.pending != nil else { return }
                     let url: URL?
                     if let musicID = self.musicID { url = URL(string: "https://www.douyin.com/music/")?.appendingPathComponent(musicID) }
-                    else { url = DYSearchScreen.videoSearchURL(self.keyword) }
+                    else { url = DYSearchScreen.videoSearchURL(self.keyword, order: self.order) }
                     guard let url else { return }
                     self.web.load(URLRequest(url: url))
                 }
@@ -185,6 +200,9 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
         pageRequest?.cancel()
         alternatePage?.cancel()
         loadingPage?.cancel()
+        verificationMonitor?.cancel()
+        isVerifying = false
+        verificationCompleted = false
         pending?.resume(throwing: CancellationError())
         pending = nil
         buffered.removeAll()
@@ -194,6 +212,14 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     }
 
     fileprivate func receive(_ raw: String) async {
+        if let data = raw.data(using: .utf8),
+           let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let kind = event["ddSearchEvent"] as? String {
+            if let term = event["keyword"] as? String, !term.isEmpty, term != keyword { return }
+            if kind == "verification" { requestVerification() }
+            else if kind == "verified", isVerifying { finishVerification() }
+            return
+        }
         let requestGeneration = generation
         let script = DouyinBridge.requestJS + Self.mapJS
         guard let value = try? await web.callAsyncJavaScript(script,
@@ -201,12 +227,17 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
               let text = value as? String, let data = text.data(using: .utf8),
               let result = try? JSONDecoder().decode(SearchResponse.self, from: data),
               requestGeneration == generation else { return }
+        if result.verification == true { requestVerification(); return }
         guard result.code == nil || result.code == 0 else { return }
         if let cursor = result.cursor, !cursor.isEmpty { apiCursor = cursor }
         accept(result.items, more: result.hasMore, validEmpty: result.code == 0)
     }
 
     private func accept(_ items: [DYAweme], more: Bool?, validEmpty: Bool = false) {
+        if isVerifying {
+            if !items.isEmpty || validEmpty { finishVerification() }
+            return
+        }
         if items.isEmpty, buffered.isEmpty, delivered == 0 {
             if validEmpty, more == false { confirmedEmpty = true }
             return
@@ -253,7 +284,14 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        requestDocumentPage()
+        if !isVerifying { requestDocumentPage() }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        let scheme = action.request.url?.scheme?.lowercased() ?? ""
+        guard ["http", "https", "about", "blob", "data"].contains(scheme) else { decisionHandler(.cancel); return }
+        decisionHandler(WKNavigationActionPolicy(rawValue: WKNavigationActionPolicy.allow.rawValue + 2) ?? .allow)
     }
 
     private func requestDocumentPage() {
@@ -275,13 +313,14 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
                 return
             }
             let body = self.musicID == nil ? DouyinBridge.searchJS : DouyinBridge.musicWorksJS
-            let arguments = ["kw": self.keyword, "mid": self.musicID ?? "", "cursor": self.apiCursor]
+            let arguments = ["kw": self.keyword, "mid": self.musicID ?? "", "cursor": self.apiCursor, "sortType": self.order.apiSort]
             guard let value = try? await self.web.callAsyncJavaScript(DouyinBridge.requestJS + body,
                 arguments: arguments, contentWorld: .page), let text = value as? String,
                   let data = text.data(using: .utf8),
                   let result = try? JSONDecoder().decode(SearchResponse.self, from: data),
-                  !Task.isCancelled, self.generation == requestGeneration, self.requestSerial == serial,
-                  result.code == nil || result.code == 0 else { return }
+                  !Task.isCancelled, self.generation == requestGeneration, self.requestSerial == serial else { return }
+            if result.verification == true { self.requestVerification(); return }
+            guard result.code == nil || result.code == 0 else { return }
             if let cursor = result.cursor { self.apiCursor = cursor }
             self.accept(result.items, more: result.hasMore, validEmpty: result.code == 0)
         }
@@ -298,30 +337,126 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
         let hasMore: Bool?
         let code: Int?
         let cursor: String?
+        let verification: Bool?
     }
+
+    private func requestVerification() {
+        guard musicID == nil, !isVerifying, onNeedsVerification != nil else { return }
+        if onNeedsVerification?() == true {
+            isVerifying = true
+            timeout?.cancel()
+        } else {
+            fail("请点击网页验证，完成后重试搜索")
+        }
+    }
+
+    func beginVerification(users: Bool) {
+        isVerifying = true
+        verificationCompleted = false
+        verificationUsers = users
+        timeout?.cancel()
+        verificationMonitor?.cancel()
+        if web.url == nil || (users && web.url?.query?.contains("type=user") != true) {
+            if let url = DYSearchScreen.videoSearchURL(keyword, order: order, users: users) { web.load(URLRequest(url: url)) }
+        }
+        verificationMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard let self, self.isVerifying, !self.verificationCompleted else { return }
+                let visible = (try? await self.web.evaluateJavaScript(Self.challengeVisibleJS)) as? Bool ?? false
+                if !visible, !self.web.isLoading { await self.probeVerification() }
+            }
+        }
+    }
+
+    private func probeVerification() async {
+        let body = verificationUsers ? DouyinBridge.searchUsersJS : DouyinBridge.searchJS
+        guard let value = try? await web.callAsyncJavaScript(DouyinBridge.requestJS + body,
+            arguments: ["kw": keyword, "cursor": "0", "sortType": order.apiSort], contentWorld: .page) as? String,
+              let data = value.data(using: .utf8),
+              let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              isVerifying, !Task.isCancelled,
+              result["code"] as? Int == 0, result["items"] is [Any], result["verification"] as? Bool != true else { return }
+        finishVerification()
+    }
+
+    private func finishVerification() {
+        guard isVerifying, !verificationCompleted else { return }
+        verificationCompleted = true
+        verificationMonitor?.cancel()
+        onVerificationSucceeded?()
+    }
+
+    func endVerification() {
+        isVerifying = false
+        verificationMonitor?.cancel()
+        web.autoresizingMask = []
+        web.frame = CGRect(x: 0, y: 0, width: 1280, height: 900)
+        if pending != nil { fail(verificationCompleted ? "验证完成，正在重新搜索" : "验证未完成，点击重试或重新打开网页验证") }
+    }
+
+    private static let challengeVisibleJS = #"""
+    (() => [...document.querySelectorAll('[id*="captcha"],[class*="captcha"],[id*="verify-center"],iframe[src*="verifycenter"],iframe[src*="captcha"]')]
+      .some(element => { const rect=element.getBoundingClientRect(), style=getComputedStyle(element);
+        return rect.width>40 && rect.height>30 && style.display!=='none' && style.visibility!=='hidden' && Number(style.opacity)!==0; }))()
+    """#
 
     private static let captureJS = #"""
     (() => {
-      const wanted = url => /\/(?:search\/item|general\/search\/(?:single|stream)|music\/aweme|music\/list\/aweme)(?:[/?]|$)/.test(String(url));
+      const wanted = url => /\/(?:search\/item|discover\/search|general\/search\/(?:single|stream)|music\/aweme|music\/list\/aweme)(?:[/?]|$)/.test(String(url));
       const post = text => { try { window.webkit.messageHandlers.ddNativeSearch.postMessage(text); } catch (_) {} };
+      const event = (kind,url) => {
+        let keyword=''; try { keyword=new URL(url || location.href,location.href).searchParams.get('keyword') || ''; } catch (_) {}
+        post(JSON.stringify({ddSearchEvent:kind,keyword:keyword}));
+      };
+      const inspect = (text, headers, url) => {
+        let data; try { data=JSON.parse(text); } catch (_) {}
+        if (data && Number(data.status_code)===0 && [data.aweme_list,data.user_list,data.data].some(Array.isArray)) {
+          event('verified',url); return;
+        }
+        const message=String(data && (data.status_msg || data.message || data.prompt) || '');
+        if (/(?:x-tt-verify-passport-decision|bdturing-verify|x-vc-bdturing-parameters)\s*:/i.test(headers || '') ||
+            data && (data.verify_info || data.verify_data || data.verification_url || data.captcha) ||
+            /人机验证|安全验证|验证码|完成验证|captcha|verifycenter/i.test(message)) event('verification',url);
+      };
       const fetch = window.fetch;
       window.fetch = function(input) {
         const url = typeof input === 'string' ? input : input && input.url;
         return fetch.apply(this, arguments).then(response => {
-          if (wanted(url) || wanted(response.url)) response.clone().text().then(post).catch(() => {});
+          if (wanted(url) || wanted(response.url)) response.clone().text().then(text => {
+            let headers=''; response.headers.forEach((value,key) => { headers+=key+':'+value+'\n'; });
+            inspect(text,headers,response.url || url); post(text);
+          }).catch(() => {});
           return response;
         });
       };
       const open = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url) {
         if (wanted(url)) this.addEventListener('load', function() {
-          try { post(typeof this.response === 'string' ? this.response : JSON.stringify(this.response)); } catch (_) {}
+          try {
+            const text=typeof this.response==='string' ? this.response : JSON.stringify(this.response);
+            inspect(text,this.getAllResponseHeaders(),this.responseURL || url); post(text);
+          } catch (_) {}
         });
         return open.apply(this, arguments);
       };
-      const stopMedia = () => document.querySelectorAll('video,audio').forEach(media => { media.muted = true; media.pause(); });
-      document.addEventListener('play', stopMedia, true);
-      document.addEventListener('DOMContentLoaded', stopMedia);
+      let scheduled=false;
+      const checkChallenge = () => {
+        scheduled=false;
+        const visible=[...document.querySelectorAll('[id*="captcha"],[class*="captcha"],[id*="verify-center"],iframe[src*="verifycenter"],iframe[src*="captcha"]')]
+          .some(element => {const rect=element.getBoundingClientRect(),style=getComputedStyle(element);
+            return rect.width>40 && rect.height>30 && style.display!=='none' && style.visibility!=='hidden' && Number(style.opacity)!==0;});
+        if (visible) event('verification',location.href);
+      };
+      const arm=() => {
+        new MutationObserver(() => {if(!scheduled){scheduled=true;setTimeout(checkChallenge,250);}})
+          .observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
+        checkChallenge();
+      };
+      if(document.documentElement) arm(); else document.addEventListener('DOMContentLoaded',arm,{once:true});
+      const stopMedia = () => document.querySelectorAll('video,audio').forEach(media => {media.muted=true;media.pause();});
+      document.addEventListener('play',stopMedia,true);
+      document.addEventListener('DOMContentLoaded',stopMedia);
     })();
     """#
 
@@ -351,7 +486,7 @@ final class DYNativeSearchTransport: NSObject, WKNavigationDelegate {
     const ddMeta = ddMetadata.find(frame => frame.has_more != null);
     const ddCode = ddMetadata.find(frame => frame.status_code != null);
     const ddCursor = ddMetadata.find(frame => frame.cursor != null);
-    return JSON.stringify({ items: ddItems, hasMore: ddMeta ? Number(ddMeta.has_more) === 1 : null,
+    return JSON.stringify({ items: ddItems, verification:ddNeedsVerification({h:''},ddRoot), hasMore: ddMeta ? Number(ddMeta.has_more) === 1 : null,
       code: ddCode ? Number(ddCode.status_code) : null, cursor:ddCursor ? String(ddCursor.cursor) : null });
     """#
 
@@ -409,7 +544,50 @@ struct DYNativeSearchHost: UIViewRepresentable {
         container.addSubview(transport.web)
         return container
     }
-    func updateUIView(_ view: UIView, context: Context) {}
+    func updateUIView(_ view: UIView, context: Context) {
+        guard !transport.isVerifying, transport.web.superview !== view else { return }
+        view.subviews.forEach { $0.removeFromSuperview() }
+        transport.web.removeFromSuperview()
+        transport.web.frame = CGRect(x: 0, y: 0, width: 1280, height: 900)
+        view.addSubview(transport.web)
+    }
+}
+
+struct DYSearchVerificationScreen: View {
+    let transport: DYNativeSearchTransport
+    let onCancel: () -> Void
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Text("请完成网页中的人机验证，通过后自动返回搜索")
+                    .font(.footnote).foregroundStyle(.secondary).padding(12)
+                DYVisibleSearchWeb(transport: transport)
+            }
+            .navigationTitle("搜索验证")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回搜索", action: onCancel) } }
+        }
+        .interactiveDismissDisabled()
+    }
+}
+
+private struct DYVisibleSearchWeb: UIViewRepresentable {
+    let transport: DYNativeSearchTransport
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        transport.web.removeFromSuperview()
+        transport.web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        transport.web.frame = view.bounds
+        view.addSubview(transport.web)
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) {
+        if transport.web.superview !== view {
+            transport.web.removeFromSuperview()
+            transport.web.frame = view.bounds
+            view.addSubview(transport.web)
+        }
+    }
 }
 
 extension DouyinBridge {

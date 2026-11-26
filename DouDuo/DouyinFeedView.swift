@@ -1076,6 +1076,14 @@ final class DouyinBridge: NSObject, ObservableObject, WKNavigationDelegate {
       const exact = String(t).replace(/("(?:id|mid|music_id|aweme_id|uid|user_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g, '$1"$2"');
       return JSON.parse(exact);
     } catch (e) { return null } };
+    const ddNeedsVerification = (response, data) => {
+      const valid = data && Number(data.status_code) === 0 &&
+        [data.aweme_list, data.user_list, data.data].some(Array.isArray);
+      if (valid) return false;
+      return /(?:x-tt-verify-passport-decision|bdturing-verify|x-vc-bdturing-parameters)\s*:/i.test(response.h || '') ||
+        !!(data && (data.verify_info || data.verify_data || data.verification_url || data.captcha)) ||
+        /人机验证|安全验证|验证码|完成验证|captcha|verifycenter/i.test(String((data && (data.status_msg || data.message || data.prompt)) || ''));
+    };
     // 抖音安全 SDK 在 load 之后还要一会儿才接管 XHR；没接管就发写请求会不带 a_bogus 签名，
     // 服务端直接丢弃（200 空 body 或 403），而读接口不受影响。写接口一律先等它就绪。
     const sdkReady = async (ms) => {
@@ -4995,9 +5003,10 @@ struct DYCommentPanel: View {
     var body: some View {
         ZStack {
             DYCommentCoverBackdrop(source: aweme.images.first ?? aweme.cover)
-            Color.clear.dyPanelGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .glassEffectTransition(.materialize)
+                .zIndex(-2)
+            DYCommentGlassBackdrop()
                 .allowsHitTesting(false)
+                .zIndex(-1)
             VStack(spacing: 0) {
                 if expandedCaptionID == aweme.id {
                     DYVideoCaptionHeader(bridge: bridge, aweme: aweme, onClose: nil)
@@ -5023,6 +5032,7 @@ struct DYCommentPanel: View {
                     .padding(.trailing, trailingInset)
                     .modifier(DYPanelDismissGesture(isAtTop: listAtTop, allowsSwipeRight: true, onClose: onClose))
             }
+            .zIndex(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))

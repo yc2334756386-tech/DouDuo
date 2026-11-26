@@ -124,6 +124,7 @@ extension DouyinBridge {
     private func list(_ js: String, _ args: [String: Any]) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
         let searchContinuation = js == Self.searchJS && (args["cursor"] as? String) != "0"
         let d = try await call(js, args: args, attempts: searchContinuation ? 1 : 3)
+        if js == Self.searchJS { try DYSearchVerificationRequired.check(d) }
         let p = try JSONDecoder().decode(DYListPage.self, from: d)
         if p.code == 8 || p.code == 2483 || (p.msg ?? "").contains("未登录") || (p.msg ?? "").contains("请先登录") {
             throw DYError.bad("抖音未登录：请在「我的」中登录后重试")
@@ -229,12 +230,13 @@ extension DouyinBridge {
         return (p.items, p.cursor, p.hasMore)
     }
 
-    func search(_ kw: String, offset: String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
-        try await list(Self.searchJS, ["kw": kw, "cursor": offset])
+    func search(_ kw: String, offset: String, sortType: String = "0") async throws -> (items: [DYAweme], cursor: String, hasMore: Bool) {
+        try await list(Self.searchJS, ["kw": kw, "cursor": offset, "sortType": sortType])
     }
 
     func searchUsers(_ word: String, cursor: String) async throws -> (items: [DYUser], cursor: String, hasMore: Bool) {
         let data = try await call(Self.searchUsersJS, args: ["kw": word, "cursor": cursor], attempts: 1)
+        try DYSearchVerificationRequired.check(data)
         let page = try JSONDecoder().decode(DYUserSearchPage.self, from: data)
         guard page.status == 200, page.code == 0 else {
             throw DYError.bad(page.code == 8 ? "请先在「我的」中登录" : "用户搜索暂时不可用，点击重试")
@@ -242,7 +244,7 @@ extension DouyinBridge {
         return (page.items, page.cursor, page.hasMore)
     }
 
-    private static let searchUsersJS = userMap + #"""
+    static let searchUsersJS = userMap + #"""
     await sdkReady(1500);
     const r = await req('GET', '/aweme/v1/web/discover/search/?' + qPost({
       keyword:kw, search_channel:'aweme_user_web', search_source:'normal_search',
@@ -254,7 +256,7 @@ extension DouyinBridge {
       .filter(user => user && (user.secUid || user.uid));
     const proposed = Number(d.cursor ?? d.offset ?? 0);
     const next = proposed > Number(cursor) ? proposed : Number(cursor) + users.length;
-    return JSON.stringify({status:r.s, code:Number(d.status_code ?? -1), items:users,
+    return JSON.stringify({status:r.s, code:Number(d.status_code ?? -1), items:users, verification:ddNeedsVerification(r,d),
       cursor:String(next), hasMore:Number(d.has_more) === 1});
     """#
 
@@ -772,17 +774,22 @@ extension DouyinBridge {
     """#
 
     static let searchJS = listTail + #"""
-    if (typeof sdkReady === 'function') await sdkReady(6000);
+    if (typeof sdkReady === 'function') await sdkReady(1500);
+    const selectedSort = typeof sortType === 'string' ? sortType : '0';
     const r = await req('GET', '/aweme/v1/web/search/item/?' + q({ search_channel: 'aweme_video_web', keyword: kw, search_source: 'normal_search',
-      query_correct_type: '1', is_filter_search: '0', from_group_id: '', offset: cursor, count: '16', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
+      query_correct_type: '1', is_filter_search: selectedSort === '0' ? '0' : '1', sort_type:selectedSort, publish_time:'0',
+      filter_selected:selectedSort === '0' ? '' : JSON.stringify({sort_type:selectedSort,publish_time:'0'}),
+      from_group_id: '', offset: cursor, count: '16', need_filter_settings: cursor === '0' ? '1' : '0', list_type: 'single' }));
     const d = parse(r.t) || {};
+    const packSearch = (data, items, cur, more) => JSON.stringify(Object.assign(JSON.parse(pack(r,data,items,cur,more)),
+      {verification:ddNeedsVerification(r,d)}));
     const raw = Array.isArray(d.aweme_list) ? d.aweme_list : Array.isArray(d.data) ? d.data : null;
     if (r.s === 200 && !raw && (d.status_code == null || d.status_code === 0)) {
-      return pack(r, { status_code: -1, status_msg: '原生搜索未收到结果，可在网页版继续搜索' }, [], cursor, false);
+      return packSearch({ status_code: -1, status_msg: '原生搜索未收到结果，可在网页版继续搜索' }, [], cursor, false);
     }
     const arr = (raw || []).map(x => x && (x.aweme_info || x.aweme || (x.aweme_id ? x : null))).filter(Boolean);
     const next = Number(d.cursor);
-    return pack(r, d, arr, d.cursor, Number(d.has_more) === 1 && Number.isSafeInteger(next) && next > Number(cursor));
+    return packSearch(d, arr, d.cursor, Number(d.has_more) === 1 && Number.isSafeInteger(next) && next > Number(cursor));
     """#
 
     static let hotJS = #"""
@@ -1681,9 +1688,12 @@ final class DYPagedModel: ObservableObject {
     @Published var hasMore = true
     private var cursor = "0"
     private let unique = DYCxxUniqueIDs()
+    private let order: ([DYAweme]) -> [DYAweme]
     private let fetch: (String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool)
 
-    init(fetch: @escaping (String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool)) {
+    init(order: @escaping ([DYAweme]) -> [DYAweme] = { $0 },
+         fetch: @escaping (String) async throws -> (items: [DYAweme], cursor: String, hasMore: Bool)) {
+        self.order = order
         self.fetch = fetch
     }
 
@@ -1698,6 +1708,7 @@ final class DYPagedModel: ObservableObject {
             let r = try await fetch("0")
             unique.clear()
             items = r.items.filter { ($0.play != nil || !$0.images.isEmpty) && unique.insert($0.id) }
+            items = order(items)
             hasMore = r.hasMore && !r.items.isEmpty && r.cursor != "0"
             cursor = r.cursor
             error = nil
@@ -1716,6 +1727,7 @@ final class DYPagedModel: ObservableObject {
             let r = try await fetch(cursor)
             let fresh = r.items.filter { ($0.play != nil || !$0.images.isEmpty) && unique.insert($0.id) }
             items.append(contentsOf: fresh)
+            items = order(items)
             hasMore = r.hasMore && !r.items.isEmpty && r.cursor != cursor
             cursor = r.cursor
             error = nil
@@ -1817,14 +1829,31 @@ struct DYSearchScreen: View {
                 }
                 .pickerStyle(.segmented).padding(.horizontal, 20).padding(.bottom, 12)
                 if searchKind == 0 {
+                    HStack {
+                        Spacer()
+                        Menu {
+                            Picker("排序", selection: $state.order) {
+                                ForEach(DYSearchOrder.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        } label: { Label("筛选 · " + state.order.rawValue, systemImage: "line.3.horizontal.decrease") }
+                    }.font(.subheadline).padding(.horizontal, 20).padding(.bottom, 8)
+                    if state.order == .plays {
+                        Text("按已加载结果排序，未提供播放量的作品靠后")
+                            .font(.caption2).foregroundStyle(.secondary).padding(.bottom, 6)
+                    }
                     DYSearchResults(model: model, transport: state.transport, onOpen: { i in
                         state.presentsVideo = true
                         open = DYListTarget(title: "搜索：\(state.lastRun)", items: model.items, start: i, model: model)
                     })
-                    .id(state.lastRun)
+                    .id(state.lastRun + state.order.rawValue + String(state.verificationRetry))
+                    if model.error != nil {
+                        Button("网页验证") { requestVerification(users: false) }
+                            .font(.footnote).padding(.vertical, 8)
+                    }
                 } else {
-                    DYUserSearchResults(bridge: bridge, query: state.lastRun, onAuthor: { searchAuthor = $0 })
-                        .id(state.lastRun)
+                    DYUserSearchResults(bridge: bridge, query: state.lastRun, onAuthor: { searchAuthor = $0 },
+                                        onVerification: { requestVerification(users: true) })
+                        .id(state.lastRun + String(state.verificationRetry))
                 }
             } else {
                 ScrollView {
@@ -1910,6 +1939,7 @@ struct DYSearchScreen: View {
                          loadMore: t.model.map { m in { await m.loadMore() } }, onAuthor: onAuthor, presentsAuthor: true)
         }
         .onChange(of: searchKind) { _, value in
+            state.verificationAttempted = false
             guard value == 0, let model = state.model else { return }
             Task {
                 if model.error != nil { await model.refresh() }
@@ -1925,16 +1955,41 @@ struct DYSearchScreen: View {
             }
         }
         .fullScreenCover(item: $searchWeb) { DouyinWebScreen(start: $0.url) }
+        .onChange(of: state.order) { _, _ in if !state.lastRun.isEmpty { run(state.lastRun) } }
+        .onChange(of: state.requiresVerification) { _, shown in
+            guard shown else { return }
+            state.verificationAttempted = true
+            state.verificationSucceeded = false
+            DDPlayback.shared.beginCover(state.verificationCoverOwner)
+            state.transport?.beginVerification(users: state.verificationForUsers)
+        }
+        .fullScreenCover(isPresented: $state.requiresVerification, onDismiss: {
+            state.transport?.endVerification()
+            DDPlayback.shared.endCover(state.verificationCoverOwner)
+            if state.verificationSucceeded {
+                state.verificationSucceeded = false
+                state.verificationRetry += 1
+                Task {
+                    await DYAccountStore.shared.refreshCurrentSnapshot()
+                    run(state.lastRun, afterVerification: true)
+                }
+            }
+        }) {
+            if let transport = state.transport {
+                DYSearchVerificationScreen(transport: transport, onCancel: { state.requiresVerification = false })
+            }
+        }
     }
 
-    static func videoSearchURL(_ keyword: String) -> URL? {
+    static func videoSearchURL(_ keyword: String, order: DYSearchOrder = .standard, users: Bool = false) -> URL? {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_~"))
         guard !keyword.isEmpty, let segment = keyword.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
         var url = URLComponents()
         url.scheme = "https"
         url.host = "www.douyin.com"
         url.percentEncodedPath = "/search/" + segment
-        url.queryItems = [URLQueryItem(name: "type", value: "video")]
+        url.queryItems = [URLQueryItem(name: "type", value: users ? "user" : "video")]
+        if order != .standard, !users { url.queryItems?.append(URLQueryItem(name: "sort_type", value: order.apiSort)) }
         return url.url
     }
 
@@ -1955,9 +2010,16 @@ struct DYSearchScreen: View {
         .padding(.bottom, 24)
     }
 
-    private func run(_ word: String) {
+    private func requestVerification(users: Bool) {
+        guard !state.requiresVerification else { return }
+        state.verificationForUsers = users
+        state.requiresVerification = true
+    }
+
+    private func run(_ word: String, afterVerification: Bool = false) {
         let w = word.trimmingCharacters(in: .whitespaces)
         guard !w.isEmpty else { return }
+        if !afterVerification { state.verificationAttempted = false }
         focused = false
         state.suggestions = []
         state.lastRun = w
@@ -1976,9 +2038,19 @@ struct DYSearchScreen: View {
         h.insert(w, at: 0)
         historyRaw = h.prefix(15).joined(separator: "\n")
         state.transport?.close()
-        let transport = DYNativeSearchTransport(keyword: w, bridge: bridge)
+        let transport = DYNativeSearchTransport(keyword: w, bridge: bridge, order: state.order)
+        transport.onNeedsVerification = { [weak session = state] in
+            guard let session, !session.verificationAttempted, !session.requiresVerification else { return false }
+            session.verificationForUsers = false
+            session.requiresVerification = true
+            return true
+        }
+        transport.onVerificationSucceeded = { [weak session = state] in
+            session?.verificationSucceeded = true
+            session?.requiresVerification = false
+        }
         state.transport = transport
-        let m = DYPagedModel { cur in try await transport.page(cur) }
+        let m = DYPagedModel(order: state.order.sorted) { cur in try await transport.page(cur) }
         state.model = m
         if searchKind == 0 { Task { await m.loadMore() } }
     }

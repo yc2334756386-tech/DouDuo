@@ -20,6 +20,7 @@ bool DYIndexInsert(DYUniqueIndex *index, const char *key);
 void DYIndexClear(DYUniqueIndex *index);
 bool DYCorePlaybackAllowed(bool active, bool foreground, bool uncovered);
 double DYCoreBoostRate(double translation, double screenWidth);
+void DYCoreRank(const double *metrics, int32_t *indices, size_t count);
 #ifdef __cplusplus
 }
 #endif

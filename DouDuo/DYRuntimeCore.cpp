@@ -1,6 +1,7 @@
 #include "DYRuntimeCore.h"
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 #include <list>
 #include <mutex>
 #include <new>
@@ -86,4 +87,15 @@ bool DYCorePlaybackAllowed(bool active, bool foreground, bool uncovered) {
 double DYCoreBoostRate(double translation, double screenWidth) {
     const double distance = std::max(8.0, std::min(180.0, screenWidth * 0.65));
     return 1.5 + 1.5 * std::max(0.0, std::min(1.0, translation / distance));
+}
+
+void DYCoreRank(const double *metrics, int32_t *indices, size_t count) {
+    if (!metrics || !indices) return;
+    for (size_t i = 0; i < count; ++i) indices[i] = static_cast<int32_t>(i);
+    std::stable_sort(indices, indices + count, [metrics](int32_t left, int32_t right) {
+        const bool a = std::isfinite(metrics[left]), b = std::isfinite(metrics[right]);
+        if (a != b) return a;
+        if (!a || metrics[left] == metrics[right]) return left < right;
+        return metrics[left] > metrics[right];
+    });
 }

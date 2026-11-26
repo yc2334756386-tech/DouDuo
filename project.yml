@@ -22,7 +22,6 @@ targets:
       - path: Shared
     dependencies:
       - package: VLCKitSPM
-      - target: DYBrandActivity
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.rrmm.douduo
@@ -55,22 +54,6 @@ targets:
         UIBackgroundModes: [audio]
         # ProMotion：iPhone 默认把 App 限制在 60Hz，必须声明这一项才能跑 120Hz（弹幕滚动、翻页更顺）
         CADisableMinimumFrameDurationOnPhone: true
-        NSSupportsLiveActivities: true
-  DYBrandActivity:
-    type: app-extension
-    platform: iOS
-    sources:
-      - path: DYBrandActivity
-      - path: Shared
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.rrmm.douduo.BrandActivity
-        PRODUCT_NAME: DYBrandActivity
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_FILE: DYBrandActivity/Info.plist
-        APPLICATION_EXTENSION_API_ONLY: YES
-        SKIP_INSTALL: YES
-        TARGETED_DEVICE_FAMILY: "1,2"
   DouDuoUITests:
     type: bundle.ui-testing
     platform: iOS

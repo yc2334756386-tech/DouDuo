@@ -41,11 +41,17 @@ final class DDPlayback {
     func isUncovered(level: Int) -> Bool { coverDepth == 0 || (level > 0 && coverDepth <= level) }
 
     func beginSettingsCover(_ owner: UUID) {
+        beginCover(owner)
+    }
+    func beginCover(_ owner: UUID) {
         guard settingsCovers.insert(owner).inserted else { return }
         pauseAll(reason: .cover, countLegacyCover: false)
     }
 
     func endSettingsCover(_ owner: UUID) {
+        endCover(owner)
+    }
+    func endCover(_ owner: UUID) {
         guard settingsCovers.remove(owner) != nil else { return }
         resumeAfterLastCover()
     }
@@ -121,7 +127,9 @@ final class DDPlayback {
         let addsLegacyCover = reason == .cover && countLegacyCover
         if addsLegacyCover { coverCount += 1 }
         let backgroundWhileCover = reason == .background && !appIsActive && coverHold
-        if !backgroundWhileCover {
+        if reason == .cover {
+            appIsActive = false
+        } else if !backgroundWhileCover {
             guard DYLivePlaybackGate.apply(appIsActive: appIsActive, command: .pause) else {
                 if addsLegacyCover { coverCount = max(0, coverCount - 1) }
                 return
@@ -1723,6 +1731,10 @@ struct PlayerPage: View {
     private func pauseForBackground() {
         let behindOfflineLibrary = DDPlayback.shared.offlineLibraryPresented && offlineContext?.inLibrary != true
         if behindOfflineLibrary, DDRemoteOwner.instance == playbackID { clearRemote() }
+        if DDPlayback.shared.coverHold, !DDPlayback.shared.isUncovered(level: coverLevel) {
+            pauseInlineForBackground()
+            return
+        }
         if !behindOfflineLibrary && !DDPlayback.shared.coverHold && pictureInPicture.keepsPlaybackOnExit {
             // 要进系统画中画：前台变速时声音可能交给了独立引擎，小窗只认 AVPlayer 原生声音 → 先交回再离开。
             // 这里由 DDPlayback.pauseAll 在停引擎之前调用，交回后引擎停了也不影响原生声音。
@@ -2193,8 +2205,21 @@ private struct DYVideoLoadingSpinner: View {
 
     @ViewBuilder var body: some View {
         if let player {
-            indicator.onReceive(player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main)) {
-                waiting = $0 == .waitingToPlayAtSpecifiedRate
+            indicator.task(id: active && playing) {
+                guard active, playing else { waiting = false; return }
+                var previous = player.currentTime().seconds
+                var stalledAt: Date?
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                    let current = player.currentTime().seconds
+                    let moved = current.isFinite && previous.isFinite && abs(current - previous) > 0.01
+                    if moved { stalledAt = nil; waiting = false }
+                    else if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                        if stalledAt == nil { stalledAt = Date() }
+                        waiting = Date().timeIntervalSince(stalledAt ?? Date()) > 0.45
+                    } else { stalledAt = nil; waiting = false }
+                    previous = current
+                }
             }
         } else { indicator }
     }

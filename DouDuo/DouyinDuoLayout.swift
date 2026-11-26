@@ -854,7 +854,6 @@ struct DYCommentPlayerLayout<Video: View>: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            .modifier(DYCommentGlassContainer())
             .background(Color.ddBackground.ignoresSafeArea())
             .overlayPreferenceValue(DYActiveVideoActionsKey.self) { actions in
                 if #available(iOS 27.1, *), usesClassicLayout {
@@ -872,16 +871,6 @@ struct DYCommentPlayerLayout<Video: View>: View {
             }
             .animation(searchPresented ? nil : .spring(response: 0.36, dampingFraction: 0.82), value: showComments)
             .animation(searchPresented ? nil : .snappy, value: layout.resident)
-            .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: commentItem,
-                                             focus: focus, onClose: { showComments = false }))
-            .dyBottomSheet(isPresented: Binding(
-                get: { showsComments && !layout.showsPane && placement == nil && !layout.sideBySide && !layout.resident },
-                set: { if placement == nil && !layout.sideBySide && !layout.resident { showComments = $0 } }
-            ), kind: .comments, hidesStatusBar: hidesCommentStatus) {
-                if let aweme = commentItem {
-                    DYCommentSheet(bridge: bridge, aweme: aweme, onClose: { showComments = false }, focus: focus)
-                }
-            }
         }
         .ignoresSafeArea(.container, edges: presentsLandscapeComments ? [.top, .horizontal]
                          : hidesCommentStatus ? .horizontal : [])
@@ -918,10 +907,14 @@ private struct DYStandaloneBarPolicy: ViewModifier {
 }
 
 
-struct DYCommentGlassContainer: ViewModifier {
-    func body(content: Content) -> some View {
-        GlassEffectContainer(spacing: 12) { content }
+struct DYCommentGlassBackdrop: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        view.isUserInteractionEnabled = false
+        view.clipsToBounds = true
+        return view
     }
+    func updateUIView(_ view: UIVisualEffectView, context: Context) {}
 }
 
 struct DYScrollTopObserver: ViewModifier {

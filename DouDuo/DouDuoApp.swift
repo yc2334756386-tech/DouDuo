@@ -212,10 +212,8 @@ struct DouDuoApp: App {
             .modifier(DYCollectPromptHost(owner: .feed))
             .task(id: scenePhase) {
                 if scenePhase == .active {
-                    DYBrandActivityManager.shared.start()
+                    await DYBrandActivityManager.shared.clearPreviousActivities()
                     await DYOfflineDownloads.shared.refreshRetention()
-                } else if scenePhase == .background {
-                    await DYBrandActivityManager.shared.end()
                 }
             }
         }

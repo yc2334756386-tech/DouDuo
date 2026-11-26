@@ -14,56 +14,8 @@
 		5DEDCB56FEEFEA58880E5479 /* DYBrandActivityManager.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DYBrandActivityManager.swift"; sourceTree = "<group>"; };
 		EAEC25B0B6F22162317E9372 /* DYBrandActivityManager.swift in app sources */ = { isa = PBXBuildFile; fileRef = 5DEDCB56FEEFEA58880E5479;  };
 		43E87447F68A70967B76D7B0 /* DYBrandActivityAttributes.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DYBrandActivityAttributes.swift"; sourceTree = "<group>"; };
-		E7FCFEF507DB7BCBD02FF4B5 /* Brand.xcassets */ = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Brand.xcassets"; sourceTree = "<group>"; };
-		C856A87091EA840233ADFFEB /* DYBrandActivity.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DYBrandActivity.swift"; sourceTree = "<group>"; };
-		A92049FE7197A7E4BE59F3E0 /* Brand Activity Info.plist */ = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
-		D737E34D2E2379872708220B /* Shared */ = { isa = PBXGroup; children = (43E87447F68A70967B76D7B0, E7FCFEF507DB7BCBD02FF4B5, ); path = Shared; sourceTree = "<group>"; };
-		B886927751B09174367559CB /* DYBrandActivity group */ = { isa = PBXGroup; children = (C856A87091EA840233ADFFEB, A92049FE7197A7E4BE59F3E0, ); path = DYBrandActivity; sourceTree = "<group>"; };
+		D737E34D2E2379872708220B /* Shared */ = { isa = PBXGroup; children = (43E87447F68A70967B76D7B0, ); path = Shared; sourceTree = "<group>"; };
 		354A3B84B0AC9F041E1C4636 /* Activity attributes in app sources */ = { isa = PBXBuildFile; fileRef = 43E87447F68A70967B76D7B0;  };
-		03172DBC1C00FFADEF5F34FA /* Brand assets in app resources */ = { isa = PBXBuildFile; fileRef = E7FCFEF507DB7BCBD02FF4B5;  };
-		C0B4EC45F5CD59E888F077A4 /* Activity widget in sources */ = { isa = PBXBuildFile; fileRef = C856A87091EA840233ADFFEB;  };
-		05EF84DF1F5BF45759CFD595 /* Activity attributes in widget sources */ = { isa = PBXBuildFile; fileRef = 43E87447F68A70967B76D7B0;  };
-		BF764D78EB64CCD24B1AFED8 /* Brand activity sources */ = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C0B4EC45F5CD59E888F077A4, 05EF84DF1F5BF45759CFD595, ); runOnlyForDeploymentPostprocessing = 0; };
-		FBA4D8F11861CE6FE001E780 /* Brand assets in widget resources */ = { isa = PBXBuildFile; fileRef = E7FCFEF507DB7BCBD02FF4B5;  };
-		D59F11A55AEAF8BE1DFA19C0 /* Brand activity resources */ = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (FBA4D8F11861CE6FE001E780, ); runOnlyForDeploymentPostprocessing = 0; };
-		5FF0AB2FA473FFC19ADBACF7 /* Brand activity frameworks */ = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		331637726FA190BD744BA881 /* DYBrandActivity.appex */ = { isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DYBrandActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		C6C061911FDEC4D7D156D4F2 /* Brand activity Debug */ = { isa = XCBuildConfiguration; buildSettings = {
-        APPLICATION_EXTENSION_API_ONLY = YES;
-        CODE_SIGN_STYLE = Automatic;
-        GENERATE_INFOPLIST_FILE = YES;
-        INFOPLIST_FILE = DYBrandActivity/Info.plist;
-        INFOPLIST_KEY_CFBundleDisplayName = "抖音";
-        IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-        LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
-        PRODUCT_BUNDLE_IDENTIFIER = me.rrmm.douduo.BrandActivity;
-        PRODUCT_NAME = DYBrandActivity;
-        SDKROOT = iphoneos;
-        SKIP_INSTALL = YES;
-        SWIFT_VERSION = 5.0;
-        TARGETED_DEVICE_FAMILY = "1,2";
-    }; name = Debug; };
-		308527F5C0C8D175B328A17C /* Brand activity Release */ = { isa = XCBuildConfiguration; buildSettings = {
-        APPLICATION_EXTENSION_API_ONLY = YES;
-        CODE_SIGN_STYLE = Automatic;
-        GENERATE_INFOPLIST_FILE = YES;
-        INFOPLIST_FILE = DYBrandActivity/Info.plist;
-        INFOPLIST_KEY_CFBundleDisplayName = "抖音";
-        IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-        LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", );
-        PRODUCT_BUNDLE_IDENTIFIER = me.rrmm.douduo.BrandActivity;
-        PRODUCT_NAME = DYBrandActivity;
-        SDKROOT = iphoneos;
-        SKIP_INSTALL = YES;
-        SWIFT_VERSION = 5.0;
-        TARGETED_DEVICE_FAMILY = "1,2";
-    }; name = Release; };
-		CE32D533EF701754D7F1279E /* Brand activity configuration list */ = { isa = XCConfigurationList; buildConfigurations = (C6C061911FDEC4D7D156D4F2, 308527F5C0C8D175B328A17C, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		E639B6D9B8A6ABE8E3DA923B /* DYBrandActivity target */ = { isa = PBXNativeTarget; buildConfigurationList = CE32D533EF701754D7F1279E; buildPhases = (BF764D78EB64CCD24B1AFED8, D59F11A55AEAF8BE1DFA19C0, 5FF0AB2FA473FFC19ADBACF7, ); buildRules = (); dependencies = (); name = DYBrandActivity; productName = DYBrandActivity; productReference = 331637726FA190BD744BA881; productType = "com.apple.product-type.app-extension"; };
-		405B5D85CB074C3FED72C0FA /* Brand activity proxy */ = { isa = PBXContainerItemProxy; containerPortal = 19FA93B65B4A6CA63BD110E7; proxyType = 1; remoteGlobalIDString = E639B6D9B8A6ABE8E3DA923B; remoteInfo = DYBrandActivity; };
-		4E2A3C87AD858C2739F15C50 /* Brand activity dependency */ = { isa = PBXTargetDependency; target = E639B6D9B8A6ABE8E3DA923B; targetProxy = 405B5D85CB074C3FED72C0FA; };
-		05C2C9433A23A6FDC479012B /* Embed brand activity */ = { isa = PBXBuildFile; fileRef = 331637726FA190BD744BA881; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		53FB359D210A898E329751F7 /* Embed app extensions */ = { isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (05C2C9433A23A6FDC479012B, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 
 /* Begin PBXBuildFile section */
         DDD137000000000000000001 /* DYDanmakuCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DDD137000000000000000002 /* DYDanmakuCore.cpp */; };
@@ -553,7 +505,6 @@
 			isa = PBXGroup;
 			children = (
 				D737E34D2E2379872708220B,
-				B886927751B09174367559CB,
 
 				716A33F79FCF26424F8D46DB /* DouDuo */,
 				C3A93D27F71AB542E8D01EFD /* DouDuoTests */,
@@ -574,7 +525,6 @@
 		AC0F0F81B083958ED04B3A5B /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				331637726FA190BD744BA881,
 
 				4533C36FD7AE2A46CAA52B82 /* DouDuo.app */,
 				67255D497584391EEC6C07A2 /* DouDuoUITests.xctest */,
@@ -613,7 +563,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4C90CE282997BB72D616945B /* Build configuration list for PBXNativeTarget "DouDuo" */;
 			buildPhases = (
-				53FB359D210A898E329751F7,
 
 				36ECA62C687F6CAC1ED168AB /* Sources */,
 				BA0FDEB1C445704369185500 /* Resources */,
@@ -622,7 +571,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				4E2A3C87AD858C2739F15C50,
 
 			);
 			name = DouDuo;
@@ -707,7 +655,6 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E639B6D9B8A6ABE8E3DA923B,
 
 				5945444A05F5E468EFC4ED47 /* DouDuo */,
 				67FA4ACB21915C23150E8B6F /* DouDuoUITests */,
@@ -721,7 +668,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				03172DBC1C00FFADEF5F34FA,
 
 				64E988A9D801D0D01BB6ECAD /* Assets.xcassets in Resources */,
 				57B020392150AF274A8B5DA2 /* DouyinPublicationRegions.json in Resources */,

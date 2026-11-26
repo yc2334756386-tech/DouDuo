@@ -128,7 +128,6 @@ struct DYCommentStage<Feed: View, Author: View>: View {
                     .zIndex(1000)
             }
         }
-        .modifier(DYCommentGlassContainer())
         .frame(width: w, height: h, alignment: .topLeading)
         .overlayPreferenceValue(DYTouchpadActionsKey.self, alignment: .topLeading) { actions in
             if padActive, aweme != nil, let actions {
@@ -171,16 +170,6 @@ struct DYCommentStage<Feed: View, Author: View>: View {
         .animation(showSearch ? nil : .snappy, value: layout.resident)
         .animation(showSearch ? nil : .spring(response: 0.36, dampingFraction: 0.82), value: showComments)
         .animation(showSearch ? nil : .snappy, value: authorPane?.id)
-        .modifier(DYInlineCommentOverlay(placement: placement, bridge: bridge, aweme: aweme,
-                                         onClose: { showComments = false }))
-        .dyBottomSheet(isPresented: Binding(
-            get: { !showSearch && showComments && !layout.showsPane && placement == nil && !layout.sideBySide && !layout.resident },
-            set: { if placement == nil && !(authorPane?.supportsSidePanel ?? false) && !layout.resident { showComments = $0 } }
-        ), kind: .comments, hidesStatusBar: hidesCommentStatus) {
-            if let cur = aweme {
-                DYCommentSheet(bridge: bridge, aweme: cur, onClose: { showComments = false })
-            }
-        }
     }
 }
 

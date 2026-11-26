@@ -49,12 +49,13 @@ final class DYSimplePager<T: Identifiable & Equatable>: ObservableObject {
     @Published var loading = false
     @Published var error: String?
     @Published var hasMore = true
+    @Published var needsVerification = false
     private var cursor = "0"
     private let unique = DYCxxUniqueIDs()
     private let fetch: (String) async throws -> (items: [T], cursor: String, hasMore: Bool)
     init(_ fetch: @escaping (String) async throws -> (items: [T], cursor: String, hasMore: Bool)) { self.fetch = fetch }
 
-    func reload() async { cursor = "0"; hasMore = true; items = []; unique.clear(); await more() }
+    func reload() async { cursor = "0"; hasMore = true; items = []; needsVerification = false; unique.clear(); await more() }
     func more() async {
         guard !loading, hasMore else { return }
         loading = true
@@ -67,6 +68,7 @@ final class DYSimplePager<T: Identifiable & Equatable>: ObservableObject {
             error = nil
         } catch {
             self.error = error.localizedDescription
+            if error is DYSearchVerificationRequired { needsVerification = true }
             hasMore = false
         }
     }
@@ -450,6 +452,7 @@ struct DYCollectedMusicScreen: View {
     @StateObject private var preview = DYCollectedMusicPlayer()
     @State private var message: String?
     @State private var musicWorks: DYMusicInfo?
+    @State private var musicCoverOwner = UUID()
     @State private var removing: Set<String> = []
 
     let embedded: Bool
@@ -473,7 +476,11 @@ struct DYCollectedMusicScreen: View {
                 if let message { Text(message).font(.caption).foregroundStyle(.orange) }
                 ForEach(pager.items) { m in
                       HStack(spacing: 12) {
-                        Button { preview.stop(); musicWorks = m } label: {
+                        Button {
+                            preview.stop()
+                            DDPlayback.shared.beginCover(musicCoverOwner)
+                            musicWorks = m
+                        } label: {
                         CachedAsyncImage(url: m.cover.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
                             placeholder: { Color.primary.opacity(0.08).overlay(Image(systemName: "music.note").foregroundStyle(.secondary)) }
                             .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
@@ -527,7 +534,9 @@ struct DYCollectedMusicScreen: View {
                 Button("好") { preview.failure = nil }
             } message: { Text(preview.failure ?? "") }
             .navigationTitle("收藏的音乐")
-            .fullScreenCover(item: $musicWorks) { DYMusicVideosScreen(bridge: bridge, music: $0) }
+            .fullScreenCover(item: $musicWorks, onDismiss: { DDPlayback.shared.endCover(musicCoverOwner) }) {
+                DYMusicVideosScreen(bridge: bridge, music: $0)
+            }
             .navigationBarTitleDisplayMode(.inline)
             .task { if pager.items.isEmpty { await pager.more() } }
             .overlay(alignment: .bottomLeading) {
@@ -953,6 +962,7 @@ struct DYOriginalSoundControl: View {
     let bridge: DouyinBridge?
     let item: DYAweme
     @State private var works: DYMusicInfo?
+    @State private var musicCoverOwner = UUID()
     @State private var export: DYAudioExport?
     @State private var message: String?
     @State private var busy = false
@@ -964,7 +974,7 @@ struct DYOriginalSoundControl: View {
             Button("保存原声到文件", systemImage: "square.and.arrow.down") { perform(.save) }
         } label: { Label(item.music.isEmpty ? "原声" : item.music, systemImage: "music.note").lineLimit(1) }
         .disabled(busy || bridge == nil)
-        .fullScreenCover(item: $works) { music in
+        .fullScreenCover(item: $works, onDismiss: { DDPlayback.shared.endCover(musicCoverOwner) }) { music in
             if let bridge { DYMusicVideosScreen(bridge: bridge, music: music) }
         }
         .sheet(item: $export) { DYAudioExportSheet(url: $0.url) }
@@ -985,6 +995,7 @@ struct DYOriginalSoundControl: View {
                 switch action {
                 case .videos:
                     guard !music.id.isEmpty else { throw DYError.bad("这条作品没有可用的原声标识") }
+                    DDPlayback.shared.beginCover(musicCoverOwner)
                     works = music
                 case .collect:
                     guard !music.id.isEmpty else { throw DYError.bad("这条作品没有可用的原声标识") }

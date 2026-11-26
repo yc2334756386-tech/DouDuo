@@ -532,6 +532,7 @@ final class DDSeamlessController {
     private var handoffGen: UInt64 = 0
     private var handoffPending = false
     private var handoffPreparation: Task<Void, Never>?
+    private var rateUpdate: Task<Void, Never>?
     /// 声音交接要等流准备好；等太久（在线流首包慢）就先按原生方式变速，交接完成后接着无缝
     private let handoffNativeFallbackDelay: Double = 0.35
 
@@ -691,28 +692,57 @@ final class DDSeamlessController {
         }
     }
 
-    /// 长按 2x / 松手恢复 / 菜单切换倍速：0ms 瞬时无损切换
+    /// 连续拖动只保留最新目标，每 25ms 应用一次，避免积压变速指令。
     func setRate(_ newRate: Float) {
         guard newRate > 0 else {
             pause()
             return
         }
-        targetRate = newRate
+        targetRate = max(0.25, min(4, newRate))
+        guard rateUpdate == nil else { return }
+        let generation = bindGen
+        rateUpdate = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(25)) } catch { return }
+            guard let self, self.bindGen == generation else { return }
+            self.rateUpdate = nil
+            self.applyRequestedRate()
+        }
+    }
+
+    private func applyVideoRate(_ rate: Float) {
+        guard wantPlaying, let player = videoPlayer else { return }
+        // 手势变速已有播放意图，直接推进已有缓冲，避免按倍速重新等待预测缓冲。
+        player.automaticallyWaitsToMinimizeStalling = false
+        if player.currentItem?.status == .readyToPlay {
+            if abs(player.rate - rate) > 0.002 || player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                player.playImmediately(atRate: rate)
+            }
+        } else if abs(player.rate - rate) > 0.002 {
+            player.rate = rate
+        }
+    }
+
+    private func applyRequestedRate() {
+        let newRate = targetRate
         switch mode {
         case .engaged:
             DDAudioEngineHub.shared.setRate(newRate, owner: ownerID)
-            if wantPlaying { videoPlayer?.rate = newRate }
+            applyVideoRate(newRate)
         case .preparing, .noAudio:
-            if wantPlaying { videoPlayer?.rate = newRate }
+            applyVideoRate(newRate)
         case .fallbackAVPlayer:
             guard wantPlaying, let vp = videoPlayer else { return }
             if handoffPending {
                 // 交接中：完成时按最新的 targetRate 起；已经先按原生方式变过速的，原生继续跟着变
-                if handoffNativeFallen, abs(vp.rate - newRate) > 0.001 { vp.softRate(newRate) }
+                if handoffNativeFallen { applyVideoRate(newRate) }
                 return
             }
             if vp.rate > 0, abs(vp.rate - newRate) < 0.001 { return }
-            if handoffAllowed, vp.rate > 0 { beginEngineHandoff() } else { vp.softRate(newRate) }
+            if handoffAllowed, stream?.pcmFormat != nil, vp.timeControlStatus == .playing {
+                beginEngineHandoff()
+            } else {
+                applyVideoRate(newRate)
+            }
         }
     }
 
@@ -762,7 +792,7 @@ final class DDSeamlessController {
     private func beginEngineHandoff() {
         guard let vp = videoPlayer, let item = vp.currentItem, let asset = item.asset as? AVURLAsset else {
             handoffAllowed = false
-            videoPlayer?.softRate(targetRate)
+            applyVideoRate(targetRate)
             return
         }
         cancelHandoff()
@@ -777,7 +807,12 @@ final class DDSeamlessController {
                   let vp = self.videoPlayer else { return }
             self.handoffNativeFallen = true
             DYLiveModel.log("DDSEAM handoff slow → native rate \(self.targetRate)")
-            if abs(vp.rate - self.targetRate) > 0.001 { vp.softRate(self.targetRate) }
+            self.applyVideoRate(self.targetRate)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self, self.handoffGen == hGen, self.handoffPending else { return }
+            self.handoffAllowed = false
+            self.abortHandoff(hGen)
         }
 
         feedTask?.cancel()
@@ -800,7 +835,7 @@ final class DDSeamlessController {
     private func abortHandoff(_ hGen: UInt64) {
         guard handoffGen == hGen, handoffPending else { return }
         cancelHandoff()
-        if wantPlaying, let vp = videoPlayer, abs(vp.rate - targetRate) > 0.001 { vp.softRate(targetRate) }
+        applyVideoRate(targetRate)
     }
 
     private func completeEngineHandoff(stream: DDAudioStream, format: AVAudioFormat,
@@ -844,7 +879,7 @@ final class DDSeamlessController {
         vpNow.isMuted = true
         hub.setRate(targetRate, owner: ownerID)   // 交接途中可能已经松手 / 改速
         hub.setMuted(isMuted, owner: ownerID)
-        vpNow.rate = targetRate
+        applyVideoRate(targetRate)
         mode = .engaged
         engagedByHandoff = true
         handoffPending = false
@@ -866,9 +901,23 @@ final class DDSeamlessController {
     }
 
     private func feedLoop(stream: DDAudioStream, gen: UInt64, streamEpoch: UInt64) async {
+        var misses = 0
         while !Task.isCancelled && bindGen == gen && stream.epoch == streamEpoch {
             if pendingBuffers < maxBufferedChunks && !stream.reachedEOF {
-                await enqueueOneChunk(gen: gen, streamEpoch: streamEpoch)
+                if await enqueueOneChunk(gen: gen, streamEpoch: streamEpoch) {
+                    misses = 0
+                } else {
+                    misses += 1
+                    // 解码或网络暂不可用时让出主线程，连续失败便恢复原生音轨。
+                    if misses >= 4, mode == .engaged, wantPlaying {
+                        handoffAllowed = false
+                        engagedByHandoff = true
+                        _ = returnToNativeAudio(reason: "audio-buffer-unavailable")
+                        applyVideoRate(targetRate)
+                        return
+                    }
+                    do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+                }
             } else {
                 try? await Task.sleep(nanoseconds: 40_000_000)
             }
@@ -923,6 +972,8 @@ final class DDSeamlessController {
     }
 
     func pause() {
+        rateUpdate?.cancel()
+        rateUpdate = nil
         wantPlaying = false
         cancelHandoff()
         syncTimer?.invalidate()
@@ -1034,12 +1085,13 @@ final class DDSeamlessController {
         }
     }
 
-    private func enqueueOneChunk(gen: UInt64, streamEpoch: UInt64) async {
-        guard bindGen == gen, let stream, stream.epoch == streamEpoch else { return }
+    @discardableResult
+    private func enqueueOneChunk(gen: UInt64, streamEpoch: UInt64) async -> Bool {
+        guard bindGen == gen, let stream, stream.epoch == streamEpoch else { return false }
         guard let buf = await stream.popNextBuffer(),
               bindGen == gen,
               stream.epoch == streamEpoch,
-              DDAudioEngineHub.shared.activeOwner == ownerID else { return }
+              DDAudioEngineHub.shared.activeOwner == ownerID else { return false }
 
         pendingBuffers += 1
         DDAudioEngineHub.shared.playerNode.scheduleBuffer(buf) { [weak self] in
@@ -1048,6 +1100,7 @@ final class DDSeamlessController {
                 self.pendingBuffers = max(0, self.pendingBuffers - 1)
             }
         }
+        return true
     }
 
     private func shouldPlayAudioNow() -> Bool {
@@ -1125,6 +1178,8 @@ final class DDSeamlessController {
     }
 
     func reset() {
+        rateUpdate?.cancel()
+        rateUpdate = nil
         handoffPreparation?.cancel()
         handoffPreparation = nil
         bindGen &+= 1
