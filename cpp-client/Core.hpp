@@ -12,6 +12,7 @@ struct Work {
     std::vector<std::string> images;
     std::int64_t comments = 0, likes = 0, collects = 0, publishedAt = 0;
     bool liked = false, collected = false;
+    bool isAd = false, isLive = false;
     double duration = 0;
     bool photo() const noexcept { return !images.empty(); }
     bool playable() const noexcept { return !id.empty() && (photo() || !play.empty()); }

@@ -6,11 +6,18 @@ import pathlib
 import struct
 import sys
 import zlib
+import subprocess
+import shutil
 
 root = pathlib.Path(sys.argv[1]) / 'AppIcon.appiconset'
 root.mkdir(parents=True, exist_ok=True)
 
 def png(path, size):
+    source=pathlib.Path(__file__).resolve().parents[1]/'Assets'/'IconOriginal.png'
+    if source.is_file():
+        if size==1024: shutil.copyfile(source,path)
+        else: subprocess.run(['/usr/bin/sips','--resampleHeightWidth',str(size),str(size),str(source),'--out',str(path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        return
     rows = bytearray()
     for y in range(size):
         rows.append(0)

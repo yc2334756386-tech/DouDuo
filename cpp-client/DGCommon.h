@@ -33,6 +33,7 @@ work.musicID=String(value[@"musicID"]);work.musicTitle=String(value[@"musicTitle
 work.location=String(value[@"location"]);work.locationKind=String(value[@"locationKind"]);
 work.publishedAt=Number(value[@"publishedAt"]);work.collects=Number(value[@"collects"]);
 work.liked=[value[@"liked"] boolValue];work.collected=[value[@"collected"] boolValue];
+work.isAd=[value[@"isAd"]boolValue];work.isLive=[value[@"isLive"]boolValue];
     for (id image in Array(value[@"images"])) work.images.emplace_back(String(image));
     return work;
 }
@@ -86,6 +87,16 @@ void DGToast(UIViewController *host, NSString *message);
 void DGSaveURL(UIViewController *host, NSString *url, BOOL video);
 void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
 void DGConfirmCopy(UIViewController *host, NSString *text);
+void DGConfirmImageSave(UIViewController *host, NSString *url);
+UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
+BOOL DGContentAllowed(const Work &work);
+void DGMarkSeen(NSString *identifier);
+void DGSeenScope(NSString *uid);
+void DGMusicPlay(NSDictionary *music);
+void DGMusicPause(void);
+void DGMusicStop(void);
+AVPlayer *DGMusicPlayer(void);
+BOOL DGMusicMatches(NSString *identifier);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);

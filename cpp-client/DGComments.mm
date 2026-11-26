@@ -171,6 +171,7 @@ namespace { struct DGReplyState {
 @end
 @implementation DGComments {
     DGBridge *_bridge;
+    DGImage *_backdrop;UIVisualEffectView *_backdropBlur;UIView *_backdropShade;
     NSString *_workID,*_parent,*_cursor;
     UIVisualEffectView *_glass,*_closeGlass;
     UIView *_handle,*_separator;
@@ -187,6 +188,8 @@ namespace { struct DGReplyState {
 }
 - (void)viewDidLoad {
     [super viewDidLoad]; self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    _backdrop=[DGImage new];_backdrop.contentMode=UIViewContentModeScaleAspectFill;_backdrop.clipsToBounds=YES;[_backdrop remote:self.coverURL?:@""];[self.view addSubview:_backdrop];
+    _backdropBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];[self.view addSubview:_backdropBlur];_backdropShade=[UIView new];_backdropShade.backgroundColor=[UIColor colorWithWhite:0 alpha:.28];[self.view addSubview:_backdropShade];
     self.view.backgroundColor=UIColor.clearColor; self.view.clipsToBounds=YES;
     self.view.layer.cornerRadius=30; self.view.layer.cornerCurve=kCACornerCurveContinuous;
     self.view.layer.borderWidth=.5; self.view.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;
@@ -212,7 +215,7 @@ namespace { struct DGReplyState {
     _table.backgroundView=_empty; [self loadMore];
 }
 - (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _glass.frame=b;
+    [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _backdrop.frame=b;_backdropBlur.frame=b;_backdropShade.frame=b;_glass.frame=b;
     _handle.frame=CGRectMake((width-50)/2,8,50,5); _titleLabel.frame=CGRectMake(68,24,MAX(0,width-136),30);
     _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
     _separator.frame=CGRectMake(20,73,MAX(0,width-40),.5); _table.frame=CGRectMake(0,77,width,MAX(0,b.size.height-77));
@@ -284,7 +287,7 @@ namespace { struct DGReplyState {
     cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};
     cell.replyAction=^{[weakSelf toggleReplies:parentID];};
     cell.openImageAction=^(NSString *url,UIImageView *source){DGComments *self=weakSelf;if(self)DGShowImage(self,url,source);};
-    cell.saveImageAction=^(NSString *url){DGComments *self=weakSelf;if(self)DGSaveURL(self,url,NO);};
+    cell.saveImageAction=^(NSString *url){DGComments *self=weakSelf;if(self)DGConfirmImageSave(self,url);};
     return cell;
 }
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {

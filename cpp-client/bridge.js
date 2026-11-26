@@ -70,6 +70,8 @@
     return {id:id(value.id_str||value.id||value.mid),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),duration:Number(value.duration||0)};
   };
   const work=item=>{
+    const isAd=!!(item.is_ads||item.is_ad||(item.raw_ad_data&&Object.keys(item.raw_ad_data).length));
+    if(item.cell_room){let room=item.cell_room.rawdata;try{if(typeof room==='string')room=JSON.parse(room);}catch(_){room=null;}room=room||{};const owner=room.owner||{},stream=room.stream_url||{},hls=stream.hls_pull_url_map||{};const play=hls.FULL_HD1||hls.HD1||hls.SD1||stream.hls_pull_url||Object.values(hls)[0]||'';return {id:'live_'+String(room.id_str||room.id||item.aweme_id||''),caption:room.title||item.desc||'直播中',author:owner.nickname||'主播',authorID:owner.sec_uid||'',authorUID:id(owner.id_str||owner.id),avatar:first(owner.avatar_thumb),cover:first(room.cover),play,alternate:'',images:[],duration:0,comments:0,likes:0,collects:0,isLive:true,isAd};}
     const video=item.video||{},stats=item.statistics||{},author=item.author||{},sound=item.music||{};
     const images=(item.images||(item.image_post_info||{}).images||[]).map(image=>first(image.display_image)||first(image)).filter(Boolean);
     const rates=(video.bit_rate||[]).filter(rate=>rate&&(!rate.format||rate.format==='mp4')&&!/_2$/.test(rate.gear_name||'')&&first(rate.play_addr));
@@ -93,7 +95,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -101,7 +103,7 @@
     for(const name of new Set(String(item.text||'').match(/\[[^\]\r\n]{1,14}\]/g)||[]))if(emojiCatalog[name])inline.push({name,url:emojiCatalog[name]});
     return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
-  const works=list=>(Array.isArray(list)?list:[]).filter(item=>item&&!item.cell_room).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
+  const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
   window.DouGlass={version:3,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
@@ -142,8 +144,9 @@
         const data=await post('/aweme/v1/web/aweme/listcollection/',{cursor,count:'18'},new URLSearchParams({count:'18',cursor}).toString());return page(data,data.aweme_list,data.cursor,data.has_more);
       }
       if(operation==='musicList'){
-        const data=await get('/aweme/v1/web/music/listcollection/',{cursor,count:'20'});return {items:(data.mc_list||[]).map(music).filter(item=>item.id),cursor:String(data.cursor||0),more:!!data.has_more};
+        const data=await get('/aweme/v1/web/music/listcollection/',{cursor,count:'20'});return {items:(data.mc_list||[]).map(value=>Object.assign(music(value),{collected:true})).filter(item=>item.id),cursor:String(data.cursor||0),more:!!data.has_more};
       }
+      if(operation==='musicCollect'){await writeReady();if(!params.id)throw new Error('平台未提供原声标识');const action=params.add?'1':'0';await post('/aweme/v1/web/music/collect/',{},new URLSearchParams({music_id:params.id,type:action,action}).toString(),{strict:true});return {ok:true,added:action==='1'};}
       if(operation==='musicDetail'){
         const data=await get('/aweme/v1/web/music/detail/',{music_id:params.id,scene:'1'});return music(data.music_info||data.music||{});
       }

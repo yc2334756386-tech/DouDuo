@@ -12,6 +12,7 @@
 - (void)compact:(BOOL)compact;
 - (void)mediaHeight:(CGFloat)height;
 - (void)backgroundAudio:(BOOL)enabled;
+- (NSString *)selectedImageURL;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);

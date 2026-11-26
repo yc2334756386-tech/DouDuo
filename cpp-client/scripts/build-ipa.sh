@@ -27,7 +27,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "$OUTPUT/Core.o" "$CLIENT"/*.mm \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
-  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"
@@ -39,13 +39,13 @@ import pathlib, plistlib, sys
 app=pathlib.Path(sys.argv[1])
 info={
   'CFBundleDevelopmentRegion':'zh_CN',
-  'CFBundleDisplayName':'澄流',
+  'CFBundleDisplayName':'抖音极简版',
   'CFBundleExecutable':'DouGlass',
   'CFBundleIdentifier':'io.github.yc2334756386.douglass',
   'CFBundleInfoDictionaryVersion':'6.0',
-  'CFBundleName':'DouGlass',
+  'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.3.0',
+  'CFBundleShortVersionString':'0.4.0',
   'UIBackgroundModes':['audio'],
   'NSPhotoLibraryAddUsageDescription':'保存你选择的视频、图集和评论图片到相册',
   'CFBundleVersion':sys.argv[3],
@@ -69,6 +69,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.3.0-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.3.0-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.3.0-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.4.0-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.4.0-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.4.0-unsigned.ipa"

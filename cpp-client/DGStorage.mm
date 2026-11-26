@@ -34,6 +34,7 @@ static void DGDownload(NSString *url,void (^completion)(NSData *,NSURLResponse *
     }] resume];
 }
 void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
+    if(video)[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];
     if(!url.length){DGToast(host,@"该内容没有可保存的地址");return;}
     DGToast(host,video ? @"正在下载视频…" : @"正在保存图片…");
     [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status){
@@ -79,6 +80,7 @@ void DGConfirmCopy(UIViewController *host,NSString *text){
     if(!host||host.presentedViewController||!text.length)return;NSString *preview=text.length>180?[[text substringToIndex:180]stringByAppendingString:@"…"]:text;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"复制作品文案？" message:preview preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=text;DGToast(host,@"文案已复制");}]];[host presentViewController:alert animated:YES completion:nil];
 }
+void DGConfirmImageSave(UIViewController *host,NSString *url){if(!host||host.presentedViewController)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"保存评论图片？" message:@"将这张图片或表情包添加到相册" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGSaveURL(host,url,NO);}]];[host presentViewController:alert animated:YES completion:nil];}
 @interface DGPreview : QLPreviewController <QLPreviewControllerDataSource,QLPreviewControllerDelegate>
 @property(nonatomic,strong) NSURL *file;
 @property(nonatomic,weak) UIImageView *source;
