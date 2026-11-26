@@ -1,4 +1,4 @@
-DouGlass / 澄流 0.1.0
+DouGlass / 澄流 0.2.0
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -10,4 +10,6 @@ This application is an independent third-party client and has no affiliation
 with Douyin. Content and service marks belong to their respective owners.
 Login takes place on the official website. Session data stays in the app's
 local WebKit website store. This version has no developer-operated backend,
-analytics SDK, comment publishing, liking, following or messaging interface.
+analytics SDK or comment publishing interface. Likes and collection changes
+are sent only when requested in the interface. Messages use the official
+website with the same local login session.

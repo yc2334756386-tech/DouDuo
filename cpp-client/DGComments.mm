@@ -1,0 +1,294 @@
+#import "DGComments.h"
+#include <unordered_map>
+static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=250;});return cache;}
+
+@interface DGCommentImage : DGImage
+@property(nonatomic, copy) NSString *sourceURL;
+@end
+@implementation DGCommentImage
+@end
+
+@interface DGCommentCell : UITableViewCell
+@property(nonatomic,copy) void (^replyAction)(void);
+@property(nonatomic,copy) void (^profileAction)(void);
+@property(nonatomic,copy) void (^openImageAction)(NSString *,UIImageView *);
+@property(nonatomic,copy) void (^saveImageAction)(NSString *);
+- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading;
+@end
+@implementation DGCommentCell {
+    DGImage *_avatar;
+    UILabel *_name,*_body,*_meta;
+    UIButton *_reply;
+    UIStackView *_stack,*_media;
+    NSLayoutConstraint *_leading,*_avatarWidth,*_avatarHeight;
+    NSString *_plainText;
+    NSArray<NSDictionary *> *_inlineEmoji;
+}
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
+    if((self=[super initWithStyle:style reuseIdentifier:identifier])) {
+        self.backgroundColor=UIColor.clearColor; self.selectionStyle=UITableViewCellSelectionStyleNone;
+        _avatar=[DGImage new]; _avatar.contentMode=UIViewContentModeScaleAspectFill; _avatar.clipsToBounds=YES;
+        _avatar.backgroundColor=[UIColor colorWithWhite:1 alpha:.08]; _avatar.userInteractionEnabled=YES;
+        [_avatar addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
+        _avatar.isAccessibilityElement=YES; _avatar.accessibilityTraits=UIAccessibilityTraitButton;
+        _name=Label(12,UIFontWeightSemibold); _name.textColor=[UIColor colorWithWhite:1 alpha:.66];
+        _name.userInteractionEnabled=YES; [_name addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
+        _body=Label(15,UIFontWeightRegular); _body.numberOfLines=0; _body.userInteractionEnabled=YES;
+        [_body addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(copyText:)]];
+        _meta=Label(11,UIFontWeightRegular); _meta.textColor=[UIColor colorWithWhite:1 alpha:.43];
+        _media=[UIStackView new]; _media.axis=UILayoutConstraintAxisVertical; _media.alignment=UIStackViewAlignmentLeading; _media.spacing=8;
+        _reply=[UIButton buttonWithType:UIButtonTypeSystem]; _reply.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
+        _reply.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        _reply.tintColor=[UIColor colorWithRed:.70 green:.91 blue:.94 alpha:1];
+        [_reply addTarget:self action:@selector(replies) forControlEvents:UIControlEventTouchUpInside];
+        _stack=[[UIStackView alloc] initWithArrangedSubviews:@[_name,_body,_media,_meta,_reply]];
+        _stack.axis=UILayoutConstraintAxisVertical; _stack.spacing=7;
+        _avatar.translatesAutoresizingMaskIntoConstraints=NO; _stack.translatesAutoresizingMaskIntoConstraints=NO;
+        [self.contentView addSubview:_avatar]; [self.contentView addSubview:_stack];
+        _leading=[_avatar.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:18];
+        _avatarWidth=[_avatar.widthAnchor constraintEqualToConstant:36]; _avatarHeight=[_avatar.heightAnchor constraintEqualToConstant:36];
+        [NSLayoutConstraint activateConstraints:@[_leading,_avatarWidth,_avatarHeight,
+            [_avatar.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
+            [_stack.leadingAnchor constraintEqualToAnchor:_avatar.trailingAnchor constant:11],
+            [_stack.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
+            [_stack.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
+            [_stack.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-13]]];
+    } return self;
+}
+- (void)clearMedia {
+    for(UIView *view in _media.arrangedSubviews.copy) { [_media removeArrangedSubview:view]; [view removeFromSuperview]; }
+}
+- (void)addImage:(NSString *)url sticker:(BOOL)sticker nested:(BOOL)nested {
+    if(!url.length)return;
+    DGCommentImage *image=[DGCommentImage new]; image.sourceURL=url;
+    image.contentMode=UIViewContentModeScaleAspectFit; image.clipsToBounds=YES; image.layer.cornerRadius=sticker?0:12;
+    image.userInteractionEnabled=YES; image.isAccessibilityElement=YES;
+    image.accessibilityTraits=UIAccessibilityTraitButton|UIAccessibilityTraitImage;
+    image.accessibilityLabel=sticker?@"表情包，轻点查看，长按保存":@"评论图片，轻点查看，长按保存";
+    [image addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openImage:)]];
+    [image addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(saveImage:)]];
+    [_media addArrangedSubview:image];
+    NSLayoutConstraint *width=[image.widthAnchor constraintEqualToConstant:sticker?132:(nested?170:202)]; width.priority=UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[width,[image.widthAnchor constraintLessThanOrEqualToAnchor:_media.widthAnchor],
+        [image.heightAnchor constraintEqualToConstant:sticker?132:(nested?150:176)]]];
+    [image remote:url];
+}
+- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading {
+    [_avatar remote:Text(comment.avatar)]; _leading.constant=nested?66:18;
+    _avatarWidth.constant=nested?28:36; _avatarHeight.constant=nested?28:36; _avatar.layer.cornerRadius=nested?14:18;
+    _avatar.accessibilityLabel=[Text(comment.author) stringByAppendingString:@"的主页"];
+    _name.text=Text(comment.author); _plainText=Text(comment.text); _body.hidden=comment.text.empty();
+    NSMutableArray *emojis=[NSMutableArray array];for(const auto &emoji:comment.emoticons)[emojis addObject:@{@"name":Text(emoji.first),@"url":Text(emoji.second)}];_inlineEmoji=emojis;[self renderEmoji];
+    for(NSDictionary *emoji in _inlineEmoji){NSString *url=emoji[@"url"];if([DGEmojiCache() objectForKey:url]||!url.length)continue;
+        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];[request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];__weak DGCommentCell *weakSelf=self;NSString *source=_plainText;
+        [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){UIImage *image=data?[UIImage imageWithData:data]:nil;if(!image)return;[DGEmojiCache() setObject:image forKey:url];dispatch_async(dispatch_get_main_queue(),^{DGCommentCell *cell=weakSelf;if(cell&&[cell->_plainText isEqualToString:source])[cell renderEmoji];});}] resume];}
+    [self clearMedia];
+    for(const auto &url:comment.images) [self addImage:Text(url) sticker:NO nested:nested];
+    if(!comment.sticker.empty() && std::find(comment.images.begin(),comment.images.end(),comment.sticker)==comment.images.end())
+        [self addImage:Text(comment.sticker) sticker:YES nested:nested];
+    _media.hidden=_media.arrangedSubviews.count==0;
+    NSDateFormatter *format=[NSDateFormatter new]; format.dateFormat=@"MM-dd";
+    NSString *date=comment.timestamp>0?[format stringFromDate:[NSDate dateWithTimeIntervalSince1970:comment.timestamp]]:@"";
+    NSMutableArray *parts=[NSMutableArray array]; if(date.length)[parts addObject:date];
+    NSString *location=Text(comment.location); if(location.length)[parts addObject:location];
+    [parts addObject:[@"♡ " stringByAppendingString:Text(douglass::compact(comment.likes))]]; _meta.text=[parts componentsJoinedByString:@"   "];
+    _reply.hidden=nested||comment.replies<=0;
+    NSString *replyText=expanded?@"收起回复 ︿":[NSString stringWithFormat:@"展开 %@ 条回复 ﹀",Text(douglass::compact(comment.replies))];
+    if(loading&&expanded)replyText=@"正在读取回复… 轻点收起";
+    [_reply setTitle:replyText forState:UIControlStateNormal];
+}
+- (void)renderEmoji {
+    NSMutableAttributedString *text=[[NSMutableAttributedString alloc] initWithString:_plainText?:@"" attributes:@{NSFontAttributeName:_body.font,NSForegroundColorAttributeName:_body.textColor}];
+    for(NSDictionary *emoji in _inlineEmoji){UIImage *image=[DGEmojiCache() objectForKey:emoji[@"url"]];NSString *name=emoji[@"name"];if(!image||!name.length)continue;NSUInteger start=0;while(start<text.length){NSRange range=[text.string rangeOfString:name options:0 range:NSMakeRange(start,text.length-start)];if(range.location==NSNotFound)break;NSTextAttachment *attachment=[NSTextAttachment new];attachment.image=image;attachment.bounds=CGRectMake(0,-4,21,21);[text replaceCharactersInRange:range withAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];start=range.location+1;}}_body.attributedText=text;
+}
+- (void)profile { if(self.profileAction)self.profileAction(); }
+- (void)replies { if(self.replyAction)self.replyAction(); }
+- (void)openImage:(UITapGestureRecognizer *)gesture {
+    DGCommentImage *image=(DGCommentImage *)gesture.view; if(self.openImageAction)self.openImageAction(image.sourceURL,image);
+}
+- (void)saveImage:(UILongPressGestureRecognizer *)gesture {
+    if(gesture.state!=UIGestureRecognizerStateBegan)return;
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    DGCommentImage *image=(DGCommentImage *)gesture.view; if(self.saveImageAction)self.saveImageAction(image.sourceURL);
+}
+- (void)copyText:(UILongPressGestureRecognizer *)gesture {
+    if(gesture.state!=UIGestureRecognizerStateBegan||!_body.text.length)return;
+    UIPasteboard.generalPasteboard.string=_plainText;
+    [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"已复制评论");
+}
+- (void)prepareForReuse {
+    [super prepareForReuse]; self.replyAction=nil; self.profileAction=nil; self.openImageAction=nil; self.saveImageAction=nil; [self clearMedia];
+}
+@end
+
+@interface DGReplyFooterCell : UITableViewCell
+@property(nonatomic,copy) void (^loadAction)(void);
+@property(nonatomic,copy) void (^collapseAction)(void);
+- (void)loading:(BOOL)loading more:(BOOL)more error:(BOOL)error count:(NSUInteger)count;
+@end
+@implementation DGReplyFooterCell {
+    UIButton *_load,*_collapse;
+}
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
+    if((self=[super initWithStyle:style reuseIdentifier:identifier])) {
+        self.backgroundColor=UIColor.clearColor; self.selectionStyle=UITableViewCellSelectionStyleNone;
+        _load=[UIButton buttonWithType:UIButtonTypeSystem]; _load.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
+        _load.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; _load.tintColor=[UIColor colorWithRed:.70 green:.91 blue:.94 alpha:1];
+        [_load addTarget:self action:@selector(load) forControlEvents:UIControlEventTouchUpInside];
+        _collapse=[UIButton buttonWithType:UIButtonTypeSystem]; [_collapse setTitle:@"收起 ︿" forState:UIControlStateNormal];
+        _collapse.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; _collapse.tintColor=[UIColor colorWithWhite:1 alpha:.56];
+        [_collapse addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
+        _load.translatesAutoresizingMaskIntoConstraints=NO; _collapse.translatesAutoresizingMaskIntoConstraints=NO;
+        [self.contentView addSubview:_load]; [self.contentView addSubview:_collapse];
+        [NSLayoutConstraint activateConstraints:@[
+            [_load.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:105],
+            [_load.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:2],
+            [_load.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-11],
+            [_load.heightAnchor constraintGreaterThanOrEqualToConstant:30],
+            [_load.trailingAnchor constraintLessThanOrEqualToAnchor:_collapse.leadingAnchor constant:-8],
+            [_collapse.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
+            [_collapse.centerYAnchor constraintEqualToAnchor:_load.centerYAnchor],[_collapse.widthAnchor constraintEqualToConstant:56]]];
+    } return self;
+}
+- (void)loading:(BOOL)loading more:(BOOL)more error:(BOOL)error count:(NSUInteger)count {
+    NSString *title=loading?@"正在读取回复…":error?@"加载失败，轻点重试":more?@"继续展开回复 ﹀":count?@"已显示全部回复":@"暂无可显示的回复";
+    [_load setTitle:title forState:UIControlStateNormal]; _load.enabled=!loading&&(more||error);
+}
+- (void)load { if(self.loadAction)self.loadAction(); }
+- (void)collapse { if(self.collapseAction)self.collapseAction(); }
+- (void)prepareForReuse { [super prepareForReuse]; self.loadAction=nil; self.collapseAction=nil; }
+@end
+
+namespace { struct DGReplyState {
+    std::vector<Comment> items;
+    std::unordered_set<std::string> ids;
+    std::string cursor="0";
+    bool expanded=false,loading=false,more=true,loaded=false,failed=false;
+}; }
+
+@interface DGComments () <UITableViewDataSource,UITableViewDelegate>
+@end
+@implementation DGComments {
+    DGBridge *_bridge;
+    NSString *_workID,*_parent,*_cursor;
+    UIVisualEffectView *_glass,*_closeGlass;
+    UIView *_handle,*_separator;
+    UILabel *_titleLabel,*_modeLabel,*_empty;
+    UIButton *_close,*_footer;
+    UITableView *_table;
+    BOOL _loading,_more,_failed;
+    std::vector<Comment> _comments;
+    std::unordered_set<std::string> _ids;
+    std::unordered_map<std::string,DGReplyState> _replyStates;
+}
+- (instancetype)initWithBridge:(DGBridge *)bridge work:(NSString *)work parent:(NSString *)parent {
+    if((self=[super init])) { _bridge=bridge; _workID=work.copy; _parent=parent.copy; _cursor=@"0"; _more=YES; } return self;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad]; self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    self.view.backgroundColor=UIColor.clearColor; self.view.clipsToBounds=YES;
+    self.view.layer.cornerRadius=30; self.view.layer.cornerCurve=kCACornerCurveContinuous;
+    self.view.layer.borderWidth=.5; self.view.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;
+    _glass=Glass(30); [self.view addSubview:_glass];
+    _handle=[UIView new]; _handle.backgroundColor=[UIColor colorWithWhite:1 alpha:.42]; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
+    _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
+    _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"只读"; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
+    _closeGlass=Glass(20); _close=Symbol(@"xmark",self,@selector(close)); _close.accessibilityLabel=@"关闭评论，继续浏览当前作品";
+    [_closeGlass.contentView addSubview:_close]; [_glass.contentView addSubview:_closeGlass];
+    _separator=[UIView new]; _separator.backgroundColor=[UIColor colorWithWhite:1 alpha:.10]; [_glass.contentView addSubview:_separator];
+    _table=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain]; _table.backgroundColor=UIColor.clearColor;
+    _table.separatorStyle=UITableViewCellSeparatorStyleNone; _table.rowHeight=UITableViewAutomaticDimension; _table.estimatedRowHeight=112;
+    _table.estimatedSectionHeaderHeight=0; _table.estimatedSectionFooterHeight=0; _table.sectionHeaderHeight=0; _table.sectionFooterHeight=0;
+    _table.sectionHeaderTopPadding=0;
+    _table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever; _table.alwaysBounceVertical=YES; _table.showsVerticalScrollIndicator=NO;
+    _table.dataSource=self; _table.delegate=self;
+    [_table registerClass:DGCommentCell.class forCellReuseIdentifier:@"comment"]; [_table registerClass:DGReplyFooterCell.class forCellReuseIdentifier:@"reply-footer"];
+    [_glass.contentView addSubview:_table];
+    _footer=[UIButton buttonWithType:UIButtonTypeSystem]; _footer.frame=CGRectMake(0,0,320,58);
+    _footer.tintColor=[UIColor colorWithWhite:1 alpha:.48]; _footer.titleLabel.font=[UIFont systemFontOfSize:12];
+    [_footer addTarget:self action:@selector(loadMore) forControlEvents:UIControlEventTouchUpInside]; _table.tableFooterView=_footer;
+    _empty=Label(14,UIFontWeightRegular); _empty.textColor=[UIColor colorWithWhite:1 alpha:.6]; _empty.textAlignment=NSTextAlignmentCenter; _empty.numberOfLines=0;
+    _table.backgroundView=_empty; [self loadMore];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _glass.frame=b;
+    _handle.frame=CGRectMake((width-50)/2,8,50,5); _titleLabel.frame=CGRectMake(68,24,MAX(0,width-136),30);
+    _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
+    _separator.frame=CGRectMake(20,73,MAX(0,width-40),.5); _table.frame=CGRectMake(0,77,width,MAX(0,b.size.height-77));
+    _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
+}
+- (void)close { if(self.closeAction)self.closeAction(); }
+- (void)loadMore {
+    if(_loading||!_more)return; _loading=YES; _failed=NO;
+    [_footer setTitle:@"正在读取评论…" forState:UIControlStateNormal]; _footer.enabled=NO;
+    if(_comments.empty())_empty.text=@"正在读取评论"; NSString *oldCursor=_cursor.copy;
+    __weak DGComments *weakSelf=self;
+    [_bridge request:_parent.length?@"replies":@"comments" parameters:@{@"id":_workID,@"parent":_parent?:@"",@"cursor":_cursor} completion:^(NSDictionary *result,NSString *error) {
+        DGComments *self=weakSelf; if(!self)return; self->_loading=NO;
+        if(error) { self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
+            [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES; return; }
+        for(id value in Array(result[@"items"])) { if(![value isKindOfClass:NSDictionary.class])continue;
+            Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)self->_comments.emplace_back(std::move(comment)); }
+        self->_cursor=[result[@"cursor"] description]?:@"0"; self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
+        self->_empty.text=self->_comments.empty()?@"还没有评论":@"";
+        long long total=Number(result[@"total"]); self->_titleLabel.text=total>0?[NSString stringWithFormat:@"评论 %@",Text(douglass::compact(total))]:(self->_parent.length?@"回复":@"评论");
+        [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more; [self->_table reloadData];
+    }];
+}
+- (NSInteger)indexOfComment:(NSString *)identifier {
+    std::string key=String(identifier); for(std::size_t i=0;i<_comments.size();++i)if(_comments[i].id==key)return(NSInteger)i; return NSNotFound;
+}
+- (void)reloadThread:(NSString *)identifier {
+    NSInteger section=[self indexOfComment:identifier]; if(section==NSNotFound||section>=[_table numberOfSections])return;
+    [UIView performWithoutAnimation:^{[self->_table reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];}];
+}
+- (void)toggleReplies:(NSString *)identifier {
+    DGReplyState &state=_replyStates[String(identifier)]; state.expanded=!state.expanded; [self reloadThread:identifier];
+    if(state.expanded&&!state.loaded&&!state.loading)[self loadReplies:identifier];
+}
+- (void)collapseReplies:(NSString *)identifier {
+    auto found=_replyStates.find(String(identifier)); if(found==_replyStates.end())return; found->second.expanded=false; [self reloadThread:identifier];
+}
+- (void)loadReplies:(NSString *)identifier {
+    std::string key=String(identifier); DGReplyState &state=_replyStates[key]; if(state.loading||(!state.more&&!state.failed))return;
+    state.loading=true; state.failed=false; state.expanded=true; NSString *cursor=Text(state.cursor); [self reloadThread:identifier];
+    __weak DGComments *weakSelf=self;
+    [_bridge request:@"replies" parameters:@{@"id":_workID,@"parent":identifier,@"cursor":cursor} completion:^(NSDictionary *result,NSString *error) {
+        DGComments *self=weakSelf; if(!self)return; DGReplyState &state=self->_replyStates[key]; state.loading=false;
+        if(error) {state.failed=true;[self reloadThread:identifier];DGToast(self,error);return;}
+        state.loaded=true;
+        for(id value in Array(result[@"items"])) {if(![value isKindOfClass:NSDictionary.class])continue;
+            Comment reply=ReadComment(value); if(!reply.id.empty()&&state.ids.insert(reply.id).second)state.items.emplace_back(std::move(reply));}
+        state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];
+    }];
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return(NSInteger)_comments.size();}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if(section<0||(std::size_t)section>=_comments.size())return 0; auto found=_replyStates.find(_comments[section].id);
+    return found!=_replyStates.end()&&found->second.expanded?(NSInteger)found->second.items.size()+2:1;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    const Comment &parent=_comments[indexPath.section]; NSString *parentID=Text(parent.id);
+    auto found=_replyStates.find(parent.id); DGReplyState *state=found==_replyStates.end()?nullptr:&found->second;
+    __weak DGComments *weakSelf=self;
+    if(indexPath.row>0&&state&&(std::size_t)indexPath.row>state->items.size()) {
+        DGReplyFooterCell *cell=[tableView dequeueReusableCellWithIdentifier:@"reply-footer" forIndexPath:indexPath];
+        [cell loading:state->loading more:state->more error:state->failed count:state->items.size()];
+        cell.loadAction=^{[weakSelf loadReplies:parentID];}; cell.collapseAction=^{[weakSelf collapseReplies:parentID];}; return cell;
+    }
+    const Comment &comment=indexPath.row==0?parent:state->items[indexPath.row-1];
+    DGCommentCell *cell=[tableView dequeueReusableCellWithIdentifier:@"comment" forIndexPath:indexPath];
+    [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading];
+    NSString *sec=Text(comment.authorID),*name=Text(comment.author);
+    cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};
+    cell.replyAction=^{[weakSelf toggleReplies:parentID];};
+    cell.openImageAction=^(NSString *url,UIImageView *source){DGComments *self=weakSelf;if(self)DGShowImage(self,url,source);};
+    cell.saveImageAction=^(NSString *url){DGComments *self=weakSelf;if(self)DGSaveURL(self,url,NO);};
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if(!_failed&&_more&&!_loading&&(std::size_t)(indexPath.section+3)>=_comments.size())[self loadMore];
+}
+@end
+
