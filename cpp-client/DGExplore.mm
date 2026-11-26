@@ -81,10 +81,10 @@ static NSString *DGCount(id value) { return Text(douglass::compact(Number(value)
 @interface DGGridTile:UIControl
 - (void)record:(NSDictionary *)record recent:(BOOL)recent;
 @end
-@implementation DGGridTile{DGImage *_poster;UILabel *_caption,*_date,*_badge,*_recent,*_newBadge;}
-- (instancetype)initWithFrame:(CGRect)frame{if((self=[super initWithFrame:frame])){_poster=[DGImage new];_poster.contentMode=UIViewContentModeScaleAspectFill;_poster.clipsToBounds=YES;_poster.layer.cornerRadius=8;_poster.backgroundColor=[UIColor colorWithWhite:1 alpha:.06];[self addSubview:_poster];_caption=Label(11,UIFontWeightMedium);_caption.numberOfLines=2;_caption.backgroundColor=[UIColor colorWithWhite:0 alpha:.34];[_poster addSubview:_caption];_date=Label(10,UIFontWeightRegular);_date.textColor=UIColor.secondaryLabelColor;[self addSubview:_date];_badge=Label(10,UIFontWeightSemibold);_badge.textAlignment=NSTextAlignmentCenter;_badge.backgroundColor=[UIColor colorWithWhite:0 alpha:.4];_badge.layer.cornerRadius=5;_badge.clipsToBounds=YES;[_poster addSubview:_badge];_recent=Label(10,UIFontWeightSemibold);_recent.text=@"刚刚看过";_recent.backgroundColor=[UIColor colorWithRed:.08 green:.36 blue:.38 alpha:.94];[_poster addSubview:_recent];_newBadge=Label(11,UIFontWeightBold);_newBadge.text=@"新";_newBadge.textAlignment=NSTextAlignmentCenter;_newBadge.backgroundColor=UIColor.systemPinkColor;_newBadge.layer.cornerRadius=5;_newBadge.clipsToBounds=YES;[_poster addSubview:_newBadge];}return self;}
-- (void)layoutSubviews{[super layoutSubviews];CGFloat w=self.bounds.size.width,h=self.bounds.size.height;_poster.frame=CGRectMake(0,0,w,h-22);_caption.frame=CGRectMake(4,_poster.bounds.size.height-35,w-8,32);_date.frame=CGRectMake(0,h-19,w,16);_badge.frame=CGRectMake(_newBadge.hidden?w-39:w-69,5,34,18);_recent.frame=CGRectMake(4,5,58,19);_newBadge.frame=CGRectMake(w-29,5,24,20);}
-- (void)record:(NSDictionary *)record recent:(BOOL)recent{_newBadge.hidden=![record[@"newInBatch"]boolValue];[_poster remote:DGValue(record[@"cover"])];_caption.text=DGValue(record[@"caption"]);long long time=Number(record[@"publishedAt"]);NSDateFormatter *f=[NSDateFormatter new];f.dateFormat=@"yyyy-MM-dd";_date.text=time>0?[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:time]]:@"日期未知";NSUInteger count=Array(record[@"images"]).count;_badge.hidden=!count;_badge.text=[NSString stringWithFormat:@"%lu图",(unsigned long)count];_recent.hidden=!recent;_poster.layer.borderWidth=recent?2:0;_poster.layer.borderColor=[UIColor colorWithRed:.4 green:.9 blue:.85 alpha:1].CGColor;[self setNeedsLayout];}
+@implementation DGGridTile{DGImage *_poster;UILabel *_caption,*_date,*_badge,*_recent,*_newBadge,*_pinnedBadge;}
+- (instancetype)initWithFrame:(CGRect)frame{if((self=[super initWithFrame:frame])){_poster=[DGImage new];_poster.contentMode=UIViewContentModeScaleAspectFill;_poster.clipsToBounds=YES;_poster.layer.cornerRadius=8;_poster.backgroundColor=[UIColor colorWithWhite:1 alpha:.06];[self addSubview:_poster];_caption=Label(11,UIFontWeightMedium);_caption.numberOfLines=2;_caption.backgroundColor=[UIColor colorWithWhite:0 alpha:.34];[_poster addSubview:_caption];_date=Label(10,UIFontWeightRegular);_date.textColor=UIColor.secondaryLabelColor;[self addSubview:_date];_badge=Label(10,UIFontWeightSemibold);_badge.textAlignment=NSTextAlignmentCenter;_badge.backgroundColor=[UIColor colorWithWhite:0 alpha:.4];_badge.layer.cornerRadius=5;_badge.clipsToBounds=YES;[_poster addSubview:_badge];_recent=Label(10,UIFontWeightSemibold);_recent.text=@"刚刚看过";_recent.backgroundColor=[UIColor colorWithRed:.08 green:.36 blue:.38 alpha:.94];[_poster addSubview:_recent];_newBadge=Label(11,UIFontWeightBold);_newBadge.text=@"新";_newBadge.textAlignment=NSTextAlignmentCenter;_newBadge.backgroundColor=UIColor.systemPinkColor;_newBadge.layer.cornerRadius=5;_newBadge.clipsToBounds=YES;[_poster addSubview:_newBadge];_pinnedBadge=Label(10,UIFontWeightSemibold);_pinnedBadge.text=@"置顶";_pinnedBadge.textAlignment=NSTextAlignmentCenter;_pinnedBadge.backgroundColor=UIColor.systemPinkColor;_pinnedBadge.layer.cornerRadius=4;_pinnedBadge.clipsToBounds=YES;[_poster addSubview:_pinnedBadge];}return self;}
+- (void)layoutSubviews{[super layoutSubviews];CGFloat w=self.bounds.size.width,h=self.bounds.size.height;_poster.frame=CGRectMake(0,0,w,h-22);_caption.frame=CGRectMake(4,_poster.bounds.size.height-35,w-8,32);_date.frame=CGRectMake(0,h-19,w,16);_badge.frame=CGRectMake(_newBadge.hidden?w-39:w-69,5,34,18);_recent.frame=CGRectMake(4,_pinnedBadge.hidden?5:27,58,19);_pinnedBadge.frame=CGRectMake(4,5,34,19);_newBadge.frame=CGRectMake(w-29,5,24,20);}
+- (void)record:(NSDictionary *)record recent:(BOOL)recent{_pinnedBadge.hidden=![record[@"pinned"]boolValue];_newBadge.hidden=![record[@"newInBatch"]boolValue];[_poster remote:DGValue(record[@"cover"])];_caption.text=DGValue(record[@"caption"]);long long time=Number(record[@"publishedAt"]);NSDateFormatter *f=[NSDateFormatter new];f.dateFormat=@"yyyy-MM-dd";_date.text=time>0?[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:time]]:@"日期未知";NSUInteger count=Array(record[@"images"]).count;_badge.hidden=!count;_badge.text=[NSString stringWithFormat:@"%lu图",(unsigned long)count];_recent.hidden=!recent;_poster.layer.borderWidth=recent?2:0;_poster.layer.borderColor=[UIColor colorWithRed:.4 green:.9 blue:.85 alpha:1].CGColor;[self setNeedsLayout];}
 @end
 @interface DGExploreGridRow:UITableViewCell
 @property(nonatomic,copy) void (^selectWork)(NSInteger index);
@@ -116,6 +116,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     UISegmentedControl *_searchTabs;UIButton *_webSearch,*_followUser,*_blockUser;UILabel *_searchHint;UIViewController *_searchPage;
     NSInteger _searchKind;BOOL _relationshipBusy,_webImportMode;
     DGSearchAssist *_assist;CGFloat _keyboardTop;
+    UIVisualEffectView *_locateGlass;UIButton *_locateButton;BOOL _locating;
     NSMutableArray<NSDictionary *> *_records;NSMutableSet<NSString *> *_ids;
     NSDictionary *_person;NSString *_cursor,*_query;BOOL _own,_loading,_more,_failed,_locateFound,_profileLoading;
     NSString *_lastQueueID;BOOL _lastQueuePlaying;NSUInteger _generation,_seekPages;NSInteger _selectedTab;AVPlayer *_audio;id _audioEnd;
@@ -140,6 +141,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     [_footer addTarget:self action:@selector(loadPage) forControlEvents:UIControlEventTouchUpInside];_table.tableFooterView=_footer;
     _refresh=[UIRefreshControl new];_refresh.tintColor=UIColor.whiteColor;[_refresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];_table.refreshControl=_refresh;
     [self buildHeader];
+    if(_mode==DGExploreProfile&&self.locate.length){_locateGlass=Glass(23);[self.view addSubview:_locateGlass];_locateButton=[UIButton buttonWithType:UIButtonTypeSystem];[_locateButton setTitle:@"定位刚刚看过" forState:UIControlStateNormal];[_locateButton setImage:[UIImage systemImageNamed:@"scope"] forState:UIControlStateNormal];_locateButton.tintColor=UIColor.whiteColor;_locateButton.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];[_locateButton addTarget:self action:@selector(beginLocate) forControlEvents:UIControlEventTouchUpInside];[_locateGlass.contentView addSubview:_locateButton];_table.contentInset=UIEdgeInsetsMake(0,0,76,0);}
     if(_mode==DGExploreSearch){_assist=[[DGSearchAssist alloc]initWithBridge:_bridge];[self.view addSubview:_assist];__weak DGExplore *weak=self;_assist.selected=^(NSString *word){[weak submitSearch:word];};_assist.fill=^(NSString *word){DGExplore *self=weak;if(!self)return;self->_search.text=word;[self->_search becomeFirstResponder];[self->_assist keyword:word];};[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];}
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateMusicPlayback) name:@"DGMusicStateChanged" object:nil];
     if(_mode==DGExploreProfile)[self loadProfile];
@@ -180,7 +182,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
             [_followingButton addTarget:self action:@selector(showFollowing) forControlEvents:UIControlEventTouchUpInside];[_header addSubview:_followingButton];
             if(!_own){_followUser=[UIButton buttonWithType:UIButtonTypeSystem];_blockUser=[UIButton buttonWithType:UIButtonTypeSystem];[_followUser setTitle:@"关注" forState:UIControlStateNormal];[_blockUser setTitle:@"拉黑" forState:UIControlStateNormal];for(UIButton *button in @[_followUser,_blockUser]){button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];button.layer.cornerRadius=15;button.backgroundColor=[UIColor colorWithWhite:1 alpha:.08];button.enabled=NO;[_header addSubview:button];}[_followUser addTarget:self action:@selector(toggleFollow) forControlEvents:UIControlEventTouchUpInside];[_blockUser addTarget:self action:@selector(confirmBlock) forControlEvents:UIControlEventTouchUpInside];}
             _name.text=self.displayName.length?self.displayName:(_own?@"我的":@"用户主页");_signature.text=@"正在读取个人资料…";
-            _context.text=self.locate.length?@"正在定位刚刚看过的作品":@"作品按平台返回顺序展示";
+            _context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":@"作品按平台返回顺序展示";
         }else if(_mode==DGExploreMusic){
             _musicControls=Glass(20);[_header addSubview:_musicControls];_play=Symbol(@"play.fill",self,@selector(toggleAudio));_play.accessibilityLabel=@"播放或暂停原声";[_musicControls.contentView addSubview:_play];
             _save=Symbol(@"square.and.arrow.down",self,@selector(saveAudio));_save.accessibilityLabel=@"保存原声";[_musicControls.contentView addSubview:_save];_collectMusic=Symbol(@"star",self,@selector(collectMusic));_collectMusic.accessibilityLabel=@"收藏原声";[_musicControls.contentView addSubview:_collectMusic];
@@ -191,7 +193,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     }
     [self layoutHeader];_table.tableHeaderView=_header;
 }
-- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height-self.view.safeAreaInsets.bottom;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}}
+- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_locateGlass){CGFloat width=self.view.bounds.size.width;_locateGlass.frame=CGRectMake(MAX(16,width-188),self.view.bounds.size.height-self.view.safeAreaInsets.bottom-60,172,44);_locateButton.frame=_locateGlass.bounds;}if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height-self.view.safeAreaInsets.bottom;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}}
 - (void)keyboardChanged:(NSNotification *)note{CGRect frame=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboardTop=CGRectGetMinY(frame)>=self.view.bounds.size.height?0:MAX(0,CGRectGetMinY(frame));[self.view setNeedsLayout];[UIView animateWithDuration:.25 animations:^{[self.view layoutIfNeeded];}];}
 - (void)layoutHeader {
     CGFloat width=self.view.bounds.size.width,height=_mode==DGExploreProfile?268:_mode==DGExploreSearch?148:_mode==DGExploreMusic?250:108;
@@ -219,7 +221,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         self->_stats.text=[NSString stringWithFormat:@"%@ 获赞 · %@ 粉丝",DGCount(result[@"likes"]),DGCount(result[@"followers"])];
         [self->_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];
         [self updateRelationship];
-        NSString *location=DGValue(result[@"location"]);self->_context.text=self.locate.length?@"正在定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
+        NSString *location=DGValue(result[@"location"]);self->_context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
         [self resetList];
     }];
 }
@@ -243,7 +245,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (BOOL)musicRows{return _mode==DGExploreProfile&&_own&&_selectedTab==3;}
 - (BOOL)peopleRows{return _mode==DGExploreFollowing||(_mode==DGExploreSearch&&_searchKind==1);}
-- (void)tabChanged{DGMusicStopOwned(self);_selectedTab=_tabs.selectedSegmentIndex;[self pauseAudio];[self resetList];}
+- (void)tabChanged{[self endLocate];DGMusicStopOwned(self);_selectedTab=_tabs.selectedSegmentIndex;[self pauseAudio];[self resetList];}
 - (void)refresh {
     if(_mode==DGExploreProfile&&!_person){[self loadProfile];[_refresh endRefreshing];return;}
     if(_mode==DGExploreSearch&&(!_query.length||_webImportMode)){[_refresh endRefreshing];if(_webImportMode)DGToast(self,@"可使用右上角网页按钮继续翻页；重新搜索可重置结果");return;}[self resetList];
@@ -265,7 +267,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     __weak DGExplore *weakSelf=self;
     [_bridge request:operation parameters:parameters completion:^(NSDictionary *result,NSString *error){
         DGExplore *self=weakSelf;if(!self||generation!=self->_generation)return;self->_loading=NO;[self->_refresh endRefreshing];
-        if(error){self->_failed=YES;if(!self->_records.count)self->_empty.text=error;[self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal];self->_footer.enabled=YES;return;}
+        if(error){[self endLocate];self->_failed=YES;if(!self->_records.count)self->_empty.text=error;[self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal];self->_footer.enabled=YES;return;}
         BOOL people=[self peopleRows],music=[self musicRows];
         for(id raw in Array(result[@"items"])){
             if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *record=raw;NSString *identifier=DGValue(record[people?@"sec":@"id"]);
@@ -273,7 +275,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
             if(!people&&!music&&!ReadWork(record).playable())continue;
             [self->_ids addObject:identifier];[self->_records addObject:record];
         }
-        ++self->_seekPages;self->_cursor=DGValue(result[@"cursor"]);if(!self->_cursor.length)self->_cursor=@"0";
+        if(self->_mode==DGExploreProfile&&self->_selectedTab==0)[self->_records sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){BOOL first=[a[@"pinned"]boolValue],second=[b[@"pinned"]boolValue];return first==second?NSOrderedSame:first?NSOrderedAscending:NSOrderedDescending;}];++self->_seekPages;self->_cursor=DGValue(result[@"cursor"]);if(!self->_cursor.length)self->_cursor=@"0";
         self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
         self->_empty.text=self->_records.count?@"":people?@"暂无可查看的用户":music?@"还没有收藏音乐":@"暂无可查看的作品，内容也可能被账号隐私设置限制";
         [self->_footer setTitle:self->_more?@"继续加载":@"已显示全部可查看内容" forState:UIControlStateNormal];self->_footer.enabled=self->_more;
@@ -281,13 +283,15 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     }];
 }
 - (void)locateIfNeeded {
-    if(_mode!=DGExploreProfile||_selectedTab!=0||!self.locate.length||_locateFound)return;
+    if(!_locating||_mode!=DGExploreProfile||_selectedTab!=0||!self.locate.length||_locateFound)return;
     NSInteger found=NSNotFound;for(NSUInteger index=0;index<_records.count;++index)if([DGValue(_records[index][@"id"]) isEqualToString:self.locate]){found=index;break;}
-    if(found!=NSNotFound){_locateFound=YES;_context.text=@"已定位到刚刚看过的作品";[_table reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:found/3 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
+    if(found!=NSNotFound){_locateFound=YES;[self endLocate];_context.text=@"已定位到刚刚看过的作品";[_table reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:found/3 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
         dispatch_async(dispatch_get_main_queue(),^{if(found/3<[self->_table numberOfRowsInSection:0])[self->_table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:found/3 inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:YES];});return;}
     if(_more&&_seekPages<15){_context.text=[NSString stringWithFormat:@"正在定位刚刚看过的作品 · 已读取 %lu 页",(unsigned long)_seekPages];dispatch_async(dispatch_get_main_queue(),^{[self loadPage];});}
-    else _context.text=_more?@"前 15 页未找到刚刚看过的作品，可继续下滑加载":@"该作品未出现在此主页可查看的作品列表中";
+    else{_context.text=_more?@"前 15 页未找到刚刚看过的作品，可继续下滑加载":@"该作品未出现在此主页可查看的作品列表中";[self endLocate];}
 }
+- (void)beginLocate{DGHaptic();if(_selectedTab!=0){_selectedTab=0;_tabs.selectedSegmentIndex=0;[self resetList];}_locateFound=NO;_locating=YES;_locateButton.enabled=NO;[_locateButton setTitle:@"正在定位…" forState:UIControlStateNormal];[self locateIfNeeded];}
+- (void)endLocate{_locating=NO;_locateButton.enabled=YES;[_locateButton setTitle:@"定位刚刚看过" forState:UIControlStateNormal];}
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
     [self submitSearch:searchBar.text];
 }

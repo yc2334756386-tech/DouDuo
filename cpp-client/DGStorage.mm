@@ -34,8 +34,8 @@ static void DGDownload(NSString *url,void (^completion)(NSData *,NSURLResponse *
     }] resume];
 }
 void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
-    if(video)[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];
     if(!url.length){DGToast(host,@"该内容没有可保存的地址");return;}
+    DGHaptic();
     DGToast(host,video ? @"正在下载视频…" : @"正在保存图片…");
     [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status){
         if(status!=PHAuthorizationStatusAuthorized && status!=PHAuthorizationStatusLimited){DGToast(host,@"请在系统设置允许添加照片");return;}
@@ -51,19 +51,20 @@ void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
                 PHAssetCreationRequest *asset=[PHAssetCreationRequest creationRequestForAsset];
                 [asset addResourceWithType:video?PHAssetResourceTypeVideo:PHAssetResourceTypePhoto fileURL:file options:nil];
             } completionHandler:^(BOOL success,NSError *failure){
-                [NSFileManager.defaultManager removeItemAtURL:file error:nil];DGToast(host,success?@"已保存到相册":@"相册保存失败，请稍后重试");
+                [NSFileManager.defaultManager removeItemAtURL:file error:nil];if(success)DGHaptic();DGToast(host,success?@"已保存到相册":@"相册保存失败，请稍后重试");
             }];
         }] resume];
     }];
 }
 static void DGDownloadAudioConfirmed(UIViewController *host,NSString *url,NSString *name) {
     if(!url.length){DGToast(host,@"平台未提供可保存的原声地址");return;}
+    DGHaptic();
     DGToast(host,@"正在下载原声…");
     DGDownload(url,^(NSData *data,NSURLResponse *response,NSError *error){
         if(error || !data.length){DGToast(host,@"原声下载失败");return;}
         NSString *extension=[response.MIMEType containsString:@"mpeg"]?@"mp3":@"m4a";
         NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"原声-%@.%@",NSUUID.UUID.UUIDString,extension]]];
-        [data writeToURL:file atomically:YES];
+        [data writeToURL:file atomically:YES];DGHaptic();
         dispatch_async(dispatch_get_main_queue(),^{
             UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
             share.completionWithItemsHandler=^(UIActivityType activity,BOOL completed,NSArray *items,NSError *failure){[NSFileManager.defaultManager removeItemAtURL:file error:nil];};
@@ -78,7 +79,7 @@ void DGSaveAudio(UIViewController *host,NSString *url,NSString *name){
 }
 void DGConfirmTextCopy(UIViewController *host,NSString *text,NSString *title,NSString *success){
     if(!host||host.presentedViewController||!text.length)return;NSString *preview=text.length>180?[[text substringToIndex:180]stringByAppendingString:@"…"]:text;UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:preview preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=text;DGToast(host,success);}]];[host presentViewController:alert animated:YES completion:nil];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=text;DGHaptic();DGToast(host,success);}]];[host presentViewController:alert animated:YES completion:nil];
 }
 void DGConfirmCopy(UIViewController *host,NSString *text){DGConfirmTextCopy(host,text,@"复制作品文案？",@"文案已复制");}
 void DGConfirmAvatarSave(UIViewController *host,NSString *url){if(!host||host.presentedViewController||!url.length)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"保存用户头像？" message:@"将这张头像添加到系统相册" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGSaveURL(host,url,NO);}]];[host presentViewController:alert animated:YES completion:nil];}

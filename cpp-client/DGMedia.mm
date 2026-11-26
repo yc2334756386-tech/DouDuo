@@ -211,7 +211,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)comments {if(self.commentsAction)self.commentsAction();}
 - (void)profile {if(self.profileAction)self.profileAction();}
 - (void)music {if(self.musicAction)self.musicAction();}
-- (void)fill {BOOL enabled=!DGBackgroundAudioEnabled();[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"douglass.backgroundAudio"];[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];DGToast(self.presenter,enabled?@"已开启后台音频播放":@"已关闭后台音频播放");}
+- (void)fill {DGHaptic();BOOL enabled=!DGBackgroundAudioEnabled();[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"douglass.backgroundAudio"];[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];DGToast(self.presenter,enabled?@"已开启后台音频播放":@"已关闭后台音频播放");}
 - (void)more {if(self.moreAction)self.moreAction();else[self download:CGPointMake(self.contentView.bounds.size.width-40,self.contentView.bounds.size.height-140)];}
 - (void)like {[self write:@"digg" add:!_work.liked];}
 - (void)collect {[self write:@"favorite" add:!_work.collected];}

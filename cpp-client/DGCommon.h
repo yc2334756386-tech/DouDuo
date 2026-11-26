@@ -97,6 +97,7 @@ void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge 
 @property(nonatomic,copy) void (^finished)(void);
 @end
 void DGToast(UIViewController *host, NSString *message);
+void DGHaptic(void);
 void DGSaveURL(UIViewController *host, NSString *url, BOOL video);
 void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
 void DGConfirmCopy(UIViewController *host, NSString *text);

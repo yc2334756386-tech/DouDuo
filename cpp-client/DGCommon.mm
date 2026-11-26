@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInterval last=0;CFTimeInterval now=CACurrentMediaTime();if(now-last<.08)return;last=now;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];});}
 @implementation DGImage {
     NSURLSessionDataTask *_task;
     NSString *_source;

@@ -62,11 +62,18 @@
   const post=(path,params,body,options)=>request('POST',path,params||{},body==null?'':body,options);
   let emojiCatalog={},emojiLoading;
   const ipCache=new Map();let selfUID='';
+  const ipFrom=value=>{
+    value=value||{};const raw=value.ip_location||value.ip_label||'',object=raw&&typeof raw==='object'?raw:{};
+    const clean=text=>typeof text==='string'&&!/^\d+$/.test(text)?text.replace(/^IP属地[:：\s]*/,'').trim():'';
+    const province=clean(object.province_name||object.province||value.ip_province),city=clean(object.city_name||object.city||value.ip_city);
+    const text=clean(raw);const parts=province||city?[province,city]:[text];if(text&&city&&!province)parts.unshift(text);
+    return [...new Set(parts.filter(Boolean))].join('·').replace(/\s*[|/，,、·]\s*/g,'·').replace(/([\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])/g,'$1·').replace(/^(.+?(?:省|自治区|特别行政区))(.+(?:市|州|地区))$/,'$1·$2');
+  };
   const loadEmojis=()=>emojiLoading||(emojiLoading=get('/aweme/v1/web/emoji/list/',{}).then(data=>{for(const value of data.emoji_list||[]){const url=first(value.emoji_url);if(value.display_name&&url)emojiCatalog[value.display_name]=url;}}).catch(()=>{}));
   const user=value=>{
     value=value||{};
     const uid=id(value.uid||value.id_str||value.id);
-    return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:typeof value.ip_location==='string'?value.ip_location:typeof value.ip_label==='string'?value.ip_label:''};
+    return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:ipFrom(value)};
   };
   const music=value=>{
     value=value||{};
@@ -100,14 +107,14 @@
     const qualityFPS=[...knownFPS].filter(value=>!smooth||fps(value)>=fps(smooth)).sort(rateOrder)[0]||quality;
     const variant=rate=>{if(!rate)return null;const urls=(rate.play_addr||{}).url_list||[];const direct=urls.find(url=>/^https?:\/\//.test(url)&&!url.includes('/aweme/v1/play/')),redirect=urls.find(url=>url.includes('/aweme/v1/play/'));const play=redirect||direct||first(rate.play_addr);return play?{play,alternate:direct&&direct!==play?direct:urls.find(url=>url!==play)||'',fps:fps(rate),shortSide:dimension(rate)}:null;};
     const variants={quality:variant(quality),smooth:variant(smooth),qualityFPS:variant(qualityFPS)};
-    const rawIP=typeof author.ip_location==='string'?author.ip_location:typeof author.ip_label==='string'?author.ip_label:'';
+    const rawIP=ipFrom(author)||ipFrom(item);
     // Human-readable work publication fields are not proof of a person's precise IP city.
     const ip=rawIP.replace(/^IP属地[:：\s]*/,'');
     const regionCode=String(item.city||'');
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -158,7 +165,8 @@
       if(operation==='works'||operation==='likes'){
         const query=operation==='works'?{sec_user_id:params.sec,max_cursor:cursor,locate_query:'false',show_live_replay_strategy:'1',need_time_list:'1',time_list_query:'0',whale_cut_token:'',cut_version:'1',count:'18'}:{sec_user_id:params.sec,max_cursor:cursor,min_cursor:'0',count:'18',cut_version:'1'};
         const data=await get(operation==='works'?'/aweme/v1/web/aweme/post/':'/aweme/v1/web/aweme/favorite/',query,{postList:operation==='works'});
-        const list=(data.aweme_list||[]).filter(item=>!(operation==='works'&&item.status&&Number(item.status.private_status)===1));
+        const pinned=operation==='works'&&cursor==='0'&&Array.isArray(data.top_aweme_list)?data.top_aweme_list:[];const topIDs=new Set((Array.isArray(data.top_aweme_ids)?data.top_aweme_ids:[]).map(id).filter(Boolean));
+        const list=[...pinned.map(item=>Object.assign({},item,{is_top:1})),...(data.aweme_list||[])].filter(item=>!(operation==='works'&&item.status&&Number(item.status.private_status)===1));for(const item of list)if(topIDs.has(id(item.aweme_id)))item.is_top=1;
         if(operation==='works') list.forEach(item=>{item.__ownList=true;});return page(data,list,data.max_cursor,data.has_more);
       }
       if(operation==='collections'){
