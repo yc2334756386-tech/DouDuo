@@ -83,6 +83,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 
 @interface DGImage : UIImageView
 @property(nonatomic) BOOL colorAdjusted;
+@property(nonatomic) NSUInteger maximumPixelSize;
 - (void)remote:(NSString *)url;
 @end
 @interface DGNavigationController:UINavigationController

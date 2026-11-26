@@ -19,7 +19,8 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     if ([_source isEqualToString:url]) return;
     [_task cancel]; _source = url.copy; self.image = nil;
     if (!url.length) return;
-    UIImage *cached = [DGImage.cache objectForKey:url];
+    NSUInteger maxPixels=self.maximumPixelSize?:2048;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
+    UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached; return; }
     NSURL *address = [NSURL URLWithString:url];
     if (!address) return;
@@ -34,7 +35,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         CGImageRef thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)@{
             (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
             (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
-            (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@2048});
+            (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(maxPixels)});
         UIImage *image = thumbnail ? [UIImage imageWithCGImage:thumbnail] : nil;
         size_t frames=CGImageSourceGetCount(source);
         if(frames>1 && data.length<12*1024*1024){
@@ -54,7 +55,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         if (thumbnail) CGImageRelease(thumbnail);
         CFRelease(source);
         if (!image) return;
-        [DGImage.cache setObject:image forKey:url cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
+        [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
         dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && [self->_source isEqualToString:url]) self.image = image; });
     }];
     [_task resume];

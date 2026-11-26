@@ -10,7 +10,7 @@ This application is an independent third-party client and has no affiliation
 with Douyin. Content and service marks belong to their respective owners.
 Login takes place on the official website. Session data stays in the app's
 local WebKit website store. This version has no developer-operated backend,
-analytics SDK or comment publishing interface. Likes and collection changes
+analytics SDK. Comment publishing is optional and occurs only after the user enables it and explicitly taps Send. Images use short-lived official upload credentials kept in memory. Voice input currently transcribes to text; raw voice comments are not supported. Likes and collection changes
 and follow/block changes are sent only when requested in the interface.
 Manual search-page importing reads real results loaded by the official page;
 the user controls pagination and completes any verification themselves.
