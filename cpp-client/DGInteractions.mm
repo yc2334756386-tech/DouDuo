@@ -17,7 +17,7 @@ static NSMutableDictionary<NSString *,DGInteraction *> *DGInteractionEntries(voi
   if(DGInteractionEntries()[self.identifier]!=self)return;
   if(like)self.busyLike=NO;else self.busyCollect=NO;
   BOOL ok=!error&&[result[@"ok"]boolValue];if(ok){if(like)self.confirmedLike=target;else self.confirmedCollect=target;}
-  else{if(like)self.desiredLike=self.confirmedLike;else self.desiredCollect=self.confirmedCollect;DGToast(self.presenter,error?:@"平台未确认操作，已恢复显示；请稍后核对");}
+  else{if(like){if(self.desiredLike==target)self.desiredLike=self.confirmedLike;}else if(self.desiredCollect==target)self.desiredCollect=self.confirmedCollect;DGToast(self.presenter,error?:@"平台未确认操作，已恢复显示；请稍后核对");}
   [self publish];if(ok)[self send:kind];
  }];
 }
@@ -27,3 +27,5 @@ void DGOptimisticAction(DGBridge *bridge,UIViewController *presenter,NSDictionar
 }
 void DGResetInteractions(void){[DGInteractionEntries()removeAllObjects];}
 
+
+NSDictionary *DGMergeInteractionSnapshot(NSDictionary *snapshot){DGInteraction *s=DGInteractionEntries()[Text(String(snapshot[@"id"]))];if(!s)return snapshot;NSMutableDictionary *merged=[snapshot mutableCopy];merged[@"liked"]=@(s.desiredLike);merged[@"collected"]=@(s.desiredCollect);merged[@"likes"]=@(MAX(0,s.initialLikes+(s.desiredLike?1:0)-(s.initialLike?1:0)));merged[@"collects"]=@(MAX(0,s.initialCollects+(s.desiredCollect?1:0)-(s.initialCollect?1:0)));return merged;}

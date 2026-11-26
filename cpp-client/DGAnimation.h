@@ -5,3 +5,5 @@ CAMediaTimingFunction *DGTiming(void);
 UIViewPropertyAnimator *DGAnimate(NSTimeInterval duration, void (^changes)(void), void (^done)(BOOL));
 UIViewController *DGMakeAnimationSettings(void);
 void DGRefreshRateApply(void);
+
+void DGRefreshRateSuspend(void);

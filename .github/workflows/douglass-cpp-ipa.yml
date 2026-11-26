@@ -21,9 +21,9 @@ jobs:
         run: bash cpp-client/scripts/build-ipa.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: DouGlass-0.8.0-unsigned-IPA
+          name: DouGlass-0.9.0-unsigned-IPA
           path: |
-            build/douglass/DouGlass-0.8.0-unsigned.ipa
+            build/douglass/DouGlass-0.9.0-unsigned.ipa
             build/douglass/SHA256.txt
           if-no-files-found: error
           compression-level: 0

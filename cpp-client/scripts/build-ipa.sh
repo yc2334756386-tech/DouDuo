@@ -27,7 +27,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "$OUTPUT/Core.o" "$CLIENT"/*.mm \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
-  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework MediaToolbox -framework CoreText -framework UniformTypeIdentifiers -framework PhotosUI -framework Speech -lz \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework MediaToolbox -framework CoreText -framework UniformTypeIdentifiers -framework PhotosUI -lz \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"
@@ -47,10 +47,8 @@ info={
   'CFBundleInfoDictionaryVersion':'6.0',
   'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.8.0',
+  'CFBundleShortVersionString':'0.9.0',
   'UIBackgroundModes':['audio'],
-  'NSMicrophoneUsageDescription':'通过麦克风将语音转为可编辑的评论草稿',
-  'NSSpeechRecognitionUsageDescription':'将语音识别为文字，检查后由你确认发表评论',
   'NSPhotoLibraryAddUsageDescription':'保存你选择的视频、图集和评论图片到相册',
   'CFBundleVersion':sys.argv[3],
   'LSRequiresIPhoneOS':True,
@@ -74,6 +72,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.8.0-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.8.0-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.8.0-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.9.0-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.9.0-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.9.0-unsigned.ipa"

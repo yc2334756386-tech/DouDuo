@@ -51,7 +51,7 @@
     });
     const data=parse(response.body);
     if(data && Number(data.status_code)===8) throw new Error('登录已失效，请重新登录');
-    const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
+    const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code!=null&&Number(data.status_code)===0:data.status_code==null||Number(data.status_code)===0);
     const actualContent=data&&((Array.isArray(data.aweme_list)&&data.aweme_list.length)||(Array.isArray(data.comments)&&data.comments.length)||data.user||data.user_info||(Array.isArray(data.data)&&data.data.length));
     if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
     const activeChallenge=/安全验证|人机验证|captcha/i.test(document.title)||[...document.querySelectorAll('iframe[src*=verify],iframe[src*=captcha],[class*=captcha_verify]')].some(element=>{const rect=element.getBoundingClientRect();return rect.width>20&&rect.height>20&&getComputedStyle(element).visibility!=='hidden';});
@@ -115,13 +115,13 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:Number(item.user_digged)===1,collected:Number(item.is_collect??item.is_collected??item.collect_stat??0)===1,isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
     const inline=(item.emoji_list||[]).map(emoji=>({name:emoji.display_name||emoji.emoji_name||'',url:first(emoji.emoji_url)||first(emoji.url)})).filter(emoji=>emoji.name&&emoji.url);
     for(const name of new Set(String(item.text||'').match(/\[[^\]\r\n]{1,14}\]/g)||[]))if(emojiCatalog[name])inline.push({name,url:emojiCatalog[name]});
-    return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),liked:!!item.user_digged,likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
+    return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',authorUID:id((item.user||{}).uid),isMe:!!(selfUID&&id((item.user||{}).uid)===selfUID),canDelete:item.can_delete===true||Number(item.can_delete)===1,avatar:first((item.user||{}).avatar_thumb),liked:Number(item.user_digged)===1,likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
@@ -152,6 +152,9 @@
       }
       if(operation==='commentLike'){
         await writeReady();const values={cid:params.cid,aweme_id:params.id,digg_type:params.add?'1':'0',channel_id:'0',app_name:'aweme',item_type:'0'};await post('/aweme/v1/web/comment/digg',values,new URLSearchParams(values).toString(),{strict:true});return {ok:true};
+      }
+      if(operation==='commentDelete'){
+        await writeReady();await post('/aweme/v1/web/comment/delete',{cid:params.cid,channel_id:'0',app_name:'aweme'},'',{strict:true});return {ok:true};
       }
       if(operation==='commentUploadAuth'){
         await writeReady();const data=await get('/aweme/v1/web/comment/upload/auth/',{content_type:'0'});return {ak:data.access_key||'',sk:data.secret_key||'',token:data.session_token||'',sid:id(data.service_id),now:Number(data.current_time||0)};
@@ -234,7 +237,7 @@
       if(operation==='digg'||operation==='favorite'){
         await writeReady();const value=params.add===true||params.add===1||params.add==='1'?'1':'0';
         const query=operation==='digg'?{aweme_id:params.id,type:value,item_type:'0'}:{aweme_id:params.id,action:value};
-        const inspect=async()=>{const detail=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});const item=detail.aweme_detail||detail.aweme||{};if(operation==='digg')return typeof item.user_digged==='number'||typeof item.user_digged==='boolean'?!!item.user_digged:null;if(item.is_collect!=null)return !!item.is_collect;if(item.is_collected!=null)return !!item.is_collected;if(item.collect_stat!=null)return Number(item.collect_stat)===1;return null;};
+        const inspect=async()=>{const detail=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});const item=detail.aweme_detail||detail.aweme||{};if(operation==='digg')return item.user_digged!=null?Number(item.user_digged)===1:null;if(item.is_collect!=null)return Number(item.is_collect)===1;if(item.is_collected!=null)return Number(item.is_collected)===1;if(item.collect_stat!=null)return Number(item.collect_stat)===1;return null;};
         try{await post(operation==='digg'?'/aweme/v1/web/commit/item/digg/':'/aweme/v1/web/commit/item/collect/',query,'',{strict:true});return {ok:true,added:value==='1'};}catch(error){if(error.verificationRequired)throw error;let state=null;try{await delay(500);state=await inspect();}catch(check){if(check.verificationRequired)throw check;}if(state===(value==='1'))return {ok:true,added:value==='1',verified:true};if(operation==='favorite'&&state!==null){try{await post('/aweme/v1/web/aweme/collect/',query,'',{strict:true});return {ok:true,added:value==='1'};}catch(fallback){if(fallback.verificationRequired)throw fallback;await delay(700);if(await inspect()===(value==='1'))return {ok:true,added:value==='1',verified:true};}}throw error;}
       }
       if(operation==='emoji'){

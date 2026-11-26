@@ -8,14 +8,14 @@ NSString *DGUserAgent(void) {
 }
 @implementation DGBridge {
     WKWebView *_web;
-    BOOL _ready, _started;
+    BOOL _ready, _started, _recoverOnActive;
     NSUInteger _generation;
     NSMutableArray *_waiters;
     NSString *_script, *_failure;
 }
 - (instancetype)init {
     if ((self = [super init])) {
-        _waiters = [NSMutableArray array];
+        _waiters = [NSMutableArray array];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationActive) name:UIApplicationDidBecomeActiveNotification object:nil];
         NSString *path = [NSBundle.mainBundle pathForResource:@"bridge" ofType:@"js"];
         _script = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
         NSString *regions=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"DouyinPublicationRegions" ofType:@"json"] encoding:NSUTF8StringEncoding error:nil];
@@ -97,7 +97,8 @@ NSString *DGUserAgent(void) {
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     [self webView:webView didFailNavigation:navigation withError:error];
 }
-- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView { [self reload]; }
+- (void)applicationActive{if(_recoverOnActive){_recoverOnActive=NO;[self reload];}}
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {if(UIApplication.sharedApplication.applicationState==UIApplicationStateActive)[self reload];else{_ready=NO;_recoverOnActive=YES;}}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSString *scheme = action.request.URL.scheme.lowercaseString;
     decisionHandler(([@[@"http", @"https", @"about"] containsObject:scheme]) ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
@@ -138,6 +139,7 @@ NSString *DGUserAgent(void) {
     };
     if (_ready) execute(nil); else [_waiters addObject:[execute copy]];
 }
+- (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)signOut:(void (^)(void))completion {
     DGSessionForget();
     ++_generation; _ready = NO;

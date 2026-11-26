@@ -20,7 +20,9 @@ static inline std::string String(id value) {
 }
 static inline long long Number(id value) { return [value respondsToSelector:@selector(longLongValue)] ? [value longLongValue] : 0; }
 static inline NSArray *Array(id value) { return [value isKindOfClass:NSArray.class] ? value : @[]; }
+NSDictionary *DGMergeInteractionSnapshot(NSDictionary *snapshot);
 static inline Work ReadWork(NSDictionary *value) {
+    value=DGMergeInteractionSnapshot(value);
     Work work;
     work.id = String(value[@"id"]); work.caption = String(value[@"caption"]);
     work.author = String(value[@"author"]); work.avatar = String(value[@"avatar"]);
@@ -46,7 +48,7 @@ static inline Comment ReadComment(NSDictionary *value) {
     comment.author = String(value[@"author"]); comment.avatar = String(value[@"avatar"]);
     comment.location = String(value[@"location"]); comment.authorID=String(value[@"authorID"]); comment.sticker=String(value[@"sticker"]); comment.likes = Number(value[@"likes"]);
     comment.replies = Number(value[@"replies"]); comment.timestamp = Number(value[@"timestamp"]);
-    comment.liked=[value[@"liked"]boolValue];
+    comment.liked=[value[@"liked"]boolValue];comment.canDelete=[value[@"isMe"]boolValue]||[value[@"canDelete"]boolValue];
     for (id image in Array(value[@"images"])) comment.images.emplace_back(String(image));
     for (NSDictionary *emoji in Array(value[@"emoticons"])) comment.emoticons.emplace_back(String(emoji[@"name"]),String(emoji[@"url"]));
     return comment;
@@ -85,6 +87,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 @property(nonatomic) BOOL colorAdjusted;
 @property(nonatomic) NSUInteger maximumPixelSize;
 - (void)remote:(NSString *)url;
++ (void)purgeCache;
 @end
 @interface DGNavigationController:UINavigationController
 @end
@@ -109,7 +112,6 @@ void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, 
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 void DGConfirmAvatarSave(UIViewController *host, NSString *url);
 void DGUploadCommentImage(DGBridge *bridge,NSData *data,DGResult completion);
-UIViewController *DGMakeCommentComposer(DGBridge *bridge,NSString *work,NSString *parent,NSString *replyTo,NSString *name,void (^sent)(NSDictionary *item));
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeMusicWebPage(NSString *identifier, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
@@ -137,3 +139,9 @@ UIViewController *DGMakeSearch(DGBridge *bridge);
 UIViewController *DGMakeMusic(DGBridge *bridge, NSDictionary *music);
 UIViewController *DGMakeMessages(DGBridge *bridge);
 UIViewController *DGMakeNotices(DGBridge *bridge);
+
+UIViewController *DGMakeEmbeddedMessages(DGBridge *bridge,void (^navigate)(UIViewController *));
+
+void DGTrimMusicPages(void);
+
+UIViewController *DGMakeNoticesGroup(DGBridge *bridge,NSInteger group);
