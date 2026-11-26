@@ -6,6 +6,7 @@
 @property(nonatomic,copy) void (^musicAction)(void);
 @property(nonatomic,copy) void (^moreAction)(void);
 @property(nonatomic,copy) void (^actionMenuAction)(void);
+@property(nonatomic,copy) void (^dismissCommentsAction)(void);
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,weak) UIViewController *presenter;
 - (void)display:(const Work &)work;

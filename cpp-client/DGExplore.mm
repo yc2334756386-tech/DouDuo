@@ -68,8 +68,8 @@ static NSString *DGCount(id value) { return Text(douglass::compact(Number(value)
     _image.frame=CGRectMake(20,15,56,56);_name.frame=CGRectMake(91,17,MAX(0,width-128),23);_subtitle.frame=CGRectMake(91,43,MAX(0,width-128),32);_chevron.frame=CGRectMake(width-32,25,20,30);
 }
 - (void)record:(NSDictionary *)record music:(BOOL)music {
-    _image.layer.cornerRadius=music?12:28;[_image remote:DGValue(record[music?@"cover":@"avatar"])];
-    _name.text=DGValue(record[music?@"title":@"nickname"]);
+    self.accessoryType=music?UITableViewCellAccessoryDetailButton:UITableViewCellAccessoryNone;_chevron.hidden=music;_image.layer.cornerRadius=music?12:28;[_image remote:DGValue(record[music?@"cover":@"avatar"])];
+    _name.text=DGValue(record[music?@"title":@"nickname"]);_name.textColor=music&&DGMusicMatches(DGValue(record[@"id"]))?UIColor.systemTealColor:UIColor.labelColor;
     if(music){NSInteger seconds=Number(record[@"duration"]);_subtitle.text=[NSString stringWithFormat:@"%@%@",DGValue(record[@"author"]),seconds>0?[NSString stringWithFormat:@" · %ld:%02ld",(long)seconds/60,(long)seconds%60]:@""];}
     else {NSString *signature=DGValue(record[@"signature"]);_subtitle.text=signature.length?signature:[NSString stringWithFormat:@"%@ 作品 · %@ 粉丝",DGCount(record[@"works"]),DGCount(record[@"followers"])];}
 }
@@ -112,7 +112,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     UIVisualEffectView *_musicControls;UISearchBar *_search;UIRefreshControl *_refresh;
     NSMutableArray<NSDictionary *> *_records;NSMutableSet<NSString *> *_ids;
     NSDictionary *_person;NSString *_cursor,*_query;BOOL _own,_loading,_more,_failed,_locateFound,_profileLoading;
-    NSUInteger _generation,_seekPages;NSInteger _selectedTab;AVPlayer *_audio;id _audioEnd;
+    NSString *_lastQueueID;BOOL _lastQueuePlaying;NSUInteger _generation,_seekPages;NSInteger _selectedTab;AVPlayer *_audio;id _audioEnd;
 }
 - (instancetype)initWithBridge:(DGBridge *)bridge mode:(DGExploreMode)mode {
     if((self=[super init])){_bridge=bridge;_mode=mode;_records=[NSMutableArray array];_ids=[NSMutableSet set];_cursor=@"0";_more=YES;_query=@"";}return self;
@@ -277,7 +277,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     NSString *url=DGValue(_mode==DGExploreMusic?self.music[@"cover"]:_person[@"avatar"]);if(url.length)DGShowImage(self,url,_avatar);
 }
 - (void)toggleAudio{if(DGMusicMatches(DGValue(self.music[@"id"]))&&DGMusicPlayer().rate>0)DGMusicPause();else DGMusicPlay(self.music);[self updateMusicPlayback];}
-- (void)updateMusicPlayback{[_play setImage:[UIImage systemImageNamed:DGMusicMatches(DGValue(self.music[@"id"]))&&DGMusicPlayer().rate>0?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];}
+- (void)updateMusicPlayback{if([self musicRows]){NSString *identifier=DGCurrentMusicID();BOOL playing=DGMusicPlayer().rate>0;if(![_lastQueueID isEqualToString:identifier]||_lastQueuePlaying!=playing){_lastQueueID=identifier;_lastQueuePlaying=playing;[_table reloadData];}}[_play setImage:[UIImage systemImageNamed:DGMusicMatches(DGValue(self.music[@"id"]))&&DGMusicPlayer().rate>0?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];}
 - (void)pauseAudio{if(DGMusicMatches(DGValue(self.music[@"id"])))DGMusicPause();}
 - (void)collectMusic{
  if(_musicCollectBusy)return;NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length)return;_musicCollectBusy=YES;BOOL add=![self.music[@"collected"]boolValue];__weak DGExplore *weak=self;
@@ -292,7 +292,8 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  DGExploreGridRow *cell=[tableView dequeueReusableCellWithIdentifier:@"work" forIndexPath:indexPath];NSUInteger base=indexPath.row*3;NSArray *records=[_records subarrayWithRange:NSMakeRange(base,MIN((NSUInteger)3,_records.count-base))];[cell records:records base:base recent:_selectedTab==0?self.locate:@""];__weak DGExplore *weak=self;cell.selectWork=^(NSInteger index){[weak openWork:index];};return cell;
 }
 - (void)openWork:(NSInteger)index{if(index<0||index>=(NSInteger)_records.count)return;DGMusicStop();UIViewController *player=DGMakeWorkPlayer(_records.copy,index,_bridge);player.modalPresentationStyle=UIModalPresentationFullScreen;[self presentViewController:player animated:YES completion:nil];}
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{if(_mode!=DGExploreFollowing&&![self musicRows])return;NSDictionary *record=_records[indexPath.row];if(_mode==DGExploreFollowing)[self.navigationController pushViewController:DGMakeProfile(_bridge,DGValue(record[@"sec"]),DGValue(record[@"nickname"]),@"") animated:YES];else [self.navigationController pushViewController:DGMakeMusic(_bridge,record) animated:YES];}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{if(_mode!=DGExploreFollowing&&![self musicRows])return;NSDictionary *record=_records[indexPath.row];if(_mode==DGExploreFollowing)[self.navigationController pushViewController:DGMakeProfile(_bridge,DGValue(record[@"sec"]),DGValue(record[@"nickname"]),@"") animated:YES];else{if(!DGValue(record[@"url"]).length){DGToast(self,@"平台未提供该曲目的播放地址");return;}if(DGMusicMatches(DGValue(record[@"id"]))&&DGMusicPlayer().rate>0)DGMusicPause();else DGMusicPlayQueue(_records.copy,indexPath.row,_bridge,_cursor,_more);[_table reloadData];}}
+- (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)path{if([self musicRows]&&path.row<(NSInteger)_records.count)[self.navigationController pushViewController:DGMakeMusic(_bridge,_records[path.row]) animated:YES];}
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath{NSInteger scale=_mode==DGExploreFollowing||[self musicRows]?1:3;if(!_failed&&_more&&!_loading&&(indexPath.row+4)*scale>=(NSInteger)_records.count)[self loadPage];}
 
 @end

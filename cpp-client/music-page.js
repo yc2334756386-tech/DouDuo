@@ -11,6 +11,6 @@
  window.DGMusicPage={read(identifier,offset){
   for(const selector of ['#RENDER_DATA','#__NEXT_DATA__']){const element=document.querySelector(selector);if(element){let text=element.textContent;try{text=decodeURIComponent(text);}catch(_){}walk(parse(text),identifier);}}
   for(const element of [...document.querySelectorAll('a[href*="/video/"],[data-e2e*="video"]')].slice(0,50)){let key=Object.keys(element).find(key=>key.startsWith('__reactFiber')),node=key&&element[key];for(let i=0;node&&i<6;i++,node=node.return)walk(node.memoizedProps,identifier);}
-  const all=[...raw.values()];return {items:window.DouGlass.normalizeWorks(all.slice(offset)),cursor:'web:'+all.length,more:more};
+  const verification=/安全验证|人机验证|captcha/i.test(document.title)||[...document.querySelectorAll('iframe[src*=verify],iframe[src*=captcha],[class*=captcha_verify]')].some(e=>{const r=e.getBoundingClientRect();return r.width>20&&r.height>20;});const all=[...raw.values()];return {verification,items:window.DouGlass.normalizeWorks(all.slice(offset)),cursor:'web:'+all.length,more:more};
  }};
 })();

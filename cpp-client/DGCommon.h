@@ -80,6 +80,12 @@ static inline AVURLAsset *Asset(NSString *url) {
 @interface DGImage : UIImageView
 - (void)remote:(NSString *)url;
 @end
+@interface DGNavigationController:UINavigationController
+@end
+void DGInstallBackGesture(UIViewController *controller);
+NSAttributedString *DGRichText(NSString *plain, NSArray *emoticons, UIFont *font, UIColor *color);
+void DGShowFullCaption(UIViewController *host, NSString *text);
+void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge *bridge, NSString *cursor, BOOL more);
 @interface DGLogin : UIViewController <WKNavigationDelegate,WKUIDelegate>
 @property(nonatomic,copy) void (^finished)(void);
 @end
@@ -102,6 +108,7 @@ void DGMusicPause(void);
 void DGMusicStop(void);
 AVPlayer *DGMusicPlayer(void);
 BOOL DGMusicMatches(NSString *identifier);
+NSString *DGCurrentMusicID(void);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);

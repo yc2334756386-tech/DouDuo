@@ -196,7 +196,7 @@ namespace { struct DGReplyState {
     _glass=Glass(30); [self.view addSubview:_glass];
     _handle=[UIView new]; _handle.backgroundColor=[UIColor colorWithWhite:1 alpha:.42]; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
     _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
-    _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"只读"; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
+    _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"";_modeLabel.hidden=YES; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
     _closeGlass=Glass(20); _close=Symbol(@"xmark",self,@selector(close)); _close.accessibilityLabel=@"关闭评论，继续浏览当前作品";
     [_closeGlass.contentView addSubview:_close]; [_glass.contentView addSubview:_closeGlass];
     _separator=[UIView new]; _separator.backgroundColor=[UIColor colorWithWhite:1 alpha:.10]; [_glass.contentView addSubview:_separator];

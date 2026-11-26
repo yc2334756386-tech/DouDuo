@@ -1,0 +1,10 @@
+#import "DGCommon.h"
+static NSCache *DGEmojis(void){static NSCache *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.totalCostLimit=8*1024*1024;cache.countLimit=300;});return cache;}
+static NSMutableSet *DGEmojiLoading(void){static NSMutableSet *set;static dispatch_once_t once;dispatch_once(&once,^{set=[NSMutableSet set];});return set;}
+NSAttributedString *DGRichText(NSString *plain,NSArray *emoticons,UIFont *font,UIColor *color){
+ NSMutableAttributedString *text=[[NSMutableAttributedString alloc]initWithString:plain?:@"" attributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:color}];
+ for(NSDictionary *emoji in emoticons){NSString *name=Text(String(emoji[@"name"])),*url=Text(String(emoji[@"url"]));if(!name.length||!url.length)continue;UIImage *image=[DGEmojis()objectForKey:url];if(image){NSUInteger start=0;while(start<text.length){NSRange range=[text.string rangeOfString:name options:0 range:NSMakeRange(start,text.length-start)];if(range.location==NSNotFound)break;NSTextAttachment *attachment=[NSTextAttachment new];attachment.image=image;attachment.bounds=CGRectMake(0,-3,font.pointSize+4,font.pointSize+4);[text replaceCharactersInRange:range withAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];start=range.location+1;}}
+ else if(![DGEmojiLoading()containsObject:url]){NSURL *address=[NSURL URLWithString:url];if(!address)continue;[DGEmojiLoading()addObject:url];NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:address];[request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];[[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){UIImage *image=data?[UIImage imageWithData:data]:nil;dispatch_async(dispatch_get_main_queue(),^{[DGEmojiLoading()removeObject:url];if(image){[DGEmojis()setObject:image forKey:url cost:image.size.width*image.size.height*4];[NSNotificationCenter.defaultCenter postNotificationName:@"DGEmojiAssetsReady" object:nil];}});}]resume];}
+ }return text;
+}
+

@@ -53,13 +53,15 @@
     const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
     const actualContent=data&&((Array.isArray(data.aweme_list)&&data.aweme_list.length)||(Array.isArray(data.comments)&&data.comments.length)||data.user||data.user_info||(Array.isArray(data.data)&&data.data.length));
     if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
-    if(data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) {const error=new Error('平台要求安全验证，正在打开官方验证页面');error.verificationRequired=true;throw error;}
+    const activeChallenge=/安全验证|人机验证|captcha/i.test(document.title)||[...document.querySelectorAll('iframe[src*=verify],iframe[src*=captcha],[class*=captcha_verify]')].some(element=>{const rect=element.getBoundingClientRect();return rect.width>20&&rect.height>20&&getComputedStyle(element).visibility!=='hidden';});
+    if(activeChallenge||data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) {const error=new Error('平台要求安全验证，正在打开官方验证页面');error.verificationRequired=true;throw error;}
     if(options.strict && (!data||data.status_code==null)) throw new Error('操作结果未确认，请刷新核对，避免连续重试');
     throw new Error(response.status===-1?'连接超时，请稍后刷新':data&&(data.status_msg||data.message||data.status_message)||'平台暂未返回内容，请完成网页验证或稍后重试');
   }
   const get=(path,params,options)=>request('GET',path,params||{},null,options);
   const post=(path,params,body,options)=>request('POST',path,params||{},body==null?'':body,options);
   let emojiCatalog={},emojiLoading;
+  const ipCache=new Map();
   const loadEmojis=()=>emojiLoading||(emojiLoading=get('/aweme/v1/web/emoji/list/',{}).then(data=>{for(const value of data.emoji_list||[]){const url=first(value.emoji_url);if(value.display_name&&url)emojiCatalog[value.display_name]=url;}}).catch(()=>{}));
   const user=value=>{
     value=value||{};
@@ -89,8 +91,9 @@
     const redirect=selectedURLs.find(url=>url.includes('/aweme/v1/play/'))||allURLs.find(url=>url.includes('/aweme/v1/play/'));
     const primary=redirect||direct||selectedURLs[0]||'';
     const alternate=direct&&direct!==primary?direct:allURLs.find(url=>url!==primary)||'';
-    const ip=typeof author.ip_location==='string'?author.ip_location:typeof author.ip_label==='string'?author.ip_label:'';
+    const rawIP=typeof author.ip_location==='string'?author.ip_location:typeof author.ip_label==='string'?author.ip_label:'';
     // Human-readable work publication fields are not proof of a person's precise IP city.
+    const ip=rawIP.replace(/^IP属地[:：\s]*/,'');
     const regionCode=String(item.city||'');
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
@@ -134,6 +137,7 @@
         const data=await get(operation==='profile'?'/aweme/v1/web/user/profile/self/':'/aweme/v1/web/user/profile/other/',query);
         const person=user(data.user||data.user_info);return Object.assign(person,{loggedIn:!!(person.uid&&person.uid!=='0')});
       }
+      if(operation==='userLocation'){if(ipCache.has(params.sec))return {location:ipCache.get(params.sec)};const data=await get('/aweme/v1/web/user/profile/other/',{sec_user_id:params.sec,publish_video_strategy_type:'2',personal_center_strategy:'1'});const profile=user(data.user||data.user_info);if(ipCache.size>150)ipCache.delete(ipCache.keys().next().value);const location=(profile.location||'').replace(/^IP属地[:：\s]*/,'');ipCache.set(params.sec,location);return {location};}
       if(operation==='detail'){const data=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});return {items:works([data.aweme_detail||data.aweme].filter(Boolean))};}
       if(operation==='noticeCounts'){const data=await get('/aweme/v1/web/notice/count/',{is_new_notice:'1',need_social_count:'1'});return {items:(data.notice_count||data.notice_count_list||[]).map(value=>({group:Number(value.group??value.notice_group??0),count:Number(value.count||0)}))};}
       if(operation==='notices'){
@@ -170,7 +174,7 @@
       if(operation==='danmaku'){
         const duration=Math.max(15000,Number(params.duration||30000)),from=Math.max(0,Number(params.from||0)),to=Math.min(duration,Math.max(from+1,Number(params.to||from+30000)));
         const data=await get('/aweme/v1/web/danmaku/get_v2/',{app_name:'aweme',format:'json',group_id:params.id,item_id:params.id,start_time:String(from),end_time:String(to),duration:String(duration)});
-        return {items:(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>({id:id(value.danmaku_id),text:value.text,offset:Number(value.offset_time||0)/1000}))};
+        await Promise.race([loadEmojis(),delay(500)]);return {items:(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>({id:id(value.danmaku_id),text:value.text,offset:Number(value.offset_time||0)/1000,emoticons:[...new Set(String(value.text).match(/\[[^\]\r\n]{1,14}\]/g)||[])].filter(name=>emojiCatalog[name]).map(name=>({name,url:emojiCatalog[name]}))}))};
       }
       if(operation==='digg'||operation==='favorite'){
         await writeReady();const value=params.add===true||params.add===1||params.add==='1'?'1':'0';
