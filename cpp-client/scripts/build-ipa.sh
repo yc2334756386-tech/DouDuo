@@ -27,7 +27,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "$OUTPUT/Core.o" "$CLIENT"/*.mm \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
-  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework MediaToolbox \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"

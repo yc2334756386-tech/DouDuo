@@ -7,6 +7,7 @@
 @property(nonatomic,copy) void (^moreAction)(void);
 @property(nonatomic,copy) void (^actionMenuAction)(CGPoint point);
 @property(nonatomic,copy) void (^dismissCommentsAction)(void);
+@property(nonatomic,copy) BOOL (^advanceAction)(void);
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,weak) UIViewController *presenter;
 - (void)display:(const Work &)work;

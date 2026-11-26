@@ -87,6 +87,9 @@ static inline AVURLAsset *Asset(NSString *url) {
 @end
 void DGInstallBackGesture(UIViewController *controller);
 void DGConfigurePageTransition(UIViewController *controller);
+double DGHoldSpeed(void);
+void DGConfigureAudio(AVPlayerItem *item);
+void DGRefreshAudioPreferences(void);
 NSAttributedString *DGRichText(NSString *plain, NSArray *emoticons, UIFont *font, UIColor *color);
 void DGShowFullCaption(UIViewController *host, NSString *text);
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge *bridge, NSString *cursor, BOOL more);

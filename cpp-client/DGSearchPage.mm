@@ -33,7 +33,7 @@
 }
 - (void)loadSearch{
  NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"];
- if(self.musicID.length){NSString *identifier=[self.musicID stringByAddingPercentEncodingWithAllowedCharacters:allowed];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:[@"https://www.douyin.com/music/"stringByAppendingString:identifier]]]];return;}
+ if(self.musicID.length){NSString *identifier=[self.musicID stringByAddingPercentEncodingWithAllowedCharacters:allowed];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:[@"https://www.douyin.com/music/" stringByAppendingString:identifier]]]];return;}
  NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"video"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
 }
 - (void)reload{[_web reload];}

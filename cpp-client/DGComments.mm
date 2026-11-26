@@ -167,14 +167,14 @@ namespace { struct DGReplyState {
     bool expanded=false,loading=false,more=true,loaded=false,failed=false;
 }; }
 
-@interface DGComments () <UITableViewDataSource,UITableViewDelegate>
+@interface DGComments () <UITableViewDataSource,UITableViewDelegate,UIGestureRecognizerDelegate>
 @end
 @implementation DGComments {
     DGBridge *_bridge;
     DGImage *_backdrop;UIVisualEffectView *_backdropBlur;UIView *_backdropShade;
     NSString *_workID,*_parent,*_cursor;
     UIVisualEffectView *_glass,*_closeGlass;
-    UIView *_handle,*_separator;
+    UIView *_handle,*_separator,*_handleHit;
     UILabel *_titleLabel,*_modeLabel,*_empty,*_sortHint;UISegmentedControl *_sort;
     UIButton *_close,*_footer;
     UITableView *_table;
@@ -195,6 +195,7 @@ namespace { struct DGReplyState {
     self.view.layer.borderWidth=.5; self.view.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;
     _glass=Glass(30); [self.view addSubview:_glass];
     _handle=[UIView new]; _handle.backgroundColor=[UIColor colorWithWhite:1 alpha:.42]; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
+    _handleHit=[UIView new];[_glass.contentView addSubview:_handleHit];UIPanGestureRecognizer *drag=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(dragHandle:)];drag.delegate=self;[_handleHit addGestureRecognizer:drag];_handleHit.isAccessibilityElement=YES;_handleHit.accessibilityLabel=@"向下拖动关闭评论";
     _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
     _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"";_modeLabel.hidden=YES; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
     _sort=[[UISegmentedControl alloc]initWithItems:@[@"最热",@"最新"]];_sort.selectedSegmentIndex=0;[_sort addTarget:self action:@selector(sortChanged) forControlEvents:UIControlEventValueChanged];[_glass.contentView addSubview:_sort];_sort.hidden=_parent.length>0;
@@ -219,12 +220,15 @@ namespace { struct DGReplyState {
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _backdrop.frame=b;_backdropBlur.frame=b;_backdropShade.frame=b;_glass.frame=b;
     _handle.frame=CGRectMake((width-50)/2,8,50,5); _titleLabel.frame=CGRectMake(68,24,MAX(0,width-136),30);
+    _handleHit.frame=CGRectMake((width-140)/2,0,140,26);
     _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
     CGFloat header=_parent.length?77:111;_sort.frame=CGRectMake(18,68,130,30);_sortHint.frame=CGRectMake(160,73,MAX(0,width-178),20);
     _separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5); _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
+- (BOOL)gestureRecognizerShouldBegin:(UIPanGestureRecognizer *)gesture{CGPoint velocity=[gesture velocityInView:self.view];return velocity.y>0&&velocity.y>fabs(velocity.x)&&self.view.superview.layer.animationKeys.count==0;}
+- (void)dragHandle:(UIPanGestureRecognizer *)gesture{UIView *panel=self.view.superview;CGFloat y=MAX(0,[gesture translationInView:panel.superview].y);if(gesture.state==UIGestureRecognizerStateChanged)panel.transform=CGAffineTransformMakeTranslation(0,y);if(gesture.state==UIGestureRecognizerStateEnded){if(y>70||[gesture velocityInView:panel.superview].y>650){if(self.closeAction)self.closeAction();}else[UIView animateWithDuration:.22 animations:^{panel.transform=CGAffineTransformIdentity;}];}if(gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)[UIView animateWithDuration:.22 animations:^{panel.transform=CGAffineTransformIdentity;}];}
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
 - (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
 - (void)sortLoaded{
