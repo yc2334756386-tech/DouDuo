@@ -77,7 +77,7 @@
     if(item.cell_room){let room=item.cell_room.rawdata;try{if(typeof room==='string')room=JSON.parse(room);}catch(_){room=null;}room=room||{};const owner=room.owner||{},stream=room.stream_url||{},hls=stream.hls_pull_url_map||{};const play=hls.FULL_HD1||hls.HD1||hls.SD1||stream.hls_pull_url||Object.values(hls)[0]||'';return {id:'live_'+String(room.id_str||room.id||item.aweme_id||''),caption:room.title||item.desc||'直播中',author:owner.nickname||'主播',authorID:owner.sec_uid||'',authorUID:id(owner.id_str||owner.id),avatar:first(owner.avatar_thumb),cover:first(room.cover),play,alternate:'',images:[],duration:0,comments:0,likes:0,collects:0,isLive:true,isAd};}
     const video=item.video||{},stats=item.statistics||{},author=item.author||{},sound=item.music||{};
     const images=(item.images||(item.image_post_info||{}).images||[]).map(image=>first(image.display_image)||first(image)).filter(Boolean);
-    const rates=(video.bit_rate||[]).filter(rate=>rate&&(!rate.format||rate.format==='mp4')&&!/_2$/.test(rate.gear_name||'')&&first(rate.play_addr));
+    const rates=(video.bit_rate||[]).filter(rate=>rate&&(!rate.format||rate.format==='mp4')&&first(rate.play_addr));
     const dimension=rate=>Math.min(Number((rate.play_addr||{}).width||video.width||0),Number((rate.play_addr||{}).height||video.height||0));
     const avc=rates.filter(rate=>!rate.is_h265&&!/h265|hevc/i.test(rate.gear_name||''));
     const candidates=avc.length?avc:rates;
@@ -92,6 +92,14 @@
     const redirect=selectedURLs.find(url=>url.includes('/aweme/v1/play/'))||allURLs.find(url=>url.includes('/aweme/v1/play/'));
     const primary=redirect||direct||selectedURLs[0]||'';
     const alternate=direct&&direct!==primary?direct:allURLs.find(url=>url!==primary)||'';
+    const fps=rate=>Math.max(0,Number(rate.FPS||rate.fps||(rate.play_addr||{}).fps||0));
+    const rateOrder=(a,b)=>dimension(b)-dimension(a)||Number(b.bit_rate||0)-Number(a.bit_rate||0);
+    const quality=[...candidates].sort(rateOrder)[0];
+    const knownFPS=candidates.filter(value=>fps(value)>0);
+    const smooth=[...knownFPS].sort((a,b)=>fps(b)-fps(a)||rateOrder(a,b))[0];
+    const qualityFPS=[...knownFPS].filter(value=>!smooth||fps(value)>=fps(smooth)).sort(rateOrder)[0]||quality;
+    const variant=rate=>{if(!rate)return null;const urls=(rate.play_addr||{}).url_list||[];const direct=urls.find(url=>/^https?:\/\//.test(url)&&!url.includes('/aweme/v1/play/')),redirect=urls.find(url=>url.includes('/aweme/v1/play/'));const play=redirect||direct||first(rate.play_addr);return play?{play,alternate:direct&&direct!==play?direct:urls.find(url=>url!==play)||'',fps:fps(rate),shortSide:dimension(rate)}:null;};
+    const variants={quality:variant(quality),smooth:variant(smooth),qualityFPS:variant(qualityFPS)};
     const rawIP=typeof author.ip_location==='string'?author.ip_location:typeof author.ip_label==='string'?author.ip_label:'';
     // Human-readable work publication fields are not proof of a person's precise IP city.
     const ip=rawIP.replace(/^IP属地[:：\s]*/,'');
@@ -99,7 +107,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -172,6 +180,10 @@
       }
       if(operation==='search'){
         const data=await get('/aweme/v1/web/search/item/',{search_channel:'aweme_video_web',keyword:params.kw||'',search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset:cursor,count:'24',need_filter_settings:cursor==='0'?'1':'0',list_type:'single'});return page(data,data.data||data.aweme_list,data.cursor,data.has_more);
+      }
+      if(operation==='suggest'){
+        const data=await get('/aweme/v1/web/search/sug/',{keyword:params.kw||'',source:'aweme_video_web',from_group_id:''});
+        return {items:(data.sug_list||[]).map(value=>({word:value.content||''})).filter(value=>value.word)};
       }
       if(operation==='searchUsers'){
         const data=await get('/aweme/v1/web/discover/search/',{keyword:params.kw||'',search_channel:'aweme_user_web',search_source:'normal_search',offset:cursor,count:'20',query_correct_type:'1',is_filter_search:'0'});

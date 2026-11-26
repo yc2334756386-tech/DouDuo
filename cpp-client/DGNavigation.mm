@@ -1,12 +1,48 @@
 #import "DGCommon.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+@interface DGPagePresentation:UIPresentationController
+@end
+@implementation DGPagePresentation
+- (BOOL)shouldRemovePresentersView{return YES;}
+- (BOOL)shouldPresentInFullscreen{return YES;}
+- (CGRect)frameOfPresentedViewInContainerView{return self.containerView.bounds;}
+@end
+@interface DGPageAnimator:NSObject<UIViewControllerAnimatedTransitioning>
+@property(nonatomic) BOOL presenting;
+@end
+@implementation DGPageAnimator
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context{return .32;}
+- (void)animateTransition:(id<UIViewControllerContextTransitioning>)context{
+ UIView *container=context.containerView,*from=[context viewForKey:UITransitionContextFromViewKey],*to=[context viewForKey:UITransitionContextToViewKey];
+ UIViewController *destination=[context viewControllerForKey:UITransitionContextToViewControllerKey];if(!to)to=destination.view;CGRect frame=[context finalFrameForViewController:destination];if(CGRectIsEmpty(frame))frame=container.bounds;to.frame=frame;CGFloat width=container.bounds.size.width;
+ if(self.presenting){[container addSubview:to];to.transform=CGAffineTransformMakeTranslation(width,0);}else{[container insertSubview:to belowSubview:from];to.transform=CGAffineTransformMakeTranslation(-width*.24,0);}
+ [UIView animateWithDuration:.32 delay:0 options:UIViewAnimationOptionCurveEaseInOut|UIViewAnimationOptionAllowUserInteraction animations:^{to.transform=CGAffineTransformIdentity;from.transform=CGAffineTransformMakeTranslation(self.presenting?-width*.24:width,0);} completion:^(BOOL done){BOOL completed=!context.transitionWasCancelled;from.transform=CGAffineTransformIdentity;to.transform=CGAffineTransformIdentity;[context completeTransition:completed];if(completed&&!self.presenting)[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];
+}
+@end
+@interface DGPageTransition:NSObject<UIViewControllerTransitioningDelegate>
+@property(nonatomic,strong) UIPercentDrivenInteractiveTransition *interaction;
+@end
+@implementation DGPageTransition
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForPresentedController:(UIViewController *)presented presentingController:(UIViewController *)presenting sourceController:(UIViewController *)source{DGPageAnimator *animation=[DGPageAnimator new];animation.presenting=YES;return animation;}
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForDismissedController:(UIViewController *)dismissed{DGPageAnimator *animation=[DGPageAnimator new];return animation;}
+- (id<UIViewControllerInteractiveTransitioning>)interactionControllerForDismissal:(id<UIViewControllerAnimatedTransitioning>)animator{return self.interaction;}
+- (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source{return [[DGPagePresentation alloc]initWithPresentedViewController:presented presentingViewController:presenting];}
+@end
+static const void *DGPageKey=&DGPageKey;
+void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;}
 @interface DGBackGesture:NSObject<UIGestureRecognizerDelegate>
 @property(nonatomic,weak) UIViewController *controller;
 @end
 @implementation DGBackGesture
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{UIViewController *host=self.controller;if([host isKindOfClass:UINavigationController.class])return host.presentingViewController&&((UINavigationController *)host).viewControllers.count<=1;return host.presentingViewController!=nil;}
-- (void)swipe:(UIScreenEdgePanGestureRecognizer *)gesture{UIViewController *host=self.controller;CGFloat x=MAX(0,[gesture translationInView:host.view].x);if(gesture.state==UIGestureRecognizerStateChanged)host.view.transform=CGAffineTransformMakeTranslation(x*.85,0);if(gesture.state==UIGestureRecognizerStateEnded){if(x>80||[gesture velocityInView:host.view].x>650){[host dismissViewControllerAnimated:YES completion:^{host.view.transform=CGAffineTransformIdentity;[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}else[UIView animateWithDuration:.2 animations:^{host.view.transform=CGAffineTransformIdentity;}];}if(gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)[UIView animateWithDuration:.2 animations:^{host.view.transform=CGAffineTransformIdentity;}];}
+- (void)swipe:(UIScreenEdgePanGestureRecognizer *)gesture{
+ UIViewController *host=self.controller;CGFloat progress=MIN(1,MAX(0,[gesture translationInView:host.view].x/MAX(1,host.view.bounds.size.width)));DGPageTransition *transition=objc_getAssociatedObject(host,DGPageKey);
+ if(gesture.state==UIGestureRecognizerStateBegan&&transition){transition.interaction=[UIPercentDrivenInteractiveTransition new];transition.interaction.completionCurve=UIViewAnimationCurveEaseOut;[host dismissViewControllerAnimated:YES completion:nil];}
+ if(gesture.state==UIGestureRecognizerStateChanged)[transition.interaction updateInteractiveTransition:progress];
+ if(gesture.state==UIGestureRecognizerStateEnded){BOOL finish=progress>.28||[gesture velocityInView:host.view].x>650;if(transition){if(finish)[transition.interaction finishInteractiveTransition];else [transition.interaction cancelInteractiveTransition];transition.interaction=nil;}else if(finish)[host dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
+ if(gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed){[transition.interaction cancelInteractiveTransition];transition.interaction=nil;}
+}
 @end
 void DGInstallBackGesture(UIViewController *controller){if(objc_getAssociatedObject(controller,@selector(DGInstallBackGestureMarker)))return;DGBackGesture *target=[DGBackGesture new];target.controller=controller;UIScreenEdgePanGestureRecognizer *pan=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:target action:@selector(swipe:)];pan.edges=UIRectEdgeLeft;pan.delegate=target;[controller.view addGestureRecognizer:pan];objc_setAssociatedObject(controller,@selector(DGInstallBackGestureMarker),target,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
 // Mask the effect view itself so UIKit can keep sampling the live backdrop.

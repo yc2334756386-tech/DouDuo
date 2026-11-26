@@ -2,6 +2,7 @@
 
 @interface DGSearchPage:UIViewController<WKNavigationDelegate>
 @property(nonatomic,copy) NSString *keyword;
+@property(nonatomic,copy) NSString *musicID;
 @property(nonatomic) BOOL users;
 @property(nonatomic,copy) void (^imported)(NSArray<NSDictionary *> *items);
 @end
@@ -9,9 +10,9 @@
  WKWebView *_web;UIView *_tools;UILabel *_hint;UIButton *_import,*_reload;UIActivityIndicatorView *_spinner;BOOL _reading;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.title=@"网页翻页";self.view.backgroundColor=UIColor.systemBackgroundColor;
+ [super viewDidLoad];self.title=self.musicID.length?@"原声作品网页":@"网页翻页";self.view.backgroundColor=UIColor.systemBackgroundColor;
  WKWebViewConfiguration *config=[WKWebViewConfiguration new];DGSessionConfigure(config);config.allowsInlineMediaPlayback=YES;config.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeAll;config.defaultWebpagePreferences.preferredContentMode=WKContentModeDesktop;
- NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"keyword":self.keyword?:@"",@"users":@(self.users)} options:0 error:nil];NSString *json=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
+ NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"keyword":self.keyword?:@"",@"users":@(self.users),@"musicID":self.musicID?:@""} options:0 error:nil];NSString *json=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
  NSString *capture=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"search-page" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]?:@"";
  NSString *script=[[NSString stringWithFormat:@"window.DGSearchExpected=%@;\n",json?:@"{}"]stringByAppendingString:capture];
  [config.userContentController addUserScript:[[WKUserScript alloc]initWithSource:script injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
@@ -32,6 +33,7 @@
 }
 - (void)loadSearch{
  NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"];
+ if(self.musicID.length){NSString *identifier=[self.musicID stringByAddingPercentEncodingWithAllowedCharacters:allowed];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:[@"https://www.douyin.com/music/"stringByAppendingString:identifier]]]];return;}
  NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"video"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
 }
 - (void)reload{[_web reload];}
@@ -49,3 +51,4 @@
 }
 @end
 UIViewController *DGMakeSearchPage(NSString *keyword,BOOL users,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.keyword=keyword;page.users=users;page.imported=imported;return page;}
+UIViewController *DGMakeMusicWebPage(NSString *identifier,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.musicID=identifier;page.imported=imported;return page;}

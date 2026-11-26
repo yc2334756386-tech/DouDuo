@@ -26,6 +26,9 @@ static inline Work ReadWork(NSDictionary *value) {
     work.author = String(value[@"author"]); work.avatar = String(value[@"avatar"]);
     work.cover = String(value[@"cover"]); work.play = String(value[@"play"]);
     work.alternate = String(value[@"alternate"]); work.music = String(value[@"music"]);
+    BOOL quality=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.quality"],smooth=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.highFPS"];
+    NSDictionary *variants=[value[@"variants"]isKindOfClass:NSDictionary.class]?value[@"variants"]:@{};id selected=variants[quality&&smooth?@"qualityFPS":quality?@"quality":smooth?@"smooth":@""];
+    if([selected isKindOfClass:NSDictionary.class]&&String(selected[@"play"]).size()){work.play=String(selected[@"play"]);work.alternate=String(selected[@"alternate"]);}
     work.comments = Number(value[@"comments"]); work.likes = Number(value[@"likes"]);
     work.duration = [value[@"duration"] doubleValue];
 work.authorID=String(value[@"authorID"]);work.authorUID=String(value[@"authorUID"]);
@@ -83,6 +86,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 @interface DGNavigationController:UINavigationController
 @end
 void DGInstallBackGesture(UIViewController *controller);
+void DGConfigurePageTransition(UIViewController *controller);
 NSAttributedString *DGRichText(NSString *plain, NSArray *emoticons, UIFont *font, UIColor *color);
 void DGShowFullCaption(UIViewController *host, NSString *text);
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge *bridge, NSString *cursor, BOOL more);
@@ -97,6 +101,7 @@ void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, 
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 void DGConfirmAvatarSave(UIViewController *host, NSString *url);
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
+UIViewController *DGMakeMusicWebPage(NSString *identifier, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
 UIViewController *DGMakeActions(DGBridge *bridge, NSDictionary *work);
 BOOL DGOptionsKeepsPlayback(UIViewController *controller);
@@ -109,6 +114,8 @@ void DGSeenScope(NSString *uid);
 void DGMusicPlay(NSDictionary *music);
 void DGMusicPause(void);
 void DGMusicStop(void);
+void DGMusicSetOwner(UIViewController *owner);
+void DGMusicStopOwned(UIViewController *owner);
 AVPlayer *DGMusicPlayer(void);
 BOOL DGMusicMatches(NSString *identifier);
 NSString *DGCurrentMusicID(void);

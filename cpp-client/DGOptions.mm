@@ -1,28 +1,52 @@
 #import "DGCommon.h"
-@interface DGOptions:UIViewController<UITableViewDataSource,UITableViewDelegate>
+@interface DGOptions:UIViewController<UITableViewDataSource,UITableViewDelegate,UIViewControllerTransitioningDelegate>
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,strong) NSDictionary *work;
 @property(nonatomic) BOOL actions;
+- (UIView *)transitionPanel;
+- (CGPoint)transitionOrigin;
+@end
+@interface DGOptionsPresentation:UIPresentationController
+@end
+@implementation DGOptionsPresentation
+- (BOOL)shouldRemovePresentersView{return NO;}
+- (CGRect)frameOfPresentedViewInContainerView{return self.containerView.bounds;}
+@end
+@interface DGOptionsAnimator:NSObject<UIViewControllerAnimatedTransitioning>
+@property(nonatomic) BOOL presenting;
+@end
+@implementation DGOptionsAnimator
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context{return self.presenting?.38:.24;}
+- (void)animateTransition:(id<UIViewControllerContextTransitioning>)context{
+ DGOptions *controller=(DGOptions *)[context viewControllerForKey:self.presenting?UITransitionContextToViewControllerKey:UITransitionContextFromViewControllerKey];UIView *view=controller.view;if(self.presenting){view.frame=context.containerView.bounds;[context.containerView addSubview:view];[view setNeedsLayout];[view layoutIfNeeded];}UIView *panel=[controller transitionPanel];CGPoint point=[controller transitionOrigin];CGAffineTransform collapsed=CGAffineTransformScale(CGAffineTransformMakeTranslation(point.x-panel.center.x,point.y-panel.center.y),.12,.12);if(self.presenting)panel.transform=collapsed;
+ [UIView animateWithDuration:[self transitionDuration:context] delay:0 usingSpringWithDamping:self.presenting?.84:1 initialSpringVelocity:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{panel.transform=self.presenting?CGAffineTransformIdentity:collapsed;} completion:^(BOOL done){BOOL complete=!context.transitionWasCancelled;if(!self.presenting&&complete)[view removeFromSuperview];panel.transform=CGAffineTransformIdentity;[context completeTransition:complete];}];
+}
 @end
 @implementation DGOptions{UITableView *_table;UIVisualEffectView *_glass;UILabel *_title;UIButton *_close;}
+- (UIView *)transitionPanel{return _glass;}
+- (CGPoint)transitionOrigin{NSValue *origin=self.work[@"menuOrigin"];return [origin isKindOfClass:NSValue.class]?origin.CGPointValue:CGPointMake(self.view.bounds.size.width-42,self.view.bounds.size.height-100);}
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForPresentedController:(UIViewController *)presented presentingController:(UIViewController *)presenting sourceController:(UIViewController *)source{DGOptionsAnimator *animation=[DGOptionsAnimator new];animation.presenting=YES;return animation;}
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForDismissedController:(UIViewController *)dismissed{return [DGOptionsAnimator new];}
+- (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source{return [[DGOptionsPresentation alloc]initWithPresentedViewController:presented presentingViewController:presenting];}
 - (void)viewDidLoad{[super viewDidLoad];DGInstallBackGesture(self);self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.view.backgroundColor=UIColor.clearColor;UIButton *dismiss=[UIButton buttonWithType:UIButtonTypeCustom];dismiss.frame=self.view.bounds;dismiss.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[dismiss addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:dismiss];_glass=Glass(28);[self.view addSubview:_glass];_title=Label(21,UIFontWeightSemibold);_title.text=self.actions?@"作品操作":@"更多设置";[_glass.contentView addSubview:_title];_close=Symbol(@"xmark.circle.fill",self,@selector(close));[_glass.contentView addSubview:_close];_table=[[UITableView alloc]initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];_table.backgroundColor=UIColor.clearColor;_table.dataSource=self;_table.delegate=self;[_glass.contentView addSubview:_table];}
 - (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat h=self.view.bounds.size.height;CGFloat panel=self.actions?MIN(h*.68,460):h*.79;_glass.frame=CGRectMake(0,h-panel,self.view.bounds.size.width,panel);_title.frame=CGRectMake(24,18,self.view.bounds.size.width-92,34);_close.frame=CGRectMake(self.view.bounds.size.width-62,12,44,44);_table.frame=CGRectMake(0,60,self.view.bounds.size.width,panel-60);}
 - (void)viewDidDisappear:(BOOL)animated{[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)finish:(void (^)(UIViewController *host))action{UIViewController *host=self.presentingViewController;[self dismissViewControllerAnimated:YES completion:^{if(action)action(host);}];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return self.actions?1:4;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{if(self.actions)return 5;return section==0?3:section==1?2:section==2?1:3;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{if(self.actions)return 5;return section==0?3:section==1?2:3;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return self.actions?nil:@[@"推荐过滤",@"弹幕",@"画面",@"账号与播放"][section];}
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)path{return !self.actions&&(path.section==1&&path.row==1||path.section==2)?90:56;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path{
  UITableViewCell *cell=[[UITableViewCell alloc]initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];cell.backgroundColor=[UIColor colorWithWhite:0 alpha:.12];cell.textLabel.textColor=UIColor.whiteColor;cell.textLabel.font=[UIFont systemFontOfSize:15];cell.detailTextLabel.textColor=UIColor.secondaryLabelColor;
  if(self.actions){BOOL photo=Array(self.work[@"images"]).count>0;cell.textLabel.text=@[photo?@"保存当前图片":@"保存视频",@"保存封面",@"保存音频",@"复制文案",@"复制分享链接"][path.row];cell.imageView.image=[UIImage systemImageNamed:@[photo?@"photo":@"video",@"photo.on.rectangle",@"music.note",@"doc.on.doc",@"square.and.arrow.up"][path.row]];cell.imageView.tintColor=UIColor.labelColor;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;return cell;}
+ if(path.section==2&&path.row>0){BOOL quality=path.row==1;cell.textLabel.text=quality?@"优化画质":@"提高帧率";cell.detailTextLabel.text=quality?@"优先高清片源，切换时可能短暂缓冲":@"优先平台提供的高帧率片源";cell.detailTextLabel.numberOfLines=2;UISwitch *toggle=[UISwitch new];toggle.tag=quality?5:6;toggle.on=[NSUserDefaults.standardUserDefaults boolForKey:quality?@"douglass.quality":@"douglass.highFPS"];[toggle addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=toggle;cell.selectionStyle=UITableViewCellSelectionStyleNone;return cell;}
  if(path.section==0||path.section==1&&path.row==0||path.section==3&&path.row==0){UISwitch *toggle=[UISwitch new];NSString *key;BOOL value;if(path.section==0){key=@[@"douglass.filter.ads",@"douglass.filter.live",@"douglass.filter.seen"][path.row];cell.textLabel.text=@[@"过滤广告",@"过滤直播间",@"过滤已刷视频"][path.row];toggle.tag=path.row;value=path.row==1&&![NSUserDefaults.standardUserDefaults objectForKey:key]?YES:[NSUserDefaults.standardUserDefaults boolForKey:key];}else if(path.section==1){key=@"douglass.danmaku";toggle.tag=3;cell.textLabel.text=@"显示弹幕";value=[NSUserDefaults.standardUserDefaults objectForKey:key]?[NSUserDefaults.standardUserDefaults boolForKey:key]:YES;}else{key=@"douglass.backgroundAudio";toggle.tag=4;cell.textLabel.text=@"后台音频播放";value=DGBackgroundAudioEnabled();}toggle.on=value;[toggle addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged];cell.accessoryView=toggle;cell.selectionStyle=UITableViewCellSelectionStyleNone;return cell;}
  if(path.section==1){double size=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(size<12||size>28)size=14;cell.textLabel.text=[NSString stringWithFormat:@"弹幕大小 · %.0f",size];UISlider *slider=[[UISlider alloc]initWithFrame:CGRectMake(18,46,tableView.bounds.size.width-72,28)];slider.minimumValue=12;slider.maximumValue=28;slider.value=size;slider.autoresizingMask=UIViewAutoresizingFlexibleWidth;[slider addTarget:self action:@selector(fontChanged:) forControlEvents:UIControlEventValueChanged];[cell.contentView addSubview:slider];cell.selectionStyle=UITableViewCellSelectionStyleNone;return cell;}
  if(path.section==2){cell.textLabel.text=@"实时环境光";UISegmentedControl *levels=[[UISegmentedControl alloc]initWithItems:@[@"亮",@"中",@"暗",@"很暗",@"关"]];levels.frame=CGRectMake(18,46,tableView.bounds.size.width-72,30);levels.autoresizingMask=UIViewAutoresizingFlexibleWidth;id value=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.ambient"];levels.selectedSegmentIndex=value?MIN(4,MAX(0,[value integerValue])):1;[levels addTarget:self action:@selector(ambient:) forControlEvents:UIControlEventValueChanged];[cell.contentView addSubview:levels];return cell;}
  cell.textLabel.text=path.row==1?@"登录 / 安全验证":@"退出当前账号";if(path.row==2)cell.textLabel.textColor=UIColor.systemRedColor;return cell;
 }
-- (void)changed:(UISwitch *)toggle{NSArray *keys=@[@"douglass.filter.ads",@"douglass.filter.live",@"douglass.filter.seen",@"douglass.danmaku",@"douglass.backgroundAudio"];[NSUserDefaults.standardUserDefaults setBool:toggle.on forKey:keys[toggle.tag]];[NSNotificationCenter.defaultCenter postNotificationName:toggle.tag<3?@"DGFiltersChanged":@"DouGlassSettingsChanged" object:nil];}
+- (void)changed:(UISwitch *)toggle{NSArray *keys=@[@"douglass.filter.ads",@"douglass.filter.live",@"douglass.filter.seen",@"douglass.danmaku",@"douglass.backgroundAudio",@"douglass.quality",@"douglass.highFPS"];[NSUserDefaults.standardUserDefaults setBool:toggle.on forKey:keys[toggle.tag]];[NSNotificationCenter.defaultCenter postNotificationName:toggle.tag>=5?@"DGPlaybackQualityChanged":toggle.tag<3?@"DGFiltersChanged":@"DouGlassSettingsChanged" object:nil];}
 - (void)fontChanged:(UISlider *)slider{NSInteger size=lround(slider.value);[NSUserDefaults.standardUserDefaults setDouble:size forKey:@"douglass.danmaku.size"];for(UIView *view=slider.superview;view;view=view.superview)if([view isKindOfClass:UITableViewCell.class]){((UITableViewCell *)view).textLabel.text=[NSString stringWithFormat:@"弹幕大小 · %ld",(long)size];break;}[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];}
 - (void)ambient:(UISegmentedControl *)levels{[NSUserDefaults.standardUserDefaults setInteger:levels.selectedSegmentIndex forKey:@"douglass.ambient"];[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path{
@@ -32,7 +56,7 @@
  if(path.section==3&&path.row==2){DGBridge *bridge=self.bridge;[self finish:^(UIViewController *host){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"退出当前账号？" message:@"这会清除本机保存的当前登录信息" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[bridge signOut:^{DGMusicStop();[NSNotificationCenter.defaultCenter postNotificationName:@"DGAccountChanged" object:nil];}];}]];[host presentViewController:alert animated:YES completion:nil];}];}
 }
 @end
-static UIViewController *DGOptionsController(DGBridge *bridge,NSDictionary *work,BOOL actions){DGOptions *options=[DGOptions new];options.bridge=bridge;options.work=work?:@{};options.actions=actions;options.modalPresentationStyle=UIModalPresentationOverFullScreen;options.modalTransitionStyle=UIModalTransitionStyleCrossDissolve;return options;}
+static UIViewController *DGOptionsController(DGBridge *bridge,NSDictionary *work,BOOL actions){DGOptions *options=[DGOptions new];options.bridge=bridge;options.work=work?:@{};options.actions=actions;options.modalPresentationStyle=UIModalPresentationCustom;options.transitioningDelegate=options;return options;}
 UIViewController *DGMakeOptions(DGBridge *bridge,NSDictionary *work){return DGOptionsController(bridge,work,NO);}
 UIViewController *DGMakeActions(DGBridge *bridge,NSDictionary *work){return DGOptionsController(bridge,work,YES);}
 BOOL DGOptionsKeepsPlayback(UIViewController *controller){return [controller isKindOfClass:DGOptions.class];}

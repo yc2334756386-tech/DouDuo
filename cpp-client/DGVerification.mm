@@ -39,7 +39,7 @@ static UIViewController *DGForegroundController(void){for(UIScene *scene in UIAp
 @end
 void DGOpenVerificationPage(DGBridge *bridge,WKWebView *web,NSString *operation,NSDictionary *parameters){
  if(DGVerificationShowing||CACurrentMediaTime()-DGVerificationCancelledAt<12)return;
- UIViewController *host=DGForegroundController();if(!host||[host isKindOfClass:UIAlertController.class])return;DGVerificationShowing=YES;DGVerification *verification=[DGVerification new];verification.bridge=bridge;verification.sourceWeb=web;verification.operation=operation;verification.parameters=parameters;verification.origin=host;UINavigationController *nav=[[DGNavigationController alloc]initWithRootViewController:verification];nav.modalPresentationStyle=UIModalPresentationFullScreen;[host presentViewController:nav animated:YES completion:nil];
+ UIViewController *host=DGForegroundController();if(!host||[host isKindOfClass:UIAlertController.class])return;DGVerificationShowing=YES;DGVerification *verification=[DGVerification new];verification.bridge=bridge;verification.sourceWeb=web;verification.operation=operation;verification.parameters=parameters;verification.origin=host;UINavigationController *nav=[[DGNavigationController alloc]initWithRootViewController:verification];DGConfigurePageTransition(nav);[host presentViewController:nav animated:YES completion:nil];
 }
 
 

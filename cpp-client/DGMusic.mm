@@ -11,6 +11,7 @@
 @property(nonatomic) NSInteger queueIndex;
 @property(nonatomic) NSUInteger queueGeneration;
 @property(nonatomic) BOOL queueMore,queueLoading;
+@property(nonatomic,weak) UIViewController *owner;
 - (void)playItem:(NSDictionary *)music;
 - (void)advance:(NSInteger)delta;
 - (void)loadQueue;
@@ -65,7 +66,9 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
 void DGMusicPlay(NSDictionary *music){DGMusicSession *session=DGMusicShared();++session.queueGeneration;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session playItem:music];}
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music,NSInteger index,DGBridge *bridge,NSString *cursor,BOOL more){if(!music.count||index<0||index>=(NSInteger)music.count)return;DGMusicSession *session=DGMusicShared();++session.queueGeneration;session.queue=music.copy;session.queueIndex=index;session.queueBridge=bridge;session.queueCursor=cursor?:@"0";session.queueMore=more;session.queueLoading=NO;[session playItem:music[index]];[session loadQueue];}
 void DGMusicPause(void){[DGMusicShared()pause];}
-void DGMusicStop(void){DGMusicSession *session=DGMusicShared();++session.queueGeneration;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session.player pause];if(session.clock&&session.player)[session.player removeTimeObserver:session.clock];session.clock=nil;if(session.endToken)[NSNotificationCenter.defaultCenter removeObserver:session.endToken];session.endToken=nil;session.player=nil;session.music=nil;MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;commands.playCommand.enabled=NO;commands.pauseCommand.enabled=NO;commands.togglePlayPauseCommand.enabled=NO;commands.changePlaybackPositionCommand.enabled=NO;commands.nextTrackCommand.enabled=NO;commands.previousTrackCommand.enabled=NO;}
+void DGMusicStop(void){DGMusicSession *session=DGMusicShared();BOOL existed=session.player!=nil;++session.queueGeneration;session.owner=nil;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session.player pause];if(session.clock&&session.player)[session.player removeTimeObserver:session.clock];session.clock=nil;if(session.endToken)[NSNotificationCenter.defaultCenter removeObserver:session.endToken];session.endToken=nil;[session.player replaceCurrentItemWithPlayerItem:nil];session.player=nil;session.music=nil;session.artwork=nil;MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;commands.playCommand.enabled=NO;commands.pauseCommand.enabled=NO;commands.togglePlayPauseCommand.enabled=NO;commands.changePlaybackPositionCommand.enabled=NO;commands.nextTrackCommand.enabled=NO;commands.previousTrackCommand.enabled=NO;if(existed)[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicStateChanged" object:nil];}
+void DGMusicSetOwner(UIViewController *owner){DGMusicShared().owner=owner;}
+void DGMusicStopOwned(UIViewController *owner){if(DGMusicShared().owner==owner)DGMusicStop();}
 AVPlayer *DGMusicPlayer(void){return DGMusicShared().player;}
 BOOL DGMusicMatches(NSString *identifier){return identifier.length&&[Text(String(DGMusicShared().music[@"id"]))isEqualToString:identifier];}
 NSString *DGCurrentMusicID(void){return Text(String(DGMusicShared().music[@"id"]));}
