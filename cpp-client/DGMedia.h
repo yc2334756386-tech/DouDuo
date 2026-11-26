@@ -10,6 +10,8 @@
 - (void)display:(const Work &)work;
 - (void)active:(BOOL)active;
 - (void)compact:(BOOL)compact;
+- (void)mediaHeight:(CGFloat)height;
+- (void)backgroundAudio:(BOOL)enabled;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);

@@ -1,6 +1,6 @@
 /* MIT DouDuo website adapter: read operations plus explicit like/collection changes. */
 (function bundle() {
-  if (window.DouGlass && window.DouGlass.version === 2) return;
+  if (window.DouGlass && window.DouGlass.version === 3) return;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const id = value => value == null || typeof value === 'number' && !Number.isSafeInteger(value) ? '' : String(value);
   const parse = text => {
@@ -19,23 +19,22 @@
   };
   // One background wait, rather than an eight-second wait for every read operation.
   const initialization = (async () => {
-    const deadline = Date.now()+6500;
+    const deadline = Date.now()+16000;
     while (!hooked() && Date.now()<deadline) await delay(150);
-    if (hooked()) {
-      document.querySelectorAll('video,audio').forEach(media => {try {media.pause();media.removeAttribute('src');media.load();}catch(_){}});
-      // Preserve page identities and security SDK state while stopping hidden rendering.
-      if(document.body) {document.body.style.contentVisibility='hidden';document.body.style.pointerEvents='none';}
-    }
+    // Keep the official page DOM and its security/session lifecycle intact.
+    if(hooked()) await delay(400);
     return hooked();
   })();
   async function writeReady() {
     if(hooked()) return;
-    await initialization;
+    const prepared=await initialization;
+    if(!prepared)throw new Error('网页安全组件尚未就绪，请点重新加载；登录信息不会因此清除');
     const until=Date.now()+2500;
     while(!hooked() && Date.now()<until) await delay(150);
     if(!hooked()) throw new Error('账号签名页尚未就绪，请稍后再试或打开登录网页完成验证');
   }
   async function request(method,path,params,body,options={}) {
+    await initialization;
     const values=Object.assign({},base,params);
     if(options.postList) delete values.os_name;
     const response=await new Promise(resolve => {
@@ -51,9 +50,10 @@
     });
     const data=parse(response.body);
     if(data && Number(data.status_code)===8) throw new Error('登录已失效，请重新登录');
-    if(/x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'') || data && (data.verify_info||data.verify_data||data.captcha)) throw new Error('请打开登录网页完成安全验证，再返回刷新');
     const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
-    if(accepted) return data;
+    const actualContent=data&&(Array.isArray(data.aweme_list)||Array.isArray(data.comments)||data.user||data.user_info||Array.isArray(data.data));
+    if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
+    if(data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) throw new Error('平台要求安全验证，请在登录页完成后返回');
     if(options.strict && (!data||data.status_code==null)) throw new Error('操作结果未确认，请刷新核对，避免连续重试');
     throw new Error(response.status===-1?'连接超时，请稍后刷新':data&&(data.status_msg||data.message||data.status_message)||'平台暂未返回内容，请完成网页验证或稍后重试');
   }
@@ -85,8 +85,8 @@
     const allURLs=[...selectedURLs,...((video.play_addr||{}).url_list||[]),...rates.flatMap(rate=>rate.play_addr.url_list||[])];
     const direct=selectedURLs.find(url=>/^https?:\/\//.test(url)&&!url.includes('/aweme/v1/play/'));
     const redirect=selectedURLs.find(url=>url.includes('/aweme/v1/play/'))||allURLs.find(url=>url.includes('/aweme/v1/play/'));
-    const primary=direct||redirect||selectedURLs[0]||'';
-    const alternate=redirect&&redirect!==primary?redirect:allURLs.find(url=>url!==primary)||'';
+    const primary=redirect||direct||selectedURLs[0]||'';
+    const alternate=direct&&direct!==primary?direct:allURLs.find(url=>url!==primary)||'';
     const ip=typeof author.ip_location==='string'?author.ip_location:typeof author.ip_label==='string'?author.ip_label:'';
     // Human-readable work publication fields are not proof of a person's precise IP city.
     const regionCode=String(item.city||'');
@@ -103,7 +103,7 @@
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(item=>item&&!item.cell_room).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
-  window.DouGlass={version:2,async request(operation,params={}){
+  window.DouGlass={version:3,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
     try {
       if(operation==='feed'){

@@ -55,7 +55,7 @@ void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
         }] resume];
     }];
 }
-void DGSaveAudio(UIViewController *host,NSString *url,NSString *name) {
+static void DGDownloadAudioConfirmed(UIViewController *host,NSString *url,NSString *name) {
     if(!url.length){DGToast(host,@"平台未提供可保存的原声地址");return;}
     DGToast(host,@"正在下载原声…");
     DGDownload(url,^(NSData *data,NSURLResponse *response,NSError *error){
@@ -70,6 +70,14 @@ void DGSaveAudio(UIViewController *host,NSString *url,NSString *name) {
             [host presentViewController:share animated:YES completion:nil];
         });
     });
+}
+void DGSaveAudio(UIViewController *host,NSString *url,NSString *name){
+    if(!host||host.presentedViewController)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"下载原声？" message:name.length?name:@"下载后可保存到文件或分享" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGDownloadAudioConfirmed(host,url,name);}]];[host presentViewController:alert animated:YES completion:nil];
+}
+void DGConfirmCopy(UIViewController *host,NSString *text){
+    if(!host||host.presentedViewController||!text.length)return;NSString *preview=text.length>180?[[text substringToIndex:180]stringByAppendingString:@"…"]:text;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"复制作品文案？" message:preview preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=text;DGToast(host,@"文案已复制");}]];[host presentViewController:alert animated:YES completion:nil];
 }
 @interface DGPreview : QLPreviewController <QLPreviewControllerDataSource,QLPreviewControllerDelegate>
 @property(nonatomic,strong) NSURL *file;

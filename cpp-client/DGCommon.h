@@ -5,6 +5,7 @@
 #import <Photos/Photos.h>
 #import <QuickLook/QuickLook.h>
 #import "DGBridge.h"
+#import "DGSession.h"
 #include "Core.hpp"
 #include <algorithm>
 #include <cmath>
@@ -84,6 +85,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 void DGToast(UIViewController *host, NSString *message);
 void DGSaveURL(UIViewController *host, NSString *url, BOOL video);
 void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
+void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);

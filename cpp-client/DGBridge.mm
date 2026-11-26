@@ -1,4 +1,5 @@
 #import "DGBridge.h"
+#import "DGSession.h"
 
 NSString *DGUserAgent(void) {
     return @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
@@ -18,6 +19,7 @@ NSString *DGUserAgent(void) {
         NSString *regions=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"DouyinPublicationRegions" ofType:@"json"] encoding:NSUTF8StringEncoding error:nil];
         if(regions.length)_script=[[NSString stringWithFormat:@"window.DGPublicationRegions=%@;\n",regions] stringByAppendingString:_script];
         WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+        DGSessionConfigure(configuration);
         configuration.websiteDataStore = WKWebsiteDataStore.defaultDataStore;
         configuration.allowsInlineMediaPlayback = YES;
         configuration.allowsPictureInPictureMediaPlayback = NO;
@@ -67,7 +69,7 @@ NSString *DGUserAgent(void) {
     [self flush:@"登录状态已更新，请刷新重试"];
     _ready = NO; _failure = nil;
     NSUInteger generation = _generation;
-    [_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/jingxuan"] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:25]];
+    DGSessionRestore(^{DGSessionPrepare(self->_web,YES,^{if(generation==self->_generation)[self->_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/jingxuan"] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:25]];});});
     __weak DGBridge *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 28 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         DGBridge *self = weakSelf;
@@ -126,11 +128,13 @@ NSString *DGUserAgent(void) {
                 NSString *message = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
                 if (failure || !result) message = @"网页请求未完成，请刷新或在登录网页完成验证";
                 deliver(result, message);
+                if(!message&&[operation isEqualToString:@"profile"]&&[result[@"loggedIn"]boolValue])DGSessionCapture(nil);
             }];
     };
     if (_ready) execute(nil); else [_waiters addObject:[execute copy]];
 }
 - (void)signOut:(void (^)(void))completion {
+    DGSessionForget();
     ++_generation; _ready = NO;
     [_web stopLoading];
     [self flush:@"已退出当前账号"];

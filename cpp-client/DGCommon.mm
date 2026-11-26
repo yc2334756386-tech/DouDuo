@@ -56,58 +56,27 @@
 @end
 
 @implementation DGLogin {
-    WKWebView *_web;
-    NSString *_baseline;
-    BOOL _closing;
+ WKWebView *_web;NSString *_baseline;BOOL _closing,_saving;NSTimer *_poll;
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"抖音账号登录";
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(done)];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStyleDone target:self action:@selector(done)];
-    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
-    configuration.websiteDataStore = WKWebsiteDataStore.defaultDataStore;
-    configuration.allowsInlineMediaPlayback = YES;
-    configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
-    _web = [[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration];
-    _web.navigationDelegate = self; _web.UIDelegate = self; _web.customUserAgent = DGUserAgent();
-    _web.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_web];
-    [NSLayoutConstraint activateConstraints:@[
-        [_web.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [_web.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [_web.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [_web.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
-    [configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
-        for (NSHTTPCookie *cookie in cookies) if ([cookie.name isEqualToString:@"sessionid"] && [cookie.domain hasSuffix:@"douyin.com"]) self->_baseline = cookie.value;
-        [self->_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/login_page?service=https%3A%2F%2Fwww.douyin.com"]]];
-    }];
+ [super viewDidLoad];self.title=@"抖音账号登录";self.view.backgroundColor=UIColor.systemBackgroundColor;
+ self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(cancel)];
+ self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc]initWithTitle:@"完成" style:UIBarButtonItemStyleDone target:self action:@selector(done)];
+ WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];DGSessionConfigure(configuration);configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeAll;
+ _web=[[WKWebView alloc]initWithFrame:CGRectZero configuration:configuration];_web.navigationDelegate=self;_web.UIDelegate=self;_web.customUserAgent=DGUserAgent();_web.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:_web];
+ [NSLayoutConstraint activateConstraints:@[[_web.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[_web.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[_web.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[_web.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+ [configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){for(NSHTTPCookie *cookie in cookies)if([cookie.name isEqualToString:@"sessionid"]&&[cookie.domain hasSuffix:@"douyin.com"])self->_baseline=cookie.value;DGSessionPrepare(self->_web,NO,^{[self->_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/login_page?service=https%3A%2F%2Fwww.douyin.com"]]];});}];
+ __weak DGLogin *weak=self;_poll=[NSTimer scheduledTimerWithTimeInterval:.8 repeats:YES block:^(NSTimer *timer){[weak inspectSession];}];
 }
-- (void)done {
-    if (_closing) return; _closing = YES;
-    [_web evaluateJavaScript:@"document.querySelectorAll('video,audio').forEach(v=>v.pause())" completionHandler:nil];
-    [self dismissViewControllerAnimated:YES completion:^{ if (self.finished) self.finished(); }];
-}
-- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    [WKWebsiteDataStore.defaultDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
-        for (NSHTTPCookie *cookie in cookies) {
-            if ([cookie.name isEqualToString:@"sessionid"] && [cookie.domain hasSuffix:@"douyin.com"] && cookie.value.length && ![cookie.value isEqualToString:self->_baseline]) { [self done]; break; }
-        }
-    }];
-}
-- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))handler {
-    NSString *scheme = action.request.URL.scheme.lowercaseString;
-    handler([@[@"http",@"https",@"about",@"blob",@"data"] containsObject:scheme] ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
-}
-- (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)action windowFeatures:(WKWindowFeatures *)features {
-    if (!action.targetFrame) [webView loadRequest:action.request];
-    return nil;
-}
-- (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completion {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"抖音登录" message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { completion(); }]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
+- (void)cancel {if(_closing)return;_closing=YES;[_poll invalidate];[_web stopLoading];[self dismissViewControllerAnimated:YES completion:^{if(self.finished)self.finished();}];}
+- (void)finish {if(_closing)return;DGSessionCapture(^{if(self->_closing)return;self->_closing=YES;[self->_poll invalidate];[self->_web stopLoading];[self dismissViewControllerAnimated:YES completion:^{if(self.finished)self.finished();}];});}
+- (void)saveAndFinish {if(_saving||_closing)return;_saving=YES;self.title=@"正在保存登录信息…";dispatch_after(dispatch_time(DISPATCH_TIME_NOW,4*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self finish];});}
+- (void)done {[WKWebsiteDataStore.defaultDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){for(NSHTTPCookie *cookie in cookies)if([cookie.name isEqualToString:@"sessionid"]&&[cookie.domain hasSuffix:@"douyin.com"]&&cookie.value.length){[self saveAndFinish];return;}DGToast(self,@"请先在页面完成登录和安全验证");}];}
+- (void)inspectSession {if(_saving||_closing)return;[WKWebsiteDataStore.defaultDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){for(NSHTTPCookie *cookie in cookies)if([cookie.name isEqualToString:@"sessionid"]&&[cookie.domain hasSuffix:@"douyin.com"]&&cookie.value.length&&![cookie.value isEqualToString:self->_baseline]){[self saveAndFinish];break;}}];}
+- (void)webView:(WKWebView *)web didFinishNavigation:(WKNavigation *)navigation {[self inspectSession];}
+- (void)webView:(WKWebView *)web decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decision {decision([@[@"https",@"http",@"about",@"blob",@"data"]containsObject:action.request.URL.scheme.lowercaseString]?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);}
+- (WKWebView *)webView:(WKWebView *)web createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)action windowFeatures:(WKWindowFeatures *)features {if(!action.targetFrame)[web loadRequest:action.request];return nil;}
+- (void)webView:(WKWebView *)web runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completion {UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"抖音登录" message:message preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){completion();}]];[self presentViewController:alert animated:YES completion:nil];}
+- (void)dealloc {[_poll invalidate];}
 @end
 

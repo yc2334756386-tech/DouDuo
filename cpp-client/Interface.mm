@@ -21,7 +21,7 @@
     UIView *_commentHost;
     NSDictionary *_profile;
     NSString *_operation,*_cursor;
-    BOOL _loading,_foreground,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible;
+    BOOL _loading,_foreground,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition;
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation;
 }
@@ -55,16 +55,17 @@
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];_visible=YES;[self activate];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];_visible=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;CGFloat panel=_comments?MIN(size.height*.58,size.height-top-170):0;CGFloat h=size.height-panel;
-    if(!CGSizeEqualToSize(_collection.bounds.size,CGSizeMake(size.width,h))){_relayout=YES;_collection.frame=CGRectMake(0,0,size.width,h);[_collection.collectionViewLayout invalidateLayout];[_collection layoutIfNeeded];[_collection setContentOffset:CGPointMake(0,MAX(0,_current)*h) animated:NO];_relayout=NO;}
-    _commentHost.frame=CGRectMake(8,h,size.width-16,panel-6);_comments.view.frame=_commentHost.bounds;
-    CGFloat w=MIN(size.width-28,510),unit=(w-16)/6;_bar.frame=CGRectMake((size.width-w)/2,top+7,w,52);NSArray *buttons=@[_settings,_follow,_recommend,_search,_messages,_account];for(NSUInteger i=0;i<buttons.count;i++)((UIView *)buttons[i]).frame=CGRectMake(8+i*unit,0,unit,52);
-    _accountImage.frame=CGRectMake((_account.bounds.size.width-32)/2,10,32,32);_back.frame=CGRectMake(12,top+4,44,44);_empty.frame=CGRectMake(28,h/2-90,size.width-56,230);_subtitle.preferredMaxLayoutWidth=MIN(size.width-56,420);
-    _follow.tintColor=[_operation isEqualToString:@"followFeed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;_recommend.tintColor=[_operation isEqualToString:@"feed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;
-    if(_staticFeed&&!_positioned&&!_feed.works.empty()){_positioned=YES;_current=MAX(0,MIN(_selected,(NSInteger)_feed.works.size()-1));[_collection setContentOffset:CGPointMake(0,_current*h) animated:NO];}
-    for(DGFeedCell *cell in _collection.visibleCells)[cell compact:_comments!=nil];
+ [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
+ if(!CGSizeEqualToSize(_collection.bounds.size,size)){_relayout=YES;_collection.frame=self.view.bounds;[_collection.collectionViewLayout invalidateLayout];[_collection layoutIfNeeded];[_collection setContentOffset:CGPointMake(0,MAX(0,_current)*size.height) animated:NO];_relayout=NO;}
+ CGFloat panel=_comments?MIN(size.height*.58,size.height-top-170):0;CGFloat media=size.height-panel;
+ _commentHost.bounds=CGRectMake(0,0,size.width-16,MAX(0,panel-6));_commentHost.center=CGPointMake(size.width/2,media+MAX(0,panel-6)/2);_comments.view.frame=_commentHost.bounds;
+ CGFloat w=MIN(size.width-28,510),unit=(w-16)/6;_bar.frame=CGRectMake((size.width-w)/2,top+7,w,52);NSArray *buttons=@[_settings,_follow,_recommend,_search,_messages,_account];for(NSUInteger i=0;i<buttons.count;i++)((UIView *)buttons[i]).frame=CGRectMake(8+i*unit,0,unit,52);
+ _accountImage.frame=CGRectMake((_account.bounds.size.width-32)/2,10,32,32);_back.frame=CGRectMake(12,top+4,44,44);_empty.frame=CGRectMake(28,media/2-90,size.width-56,230);_subtitle.preferredMaxLayoutWidth=MIN(size.width-56,420);
+ _follow.tintColor=[_operation isEqualToString:@"followFeed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;_recommend.tintColor=[_operation isEqualToString:@"feed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;
+ if(_staticFeed&&!_positioned&&!_feed.works.empty()){_positioned=YES;_current=MAX(0,MIN(_selected,(NSInteger)_feed.works.size()-1));[_collection setContentOffset:CGPointMake(0,_current*size.height) animated:NO];}
+ [UIView performWithoutAnimation:^{for(DGFeedCell *cell in self->_collection.visibleCells){[cell compact:self->_comments!=nil];[cell mediaHeight:self->_comments?media:0];[cell layoutIfNeeded];}}];
 }
-- (void)background{_foreground=NO;[self activate];}
+- (void)background{_foreground=NO;DGSessionCapture(nil);[self activate];}
 - (void)foreground{_foreground=YES;[self activate];}
 - (void)resume{dispatch_async(dispatch_get_main_queue(),^{[self activate];});}
 - (void)workStateChanged:(NSNotification *)notification {
@@ -89,7 +90,7 @@
         [self updateEmpty:nil];DGWarmWorks(self->_feed.works,self->_current);dispatch_async(dispatch_get_main_queue(),^{[self activate];});if(self->_feed.works.empty()&&self->_feed.more)[self loadFeed:NO];
     }];
 }
-- (void)loadProfile{NSUInteger generation=_generation;__weak DGFeed *weakSelf=self;[_bridge request:@"profile" parameters:@{} completion:^(NSDictionary *result,NSString *error){DGFeed *self=weakSelf;if(!self||generation!=self->_generation)return;self->_profile=error?nil:result;NSString *avatar=[result[@"avatar"] isKindOfClass:NSString.class]?result[@"avatar"]:@"";self->_accountImage.hidden=![result[@"loggedIn"] boolValue]||!avatar.length;[self->_accountImage remote:avatar];[self->_account setImage:self->_accountImage.hidden?[UIImage systemImageNamed:@"person.crop.circle"]:nil forState:UIControlStateNormal];}];}
+- (void)loadProfile{NSUInteger generation=_generation;__weak DGFeed *weakSelf=self;[_bridge request:@"profile" parameters:@{} completion:^(NSDictionary *result,NSString *error){DGFeed *self=weakSelf;if(!self||generation!=self->_generation)return;if(error){return;}self->_profile=result;NSString *avatar=[result[@"avatar"] isKindOfClass:NSString.class]?result[@"avatar"]:@"";self->_accountImage.hidden=![result[@"loggedIn"] boolValue]||!avatar.length;[self->_accountImage remote:avatar];[self->_account setImage:self->_accountImage.hidden?[UIImage systemImageNamed:@"person.crop.circle"]:nil forState:UIControlStateNormal];}];}
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section{return _feed.works.size();}
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)path{return collectionView.bounds.size;}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)path {
@@ -97,22 +98,28 @@
     cell.commentsAction=^{[weakSelf showComments:workID];};cell.profileAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,workID)];};
     cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@""})];};return cell;
 }
-- (void)activate{if(_relayout)return;CGFloat h=_collection.bounds.size.height;if(h<=0)return;_current=MAX(0,(NSInteger)llround(_collection.contentOffset.y/h));BOOL allowed=_foreground&&_visible&&self.view.window&&self.presentedViewController==nil;for(DGFeedCell *cell in _collection.visibleCells)[cell active:allowed&&[_collection indexPathForCell:cell].item==_current];if(!_failed&&!_loading&&_feed.more&&!_feed.works.empty()&&_current+5>=(NSInteger)_feed.works.size())[self loadFeed:NO];if(!_collection.dragging&&!_collection.decelerating)DGWarmWorks(_feed.works,_current);}
+- (void)activate{if(_relayout)return;CGFloat h=_collection.bounds.size.height;if(h<=0)return;_current=MAX(0,(NSInteger)llround(_collection.contentOffset.y/h));BOOL allowed=(_foreground||DGBackgroundAudioEnabled())&&_visible&&self.view.window&&self.presentedViewController==nil;for(DGFeedCell *cell in _collection.visibleCells){[cell backgroundAudio:!_foreground&&DGBackgroundAudioEnabled()];[cell active:allowed&&[_collection indexPathForCell:cell].item==_current];}if(!_failed&&!_loading&&_feed.more&&!_feed.works.empty()&&_current+5>=(NSInteger)_feed.works.size())[self loadFeed:NO];if(!_collection.dragging&&!_collection.decelerating)DGWarmWorks(_feed.works,_current);}
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView{[self activate];}
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{DGWarmWorks(_feed.works,_current);[self activate];}
 - (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{[(DGFeedCell *)cell active:NO];}
 - (void)showComments:(NSString *)workID {
-    if(_comments){[self closeComments];return;}_comments=[[DGComments alloc] initWithBridge:_bridge work:workID parent:nil];__weak DGFeed *weakSelf=self;_comments.closeAction=^{[weakSelf closeComments];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
-    [self addChildViewController:_comments];_commentHost=[UIView new];_commentHost.layer.cornerRadius=30;_commentHost.clipsToBounds=YES;[self.view addSubview:_commentHost];[_commentHost addSubview:_comments.view];[_comments didMoveToParentViewController:self];_collection.scrollEnabled=NO;_commentHost.alpha=0;[self.view setNeedsLayout];[UIView animateWithDuration:.34 delay:0 usingSpringWithDamping:.88 initialSpringVelocity:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{[self.view layoutIfNeeded];self->_commentHost.alpha=1;} completion:^(BOOL done){[self activate];}];
+ if(_commentTransition)return;if(_comments){[self closeComments];return;}_commentTransition=YES;
+ _comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
+ [self addChildViewController:_comments];_commentHost=[UIView new];_commentHost.layer.cornerRadius=30;_commentHost.clipsToBounds=YES;[self.view addSubview:_commentHost];[_commentHost addSubview:_comments.view];[_comments didMoveToParentViewController:self];_collection.scrollEnabled=NO;
+ [UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentHost.bounds.size.height+10);
+ [UIView animateWithDuration:.24 delay:0 options:UIViewAnimationOptionCurveEaseOut|UIViewAnimationOptionBeginFromCurrentState animations:^{self->_commentHost.transform=CGAffineTransformIdentity;} completion:^(BOOL done){self->_commentTransition=NO;[self activate];}];
 }
-- (void)closeComments{if(!_comments)return;[_comments willMoveToParentViewController:nil];[_comments.view removeFromSuperview];[_comments removeFromParentViewController];_comments=nil;[_commentHost removeFromSuperview];_commentHost=nil;_collection.scrollEnabled=YES;[self.view setNeedsLayout];[UIView animateWithDuration:.28 animations:^{[self.view layoutIfNeeded];} completion:^(BOOL done){[self activate];}];}
+- (void)closeComments {
+ if(!_comments||_commentTransition)return;_commentTransition=YES;UIView *panel=_commentHost;
+ [UIView animateWithDuration:.2 delay:0 options:UIViewAnimationOptionCurveEaseIn|UIViewAnimationOptionBeginFromCurrentState animations:^{panel.transform=CGAffineTransformMakeTranslation(0,panel.bounds.size.height+10);} completion:^(BOOL done){[self->_comments willMoveToParentViewController:nil];[self->_comments.view removeFromSuperview];[self->_comments removeFromParentViewController];self->_comments=nil;[panel removeFromSuperview];self->_commentHost=nil;self->_collection.scrollEnabled=YES;self->_commentTransition=NO;[UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];[self activate];}];
+}
 - (void)presentPage:(UIViewController *)page{if(!page||self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:page];nav.modalPresentationStyle=UIModalPresentationFullScreen;nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self presentViewController:nav animated:YES completion:nil];}
 - (void)search{[self presentPage:DGMakeSearch(_bridge)];}
 - (void)messages{[self presentPage:DGMakeMessages(_bridge)];}
 - (void)account{if(![_profile[@"loggedIn"] boolValue]){[self openLogin];return;}[self presentPage:DGMakeProfile(_bridge,@"",_profile[@"nickname"]?:@"我的",@"")];}
 - (void)followList:(UILongPressGestureRecognizer *)gesture{if(gesture.state!=UIGestureRecognizerStateBegan)return;extern UIViewController *DGMakeFollowing(DGBridge *,NSString *,NSString *);[self presentPage:DGMakeFollowing(_bridge,_profile[@"sec"]?:@"",_profile[@"uid"]?:@"")];}
 - (void)settings {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"澄流 · 设置" message:@"长按两侧 1.5×，向上滑最高 3×\n长按关注可查看关注列表" preferredStyle:UIAlertControllerStyleActionSheet];BOOL enabled=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku"]?[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku"]:YES;
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"澄流 · 设置" message:@"长按视频固定 2×，松手恢复 1×\n长按关注可查看关注列表" preferredStyle:UIAlertControllerStyleActionSheet];BOOL enabled=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku"]?[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku"]:YES;
     [menu addAction:[UIAlertAction actionWithTitle:enabled?@"关闭视频弹幕":@"开启视频弹幕" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[NSUserDefaults.standardUserDefaults setBool:!enabled forKey:@"douglass.danmaku"];[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
