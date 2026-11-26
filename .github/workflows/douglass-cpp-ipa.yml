@@ -1,0 +1,30 @@
+name: DouGlass C++ unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/douglass-cpp-v1-20261126]
+    paths:
+      - cpp-client/**
+      - .github/workflows/douglass-cpp-ipa.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile C++ and package unsigned IPA
+        run: bash cpp-client/scripts/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DouGlass-0.1.0-unsigned-IPA
+          path: |
+            build/douglass/DouGlass-0.1.0-unsigned.ipa
+            build/douglass/SHA256.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
