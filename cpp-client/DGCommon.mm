@@ -4,11 +4,11 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 @implementation DGImage {
     NSURLSessionDataTask *_task;
     NSString *_source;
-    UIImage *_original;NSUInteger _colorGeneration;
+    UIImage *_original;NSUInteger _colorGeneration,_loadGeneration;BOOL _decodeHDR;
 }
 - (void)setColorAdjusted:(BOOL)value{if(_colorAdjusted==value)return;_colorAdjusted=value;[NSNotificationCenter.defaultCenter removeObserver:self name:@"DGColorChanged" object:nil];if(value)[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(colorChanged) name:@"DGColorChanged" object:nil];[self colorChanged];}
 - (void)setImage:(UIImage *)image{_original=image;[super setImage:image];if(_colorAdjusted)[self colorChanged];}
-- (void)colorChanged{self.preferredImageDynamicRange=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.hdr"]?UIImageDynamicRangeHigh:UIImageDynamicRangeStandard;NSUInteger generation=++_colorGeneration;UIImage *original=_original;if(!_colorAdjusted||!original){[super setImage:original];return;}__weak DGImage *weak=self;dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{UIImage *result=DGColorImage(original);dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weak;if(self&&generation==self->_colorGeneration)[self setRenderedImage:result];});});}
+- (void)colorChanged{BOOL hdr=_colorAdjusted&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.hdr"]&&AVPlayer.eligibleForHDRPlayback;if(_source.length&&_decodeHDR!=hdr){NSString *url=_source;_source=nil;[self remote:url];return;}self.preferredImageDynamicRange=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.hdr"]?UIImageDynamicRangeHigh:UIImageDynamicRangeStandard;NSUInteger generation=++_colorGeneration;UIImage *original=_original;if(!_colorAdjusted||!original){[super setImage:original];return;}__weak DGImage *weak=self;dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{UIImage *result=DGColorImage(original);dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weak;if(self&&generation==self->_colorGeneration)[self setRenderedImage:result];});});}
 - (void)setRenderedImage:(UIImage *)image{[super setImage:image];}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
@@ -18,9 +18,9 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 + (void)purgeCache{[DGImage.cache removeAllObjects];}
 - (void)remote:(NSString *)url {
     if ([_source isEqualToString:url]) return;
-    [_task cancel]; _source = url.copy; self.image = nil;
+    NSUInteger load=++_loadGeneration;[_task cancel]; _source = url.copy;_decodeHDR=_colorAdjusted&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.hdr"]&&AVPlayer.eligibleForHDRPlayback;self.image = nil;
     if (!url.length) return;
-    NSUInteger maxPixels=self.maximumPixelSize?:1440;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
+    NSUInteger maxPixels=self.maximumPixelSize?:1440;BOOL decodeHDR=_decodeHDR;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu|%d",url,(unsigned long)maxPixels,decodeHDR];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached; return; }
     NSURL *address = [NSURL URLWithString:url];
@@ -35,7 +35,8 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         if (!source) return;
         CGImageRef thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)@{
             (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
-            (__bridge NSString *)kCGImageSourceShouldAllowFloat:@YES,
+            (__bridge NSString *)kCGImageSourceShouldAllowFloat:@(decodeHDR),
+            (__bridge NSString *)kCGImageSourceDecodeRequest:(__bridge NSString *)(decodeHDR?kCGImageSourceDecodeToHDR:kCGImageSourceDecodeToSDR),
             (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
             (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(maxPixels)});
         UIImage *image = thumbnail ? [UIImage imageWithCGImage:thumbnail] : nil;
@@ -45,7 +46,8 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
             size_t stride=MAX((size_t)1,(frames+23)/24);
             for(size_t index=0;index<frames;index+=stride){
                 CGImageRef frame=CGImageSourceCreateThumbnailAtIndex(source,index,(__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
-            (__bridge NSString *)kCGImageSourceShouldAllowFloat:@YES,(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@320});
+            (__bridge NSString *)kCGImageSourceShouldAllowFloat:@(decodeHDR),
+            (__bridge NSString *)kCGImageSourceDecodeRequest:(__bridge NSString *)(decodeHDR?kCGImageSourceDecodeToHDR:kCGImageSourceDecodeToSDR),(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@320});
                 if(!frame)continue;[animation addObject:[UIImage imageWithCGImage:frame]];CGImageRelease(frame);
                 NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,index,NULL));
                 NSDictionary *gif=properties[(__bridge NSString *)kCGImagePropertyGIFDictionary];
@@ -59,7 +61,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         CFRelease(source);
         if (!image) return;
         [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
-        dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && [self->_source isEqualToString:url]) self.image = image; });
+        dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && load==self->_loadGeneration && [self->_source isEqualToString:url]) self.image = image; });
     }];
     [_task resume];
 }
