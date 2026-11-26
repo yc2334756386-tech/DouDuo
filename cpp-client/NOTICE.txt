@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.4.0
+抖音极简版 / DouGlass 0.5.0
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -11,5 +11,9 @@ with Douyin. Content and service marks belong to their respective owners.
 Login takes place on the official website. Session data stays in the app's
 local WebKit website store. This version has no developer-operated backend,
 analytics SDK or comment publishing interface. Likes and collection changes
-are sent only when requested in the interface. Messages use the official
+and follow/block changes are sent only when requested in the interface.
+Manual search-page importing reads real results loaded by the official page;
+the user controls pagination and completes any verification themselves.
+Comment sorting applies only to the comments already loaded in the client.
+Messages use the official
 website transport with the same local login session, rendered by native UI.

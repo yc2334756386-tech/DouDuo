@@ -61,11 +61,12 @@
   const get=(path,params,options)=>request('GET',path,params||{},null,options);
   const post=(path,params,body,options)=>request('POST',path,params||{},body==null?'':body,options);
   let emojiCatalog={},emojiLoading;
-  const ipCache=new Map();
+  const ipCache=new Map();let selfUID='';
   const loadEmojis=()=>emojiLoading||(emojiLoading=get('/aweme/v1/web/emoji/list/',{}).then(data=>{for(const value of data.emoji_list||[]){const url=first(value.emoji_url);if(value.display_name&&url)emojiCatalog[value.display_name]=url;}}).catch(()=>{}));
   const user=value=>{
     value=value||{};
-    return {uid:id(value.uid||value.id_str||value.id),sec:value.sec_uid||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),location:typeof value.ip_location==='string'?value.ip_location:typeof value.ip_label==='string'?value.ip_label:''};
+    const uid=id(value.uid||value.id_str||value.id);
+    return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:typeof value.ip_location==='string'?value.ip_location:typeof value.ip_label==='string'?value.ip_label:''};
   };
   const music=value=>{
     value=value||{};
@@ -108,7 +109,8 @@
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
-  window.DouGlass={version:3,normalizeWorks:works,async request(operation,params={}){
+  const users=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(entry=>user(entry.user_info||entry.user||entry)).filter(value=>value.sec);
+  window.DouGlass={version:3,normalizeWorks:works,normalizeUsers:users,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
     try {
       if(operation==='feed'){
@@ -135,7 +137,7 @@
       if(operation==='profile'||operation==='userProfile'){
         const query=operation==='profile'?{publish_video_strategy_type:'2',source:'channel_pc_web',personal_center_strategy:'1'}:{sec_user_id:params.sec,publish_video_strategy_type:'2',personal_center_strategy:'1'};
         const data=await get(operation==='profile'?'/aweme/v1/web/user/profile/self/':'/aweme/v1/web/user/profile/other/',query);
-        const person=user(data.user||data.user_info);return Object.assign(person,{loggedIn:!!(person.uid&&person.uid!=='0')});
+        const person=user(data.user||data.user_info);if(operation==='profile'&&person.uid&&person.uid!=='0'){selfUID=person.uid;person.isMe=true;}return Object.assign(person,{loggedIn:!!(person.uid&&person.uid!=='0')});
       }
       if(operation==='userLocation'){if(ipCache.has(params.sec))return {location:ipCache.get(params.sec)};const data=await get('/aweme/v1/web/user/profile/other/',{sec_user_id:params.sec,publish_video_strategy_type:'2',personal_center_strategy:'1'});const profile=user(data.user||data.user_info);if(ipCache.size>150)ipCache.delete(ipCache.keys().next().value);const location=(profile.location||'').replace(/^IP属地[:：\s]*/,'');ipCache.set(params.sec,location);return {location};}
       if(operation==='detail'){const data=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});return {items:works([data.aweme_detail||data.aweme].filter(Boolean))};}
@@ -170,6 +172,22 @@
       }
       if(operation==='search'){
         const data=await get('/aweme/v1/web/search/item/',{search_channel:'aweme_video_web',keyword:params.kw||'',search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset:cursor,count:'24',need_filter_settings:cursor==='0'?'1':'0',list_type:'single'});return page(data,data.data||data.aweme_list,data.cursor,data.has_more);
+      }
+      if(operation==='searchUsers'){
+        const data=await get('/aweme/v1/web/discover/search/',{keyword:params.kw||'',search_channel:'aweme_user_web',search_source:'normal_search',offset:cursor,count:'20',query_correct_type:'1',is_filter_search:'0'});
+        const items=users(data.user_list||(data.data||{}).user_list||data.data||[]);const proposed=Number(data.cursor??data.offset??0),next=proposed>Number(cursor)?proposed:Number(cursor)+items.length;
+        return {items,cursor:String(next),more:!!data.has_more&&items.length>0};
+      }
+      if(operation==='follow'||operation==='block'){
+        await writeReady();if(!params.uid||params.uid===selfUID)throw new Error('无法对该用户执行此操作');const value=params.add?'1':'0';
+        const body=operation==='follow'?{user_id:params.uid,type:value}:{user_id:params.uid,sec_user_id:params.sec||'',block_type:value,source:'0'};
+        const data=await post(operation==='follow'?'/aweme/v1/web/commit/follow/user/':'/aweme/v1/web/user/block/',{},new URLSearchParams(body).toString(),{strict:true});
+        if(operation==='block'&&Number(data.block_status??-1)!==Number(value)){
+          const check=await get('/aweme/v1/web/user/profile/other/',{sec_user_id:params.sec,publish_video_strategy_type:'2',personal_center_strategy:'1'});const person=check.user||check.user_info||{};
+          if(person.is_block==null||!!person.is_block!==(value==='1'))throw new Error('平台未确认拉黑状态，请重新打开主页核对');
+        }
+        if(operation==='follow'&&data.follow_status!=null&&(Number(data.follow_status)>0)!==(value==='1'))throw new Error('平台未确认关注状态，请重新打开主页核对');
+        return operation==='follow'?{ok:true,added:value==='1',followStatus:data.follow_status??(value==='1'?1:0)}:{ok:true,added:value==='1',blocked:value==='1'};
       }
       if(operation==='danmaku'){
         const duration=Math.max(15000,Number(params.duration||30000)),from=Math.max(0,Number(params.from||0)),to=Math.min(duration,Math.max(from+1,Number(params.to||from+30000)));

@@ -32,6 +32,7 @@ xcrun --sdk iphoneos clang++ \
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"
 cp "$CLIENT/music-page.js" "$APP/music-page.js"
+cp "$CLIENT/search-page.js" "$APP/search-page.js"
 cp "$ROOT/DouDuo/DouyinPublicationRegions.json" "$APP/DouyinPublicationRegions.json"
 cp "$ROOT/LICENSE" "$APP/DOUDUO-LICENSE.txt"
 cp "$CLIENT/NOTICE.txt" "$APP/NOTICE.txt"

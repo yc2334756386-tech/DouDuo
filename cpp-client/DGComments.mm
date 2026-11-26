@@ -175,10 +175,10 @@ namespace { struct DGReplyState {
     NSString *_workID,*_parent,*_cursor;
     UIVisualEffectView *_glass,*_closeGlass;
     UIView *_handle,*_separator;
-    UILabel *_titleLabel,*_modeLabel,*_empty;
+    UILabel *_titleLabel,*_modeLabel,*_empty,*_sortHint;UISegmentedControl *_sort;
     UIButton *_close,*_footer;
     UITableView *_table;
-    BOOL _loading,_more,_failed;
+    BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
     std::vector<Comment> _comments;
     std::unordered_set<std::string> _ids;
     std::unordered_map<std::string,DGReplyState> _replyStates;
@@ -197,6 +197,8 @@ namespace { struct DGReplyState {
     _handle=[UIView new]; _handle.backgroundColor=[UIColor colorWithWhite:1 alpha:.42]; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
     _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
     _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"";_modeLabel.hidden=YES; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
+    _sort=[[UISegmentedControl alloc]initWithItems:@[@"最热",@"最新"]];_sort.selectedSegmentIndex=0;[_sort addTarget:self action:@selector(sortChanged) forControlEvents:UIControlEventValueChanged];[_glass.contentView addSubview:_sort];_sort.hidden=_parent.length>0;
+    _sortHint=Label(10,UIFontWeightRegular);_sortHint.text=@"按已加载评论排序";_sortHint.textColor=UIColor.secondaryLabelColor;[_glass.contentView addSubview:_sortHint];_sortHint.hidden=_sort.hidden;
     _closeGlass=Glass(20); _close=Symbol(@"xmark",self,@selector(close)); _close.accessibilityLabel=@"关闭评论，继续浏览当前作品";
     [_closeGlass.contentView addSubview:_close]; [_glass.contentView addSubview:_closeGlass];
     _separator=[UIView new]; _separator.backgroundColor=[UIColor colorWithWhite:1 alpha:.10]; [_glass.contentView addSubview:_separator];
@@ -218,10 +220,18 @@ namespace { struct DGReplyState {
     [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _backdrop.frame=b;_backdropBlur.frame=b;_backdropShade.frame=b;_glass.frame=b;
     _handle.frame=CGRectMake((width-50)/2,8,50,5); _titleLabel.frame=CGRectMake(68,24,MAX(0,width-136),30);
     _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
-    _separator.frame=CGRectMake(20,73,MAX(0,width-40),.5); _table.frame=CGRectMake(0,77,width,MAX(0,b.size.height-77));
+    CGFloat header=_parent.length?77:111;_sort.frame=CGRectMake(18,68,130,30);_sortHint.frame=CGRectMake(160,73,MAX(0,width-178),20);
+    _separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5); _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
+- (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
+- (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
+- (void)sortLoaded{
+    BOOL latest=_sort.selectedSegmentIndex==1;
+    std::stable_sort(_comments.begin(),_comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});
+}
+- (void)sortChanged{[self sortLoaded];[_table reloadData];[_table setContentOffset:CGPointZero animated:NO];_savedOffset=CGPointZero;}
 - (void)loadMore {
     if(_loading||!_more)return; _loading=YES; _failed=NO;
     [_footer setTitle:@"正在读取评论…" forState:UIControlStateNormal]; _footer.enabled=NO;
@@ -231,12 +241,14 @@ namespace { struct DGReplyState {
         DGComments *self=weakSelf; if(!self)return; self->_loading=NO;
         if(error) { self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
             [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES; return; }
+        NSIndexPath *anchor=self->_table.indexPathsForVisibleRows.firstObject;NSString *anchorID=anchor&&anchor.section<(NSInteger)self->_comments.size()?Text(self->_comments[anchor.section].id):@"";CGFloat anchorOffset=anchor?self->_table.contentOffset.y-CGRectGetMinY([self->_table rectForRowAtIndexPath:anchor]):0;
         for(id value in Array(result[@"items"])) { if(![value isKindOfClass:NSDictionary.class])continue;
             Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)self->_comments.emplace_back(std::move(comment)); }
         self->_cursor=[result[@"cursor"] description]?:@"0"; self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
         self->_empty.text=self->_comments.empty()?@"还没有评论":@"";
         long long total=Number(result[@"total"]); self->_titleLabel.text=total>0?[NSString stringWithFormat:@"评论 %@",Text(douglass::compact(total))]:(self->_parent.length?@"回复":@"评论");
-        [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more; [self->_table reloadData];
+        [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more;[self sortLoaded]; [self->_table reloadData];[self->_table layoutIfNeeded];
+        NSInteger section=[self indexOfComment:anchorID];if(section!=NSNotFound&&anchor.row<[self->_table numberOfRowsInSection:section]){NSIndexPath *path=[NSIndexPath indexPathForRow:anchor.row inSection:section];CGFloat y=CGRectGetMinY([self->_table rectForRowAtIndexPath:path])+anchorOffset;[self->_table setContentOffset:CGPointMake(0,y) animated:NO];if(self->_remembered)self->_savedOffset=self->_table.contentOffset;}
     }];
 }
 - (NSInteger)indexOfComment:(NSString *)identifier {
@@ -291,7 +303,7 @@ namespace { struct DGReplyState {
     return cell;
 }
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if(!_failed&&_more&&!_loading&&(std::size_t)(indexPath.section+3)>=_comments.size())[self loadMore];
+    if(self.view.window&&!_failed&&_more&&!_loading&&(std::size_t)(indexPath.section+3)>=_comments.size())[self loadMore];
 }
 @end
 
