@@ -1,10 +1,11 @@
+#import "DGAnimation.h"
 #import "DGCommon.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 @interface DGPagePresentation:UIPresentationController
 @end
 @implementation DGPagePresentation
-- (BOOL)shouldRemovePresentersView{return YES;}
+- (BOOL)shouldRemovePresentersView{return NO;}
 - (BOOL)shouldPresentInFullscreen{return YES;}
 - (CGRect)frameOfPresentedViewInContainerView{return self.containerView.bounds;}
 @end
@@ -12,12 +13,12 @@
 @property(nonatomic) BOOL presenting;
 @end
 @implementation DGPageAnimator
-- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context{return .32;}
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context{return DGDuration(.32);}
 - (void)animateTransition:(id<UIViewControllerContextTransitioning>)context{
  UIView *container=context.containerView,*from=[context viewForKey:UITransitionContextFromViewKey],*to=[context viewForKey:UITransitionContextToViewKey];
  UIViewController *destination=[context viewControllerForKey:UITransitionContextToViewControllerKey];if(!to)to=destination.view;CGRect frame=[context finalFrameForViewController:destination];if(CGRectIsEmpty(frame))frame=container.bounds;to.frame=frame;CGFloat width=container.bounds.size.width;
- if(self.presenting){[container addSubview:to];to.transform=CGAffineTransformMakeTranslation(width,0);}else{[container insertSubview:to belowSubview:from];to.transform=CGAffineTransformMakeTranslation(-width*.24,0);}
- [UIView animateWithDuration:.32 delay:0 options:UIViewAnimationOptionCurveEaseInOut|UIViewAnimationOptionAllowUserInteraction animations:^{to.transform=CGAffineTransformIdentity;from.transform=CGAffineTransformMakeTranslation(self.presenting?-width*.24:width,0);} completion:^(BOOL done){BOOL completed=!context.transitionWasCancelled;from.transform=CGAffineTransformIdentity;to.transform=CGAffineTransformIdentity;[context completeTransition:completed];if(completed&&!self.presenting)[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];
+ if(self.presenting){[container addSubview:to];to.transform=CGAffineTransformMakeTranslation(width,0);}else{to.hidden=NO;to.alpha=1;if(!to.superview)[container insertSubview:to belowSubview:from];if(to.superview==container)to.transform=CGAffineTransformMakeTranslation(-width*.24,0);}
+ DGAnimate(.32,^{to.transform=CGAffineTransformIdentity;from.transform=CGAffineTransformMakeTranslation(self.presenting?-width*.24:width,0);},^(BOOL done){BOOL completed=!context.transitionWasCancelled;from.transform=CGAffineTransformIdentity;to.transform=CGAffineTransformIdentity;[context completeTransition:completed];if(completed&&!self.presenting)[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];
 }
 @end
 @interface DGPageTransition:NSObject<UIViewControllerTransitioningDelegate>

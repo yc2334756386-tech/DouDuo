@@ -14,6 +14,7 @@
 - (void)active:(BOOL)active;
 - (void)compact:(BOOL)compact;
 - (void)mediaHeight:(CGFloat)height;
+- (void)interactiveMediaHeight:(CGFloat)height;
 - (void)backgroundAudio:(BOOL)enabled;
 - (NSString *)selectedImageURL;
 @end

@@ -46,6 +46,7 @@ static inline Comment ReadComment(NSDictionary *value) {
     comment.author = String(value[@"author"]); comment.avatar = String(value[@"avatar"]);
     comment.location = String(value[@"location"]); comment.authorID=String(value[@"authorID"]); comment.sticker=String(value[@"sticker"]); comment.likes = Number(value[@"likes"]);
     comment.replies = Number(value[@"replies"]); comment.timestamp = Number(value[@"timestamp"]);
+    comment.liked=[value[@"liked"]boolValue];
     for (id image in Array(value[@"images"])) comment.images.emplace_back(String(image));
     for (NSDictionary *emoji in Array(value[@"emoticons"])) comment.emoticons.emplace_back(String(emoji[@"name"]),String(emoji[@"url"]));
     return comment;
@@ -81,6 +82,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 
 
 @interface DGImage : UIImageView
+@property(nonatomic) BOOL colorAdjusted;
 - (void)remote:(NSString *)url;
 @end
 @interface DGNavigationController:UINavigationController
@@ -104,6 +106,8 @@ void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, NSString *success);
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 void DGConfirmAvatarSave(UIViewController *host, NSString *url);
+void DGUploadCommentImage(DGBridge *bridge,NSData *data,DGResult completion);
+UIViewController *DGMakeCommentComposer(DGBridge *bridge,NSString *work,NSString *parent,NSString *replyTo,NSString *name,void (^sent)(NSDictionary *item));
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeMusicWebPage(NSString *identifier, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);

@@ -1,4 +1,4 @@
-# 抖音极简版 0.6.0
+# 抖音极简版 0.7.0
 
 C++20 与 Objective-C++ 原生 iOS 客户端，由 DouGlass 分支继续开发。最低 iOS 18，arm64；iOS 26 及以上使用系统 Liquid Glass。应用图标继续使用用户提供的原图。
 
@@ -24,7 +24,7 @@ C++20 与 Objective-C++ 原生 iOS 客户端，由 DouGlass 分支继续开发�
 - 杜比全景声选项控制系统空间音频路径，仍需兼容音源、输出设备及系统支持。此开关不会把普通立体声音源变成杜比全景声；选择系统空间音频时暂停 EQ 处理。
 - 弹幕新增颜色、描边、阴影、字体样式及系统字体选择，设置保存在本机。
 
-## 0.6.0 更新
+## 0.7.0 更新
 
 - 原声左侧旋转头像与原声文字统一打开“使用这首原声的作品”。原声页提供“网页查看原声作品并导回”，可手动翻页、完成验证后重复导入。
 - 搜索输入时读取官网联想词，突出匹配文字，支持点击搜索或点箭头填入；本机保留最近 30 条搜索历史，支持一键清空。
@@ -72,6 +72,6 @@ GitHub Actions 的 DouGlass C++ unsigned IPA 工作流使用 macOS / Xcode 云�
 bash cpp-client/scripts/build-ipa.sh
 ```
 
-产物为 build/douglass/DouGlass-0.6.0-unsigned.ipa 与 SHA256.txt。编译源文件包括全部 cpp-client/*.mm 和 Core.cpp，附带网页适配脚本及上游 MIT 许可。
+产物为 build/douglass/DouGlass-0.7.0-unsigned.ipa 与 SHA256.txt。编译源文件包括全部 cpp-client/*.mm 和 Core.cpp，附带网页适配脚本及上游 MIT 许可。
 
 源码语法检查、云端编译、产物哈希和包结构核对是此次交付的检查范围。播放、登录、官网接口、动画和后台行为未做实机验证。原生界面通过抖音官网环境使用本人的登录与服务，没有开发者业务后台或统计 SDK。

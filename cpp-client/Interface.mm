@@ -1,6 +1,7 @@
 #import "DGCommon.h"
 #import "DGMedia.h"
 #import "DGComments.h"
+#import "DGAnimation.h"
 @interface DGFeed : UIViewController <UICollectionViewDataSource,UICollectionViewDelegateFlowLayout>
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge;
 @end
@@ -18,7 +19,7 @@
     UIActivityIndicatorView *_spinner;
     UIRefreshControl *_pull;
     DGComments *_comments,*_retainedComments;NSString *_retainedCommentWorkID;
-    UIView *_commentHost;
+    UIView *_commentHost;CGFloat _commentDragOffset;
     NSDictionary *_profile;
     NSString *_operation,*_cursor;
     BOOL _loading,_foreground,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
@@ -52,8 +53,9 @@
 }
 - (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return UIStatusBarStyleLightContent;}
+- (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;_navigationTabs.selectedSegmentIndex=[_operation isEqualToString:@"followFeed"]?0:1;[self activate];}
-- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(DGOptionsKeepsPlayback(self.presentedViewController))return;_visible=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
+- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
  if(!CGSizeEqualToSize(_collection.bounds.size,size)){_relayout=YES;_collection.frame=self.view.bounds;[_collection.collectionViewLayout invalidateLayout];[_collection layoutIfNeeded];[_collection setContentOffset:CGPointMake(0,MAX(0,_current)*size.height) animated:NO];_relayout=NO;}
@@ -63,7 +65,7 @@
  _accountImage.frame=CGRectMake((_account.bounds.size.width-32)/2,8,32,32);_back.frame=CGRectMake(12,top+4,44,44);_empty.frame=CGRectMake(28,media/2-90,size.width-56,230);_subtitle.preferredMaxLayoutWidth=MIN(size.width-56,420);
  _follow.tintColor=[_operation isEqualToString:@"followFeed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;_recommend.tintColor=[_operation isEqualToString:@"feed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;
  if(_staticFeed&&!_positioned&&!_feed.works.empty()){_positioned=YES;_current=MAX(0,MIN(_selected,(NSInteger)_feed.works.size()-1));[_collection setContentOffset:CGPointMake(0,_current*size.height) animated:NO];}
- __weak DGFeed *weak=self;for(DGFeedCell *cell in self->_collection.visibleCells){BOOL compact=self->_comments&&!self->_closingComments;if(compact)cell.dismissCommentsAction=^{[weak closeComments];};else cell.dismissCommentsAction=nil;[cell compact:compact];[cell mediaHeight:compact?media:0];[cell layoutIfNeeded];}
+ __weak DGFeed *weak=self;for(DGFeedCell *cell in self->_collection.visibleCells){BOOL compact=self->_comments&&!self->_closingComments;if(compact)cell.dismissCommentsAction=^{[weak closeComments];};else cell.dismissCommentsAction=nil;[cell compact:compact];[cell mediaHeight:compact?media+_commentDragOffset:0];[cell layoutIfNeeded];}
 }
 - (void)background{_foreground=NO;DGSessionCapture(nil);[self activate];}
 - (void)foreground{_foreground=YES;[self activate];}
@@ -73,7 +75,7 @@
     for(Work &work:_feed.works)if(work.id==identifier){work.liked=[state[@"liked"] boolValue];work.collected=[state[@"collected"] boolValue];work.likes=Number(state[@"likes"]);work.collects=Number(state[@"collects"]);}
     for(NSUInteger index=0;index<_records.count;index++){NSDictionary *record=_records[index];if(String(record[@"id"])!=identifier)continue;NSMutableDictionary *updated=[record mutableCopy];for(NSString *key in @[@"liked",@"collected",@"likes",@"collects"])if(state[key])updated[key]=state[key];_records[index]=updated;}
 }
-- (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
+- (void)close{if(self.navigationController&&self.navigationController.viewControllers.firstObject!=self){[self.navigationController popViewControllerAnimated:YES];return;}[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (void)updateEmpty:(NSString *)message {_empty.hidden=!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_state.hidden=_loading;_subtitle.hidden=_loading;_retry.hidden=_loading;_login.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
 - (void)navigationChanged:(UISegmentedControl *)tabs{if(tabs.selectedSegmentIndex==0)[self followFeed];else if(tabs.selectedSegmentIndex==1)[self recommend];else [self messages];}
 - (void)navigationHold:(UILongPressGestureRecognizer *)gesture{if([gesture locationInView:_navigationTabs].x<_navigationTabs.bounds.size.width/3)[self followList:gesture];}
@@ -114,14 +116,15 @@
 - (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{[(DGFeedCell *)cell active:NO];}
 - (void)showComments:(NSString *)workID {
  if(_commentTransition)return;_closingComments=NO;if(_comments){[self closeComments];return;}_commentTransition=YES;
- _comments=[_retainedCommentWorkID isEqualToString:workID]?_retainedComments:nil;if(!_comments)_comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];_retainedComments=_comments;_retainedCommentWorkID=workID.copy;if(_current<(NSInteger)_records.count){NSDictionary *record=_records[_current];_comments.coverURL=Text(String(record[@"cover"]));if(!_comments.coverURL.length)_comments.coverURL=Text(String(Array(record[@"images"]).firstObject));}__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
+ _comments=[_retainedCommentWorkID isEqualToString:workID]?_retainedComments:nil;if(!_comments)_comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];_retainedComments=_comments;_retainedCommentWorkID=workID.copy;if(_current<(NSInteger)_records.count){NSDictionary *record=_records[_current];_comments.coverURL=Text(String(record[@"cover"]));if(!_comments.coverURL.length)_comments.coverURL=Text(String(Array(record[@"images"]).firstObject));}__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.dragAction=^(CGFloat offset,NSInteger phase){[weak commentDragged:offset phase:phase];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
  [self addChildViewController:_comments];_commentHost=[UIView new];_commentHost.layer.cornerRadius=30;_commentHost.clipsToBounds=YES;[self.view addSubview:_commentHost];[_commentHost addSubview:_comments.view];[_comments didMoveToParentViewController:self];_collection.scrollEnabled=NO;
  [UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];[self->_comments restorePosition];}];_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentHost.bounds.size.height+10);
- [UIView animateWithDuration:.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut|UIViewAnimationOptionBeginFromCurrentState animations:^{self->_commentHost.transform=CGAffineTransformIdentity;} completion:^(BOOL done){self->_commentTransition=NO;[self activate];}];
+ DGAnimate(.3,^{self->_commentHost.transform=CGAffineTransformIdentity;},^(BOOL done){self->_commentTransition=NO;[self activate];});
 }
+- (void)commentDragged:(CGFloat)offset phase:(NSInteger)phase{if(_commentTransition||!_comments)return;_commentDragOffset=MIN(offset,_commentHost.bounds.size.height);if(phase==0){_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentDragOffset);CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height+_commentDragOffset;for(DGFeedCell *cell in _collection.visibleCells)[cell interactiveMediaHeight:media];}else if(phase==1){[self closeComments];}else{_commentDragOffset=0;CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height;for(DGFeedCell *cell in _collection.visibleCells)[cell mediaHeight:media];DGAnimate(.25,^{self->_commentHost.transform=CGAffineTransformIdentity;},nil);}}
 - (void)closeComments {
- if(!_comments||_commentTransition)return;[_comments rememberPosition];_commentTransition=YES;_closingComments=YES;[self.view setNeedsLayout];[self.view layoutIfNeeded];UIView *panel=_commentHost;
- [UIView animateWithDuration:.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut|UIViewAnimationOptionBeginFromCurrentState animations:^{panel.transform=CGAffineTransformMakeTranslation(0,panel.bounds.size.height+10);} completion:^(BOOL done){[self->_comments willMoveToParentViewController:nil];[self->_comments.view removeFromSuperview];[self->_comments removeFromParentViewController];self->_comments=nil;[panel removeFromSuperview];self->_commentHost=nil;self->_collection.scrollEnabled=YES;self->_commentTransition=NO;self->_closingComments=NO;[UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];[self activate];}];
+ if(!_comments||_commentTransition)return;[_comments rememberPosition];_commentTransition=YES;_closingComments=YES;_commentDragOffset=0;[self.view setNeedsLayout];[self.view layoutIfNeeded];UIView *panel=_commentHost;
+ [UIView animateWithDuration:.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut|UIViewAnimationOptionBeginFromCurrentState animations:^{panel.transform=CGAffineTransformMakeTranslation(0,panel.bounds.size.height+10);},^(BOOL done){[self->_comments willMoveToParentViewController:nil];[self->_comments.view removeFromSuperview];[self->_comments removeFromParentViewController];self->_comments=nil;[panel removeFromSuperview];self->_commentHost=nil;self->_collection.scrollEnabled=YES;self->_commentTransition=NO;self->_closingComments=NO;[UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];[self activate];});
 }
 - (void)verificationCompleted:(NSNotification *)note{if(!_ownsBridge)return;_failed=NO;[self loadProfile];if([note.userInfo[@"operation"]isEqualToString:_operation]&&!_loading)[self loadFeed:YES];}
 - (void)accountChanged{[self sessionChanged:NO];}
