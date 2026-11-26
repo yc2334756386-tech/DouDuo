@@ -59,6 +59,8 @@
   }
   const get=(path,params,options)=>request('GET',path,params||{},null,options);
   const post=(path,params,body,options)=>request('POST',path,params||{},body==null?'':body,options);
+  let emojiCatalog={},emojiLoading;
+  const loadEmojis=()=>emojiLoading||(emojiLoading=get('/aweme/v1/web/emoji/list/',{}).then(data=>{for(const value of data.emoji_list||[]){const url=first(value.emoji_url);if(value.display_name&&url)emojiCatalog[value.display_name]=url;}}).catch(()=>{}));
   const user=value=>{
     value=value||{};
     return {uid:id(value.uid||value.id_str||value.id),sec:value.sec_uid||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),location:typeof value.ip_location==='string'?value.ip_location:typeof value.ip_label==='string'?value.ip_label:''};
@@ -95,7 +97,9 @@
   };
   const comment=item=>{
     const sticker=item.sticker||{};
-    return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:(item.emoji_list||[]).map(emoji=>({name:emoji.display_name||emoji.emoji_name||'',url:first(emoji.emoji_url)||first(emoji.url)})).filter(emoji=>emoji.name&&emoji.url)};
+    const inline=(item.emoji_list||[]).map(emoji=>({name:emoji.display_name||emoji.emoji_name||'',url:first(emoji.emoji_url)||first(emoji.url)})).filter(emoji=>emoji.name&&emoji.url);
+    for(const name of new Set(String(item.text||'').match(/\[[^\]\r\n]{1,14}\]/g)||[]))if(emojiCatalog[name])inline.push({name,url:emojiCatalog[name]});
+    return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(item=>item&&!item.cell_room).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
@@ -111,7 +115,9 @@
         return page(data,data.data||data.aweme_list,data.cursor,data.has_more);
       }
       if(operation==='comments'){
+        const emojis=loadEmojis();
         const data=await get('/aweme/v1/web/comment/list/',{aweme_id:params.id,cursor,count:'20',item_type:'0',whale_cut_token:'',cut_version:'1',rcFT:''});
+        await Promise.race([emojis,delay(800)]);
         return {items:(data.comments||[]).map(comment),cursor:String(data.cursor||0),more:!!data.has_more,total:Number(data.total||0)};
       }
       if(operation==='replies'){

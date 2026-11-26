@@ -47,6 +47,7 @@
     _retry=[UIButton buttonWithType:UIButtonTypeSystem];[_retry setTitle:@"重新加载" forState:UIControlStateNormal];[_retry addTarget:self action:@selector(refreshFeed) forControlEvents:UIControlEventTouchUpInside];_login=[UIButton buttonWithType:UIButtonTypeSystem];[_login setTitle:@"登录 / 网页验证" forState:UIControlStateNormal];[_login addTarget:self action:@selector(openLogin) forControlEvents:UIControlEventTouchUpInside];
     _empty=[[UIStackView alloc] initWithArrangedSubviews:@[_spinner,_state,_subtitle,_retry,_login]];_empty.axis=UILayoutConstraintAxisVertical;_empty.spacing=18;_empty.alignment=UIStackViewAlignmentCenter;[self.view addSubview:_empty];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background) name:UIApplicationWillResignActiveNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foreground) name:UIApplicationDidBecomeActiveNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGResumePlayback" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(workStateChanged:) name:@"DouGlassWorkStateChanged" object:nil];
     if(_staticFeed)[self updateEmpty:nil];else{[self loadFeed:YES];[self loadProfile];}
 }
 - (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
@@ -66,6 +67,11 @@
 - (void)background{_foreground=NO;[self activate];}
 - (void)foreground{_foreground=YES;[self activate];}
 - (void)resume{dispatch_async(dispatch_get_main_queue(),^{[self activate];});}
+- (void)workStateChanged:(NSNotification *)notification {
+    NSDictionary *state=notification.userInfo;std::string identifier=String(state[@"id"]);if(identifier.empty())return;
+    for(Work &work:_feed.works)if(work.id==identifier){work.liked=[state[@"liked"] boolValue];work.collected=[state[@"collected"] boolValue];work.likes=Number(state[@"likes"]);work.collects=Number(state[@"collects"]);}
+    for(NSUInteger index=0;index<_records.count;index++){NSDictionary *record=_records[index];if(String(record[@"id"])!=identifier)continue;NSMutableDictionary *updated=[record mutableCopy];for(NSString *key in @[@"liked",@"collected",@"likes",@"collects"])if(state[key])updated[key]=state[key];_records[index]=updated;}
+}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (void)updateEmpty:(NSString *)message {_empty.hidden=!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_retry.hidden=_loading;_login.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
 - (void)recommend{if(![_operation isEqualToString:@"feed"]){_operation=@"feed";[self resetChannel];}else[self refreshFeed];}

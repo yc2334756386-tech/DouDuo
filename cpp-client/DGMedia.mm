@@ -5,20 +5,32 @@
 @property(nonatomic,strong) AVPlayerItem *item;
 @property(nonatomic) NSUInteger leases;
 @property(nonatomic) BOOL warming, warmed;
+@property(nonatomic) BOOL retired;
+@property(nonatomic) NSUInteger warmAttempts;
 - (instancetype)initWithURL:(NSString *)url;
 - (void)warm;
+- (void)retire;
 @end
 @implementation DGPrepared
 - (instancetype)initWithURL:(NSString *)url { if((self=[super init])){_item=[AVPlayerItem playerItemWithAsset:Asset(url)];_item.preferredForwardBufferDuration=2;_player=[AVPlayer playerWithPlayerItem:_item];_player.automaticallyWaitsToMinimizeStalling=NO;[_player addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];}return self;}
-- (void)warm {if(_leases||_warming||_warmed||_item.status!=AVPlayerItemStatusReadyToPlay||_player.status!=AVPlayerStatusReadyToPlay)return;_warming=YES;__weak DGPrepared *weak=self;[_player prerollAtRate:1 completionHandler:^(BOOL ok){DGPrepared *s=weak;if(s){s.warming=NO;s.warmed=ok;}}];}
+- (void)warm {
+    if(!NSThread.isMainThread){__weak DGPrepared *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak warm];});return;}
+    if(_retired||_leases||_warming||_warmed||_warmAttempts>=2||_item.status!=AVPlayerItemStatusReadyToPlay||_player.status!=AVPlayerStatusReadyToPlay)return;
+    _warming=YES;++_warmAttempts;__weak DGPrepared *weak=self;
+    [_player prerollAtRate:1 completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{DGPrepared *s=weak;if(!s)return;s.warming=NO;s.warmed=ok&&!s.retired;});}];
+}
+- (void)retire {
+    _retired=YES;[_player cancelPendingPrerolls];_warming=NO;
+    if(!_leases){[_player pause];[_player replaceCurrentItemWithPlayerItem:nil];}
+}
 - (void)observeValueForKeyPath:(NSString *)key ofObject:(id)object change:(NSDictionary *)change context:(void *)context {if(object==_player)[self warm];}
 - (void)dealloc {[_player removeObserver:self forKeyPath:@"status"];[_player pause];}
 @end
 static NSMutableDictionary<NSString *,DGPrepared *> *Pool(){static NSMutableDictionary *pool;static dispatch_once_t once;dispatch_once(&once,^{pool=[NSMutableDictionary dictionary];});return pool;}
 static NSString *PoolKey(const Work &w){return [NSString stringWithFormat:@"%@|%@",Text(w.id),Text(w.play)];}
-static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=Pool()[key];if(!p){p=[[DGPrepared alloc]initWithURL:Text(w.play)];Pool()[key]=p;}if(Pool().count>6)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(![key isEqualToString:old]&&!v.leases){[v.player pause];[Pool() removeObjectForKey:old];if(Pool().count<=5)break;}}return p;}
-void DGWarmWorks(const std::vector<Work>&works,NSInteger index){NSMutableSet *keys=[NSMutableSet set];for(NSInteger i=MAX(0,index-1);i<=MIN((NSInteger)works.size()-1,index+3);++i){const Work &w=works[i];if(w.photo()||w.play.empty())continue;[keys addObject:PoolKey(w)];DGPrepared *p=Obtain(w);if(i!=index)[p warm];}for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(![keys containsObject:key]&&!p.leases){[p.player pause];[Pool() removeObjectForKey:key];}}}
-void DGClearPlayers(){for(DGPrepared *p in Pool().allValues)if(!p.leases)[p.player pause];[Pool() removeAllObjects];}
+static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=Pool()[key];if(!p){p=[[DGPrepared alloc]initWithURL:Text(w.play)];Pool()[key]=p;}if(Pool().count>6)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(![key isEqualToString:old]&&!v.leases){[v retire];[Pool() removeObjectForKey:old];if(Pool().count<=5)break;}}return p;}
+void DGWarmWorks(const std::vector<Work>&works,NSInteger index){NSMutableSet *keys=[NSMutableSet set];for(NSInteger i=MAX(0,index-1);i<=MIN((NSInteger)works.size()-1,index+3);++i){const Work &w=works[i];if(w.photo()||w.play.empty())continue;[keys addObject:PoolKey(w)];DGPrepared *p=Obtain(w);if(i!=index)[p warm];}for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(![keys containsObject:key]&&!p.leases){[p retire];[Pool() removeObjectForKey:key];}}}
+void DGClearPlayers(){for(DGPrepared *p in Pool().allValues)[p retire];[Pool() removeAllObjects];}
 static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value=0;return [NSString stringWithFormat:@"%02ld:%02ld",(long)value/60,(long)value%60];}
 @interface DGFeedCell()<UIScrollViewDelegate,UIGestureRecognizerDelegate>
 @end
@@ -28,6 +40,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  UIVisualEffectView *_rail,*_moreGlass,*_photoGlass,*_speedGlass,*_previewGlass;UIButton *_avatarButton,*_likeButton,*_commentButton,*_collectButton,*_fillButton,*_moreButton,*_musicButton;UIImageView *_previewImage;
  AVPlayer *_player,*_musicPlayer;AVPlayerLayer *_playerLayer;DGPrepared *_prepared;AVPlayerItem *_observedItem;AVAssetImageGenerator *_generator;id _loopToken,_musicLoopToken,_clock;UISlider *_slider;
  NSMutableArray<UIScrollView*> *_locked;BOOL _active,_paused,_alternateUsed,_dragging,_compact,_fill,_boosting,_busy,_danmakuLoading;double _rate,_holdY,_progressAt,_progress;NSInteger _recoveries,_photoIndex,_danmakuWindow,_lane;NSUInteger _generation,_previewGeneration;NSArray<NSDictionary*> *_danmakuItems;NSMutableSet<NSString*> *_emitted;
+ BOOL _watchdogScheduled,_watchdogExhausted;NSUInteger _watchdogToken;double _firstFrameStarted;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
  if((self=[super initWithFrame:frame])){
@@ -62,11 +75,12 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)compact:(BOOL)value {if(_compact==value)return;_compact=value;_playerLayer.videoGravity=_fill&&!value?AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;[self setNeedsLayout];}
 - (void)detach {
+ [self stopWatchdog];
  ++_previewGeneration;[_generator cancelAllCGImageGeneration];_generator=nil;if(_observedItem){[_observedItem removeObserver:self forKeyPath:@"status"];_observedItem=nil;}if(_clock&&_player){[_player removeTimeObserver:_clock];_clock=nil;}if(_loopToken){[NSNotificationCenter.defaultCenter removeObserver:_loopToken];_loopToken=nil;}if(_musicLoopToken){[NSNotificationCenter.defaultCenter removeObserver:_musicLoopToken];_musicLoopToken=nil;}if(_prepared){if(_prepared.leases)--_prepared.leases;if(!_prepared.leases)[_prepared.player pause];_prepared=nil;}else[_player pause];[_musicPlayer pause];_musicPlayer=nil;_player=nil;_playerLayer.player=nil;
 }
 - (void)prepareForReuse {[super prepareForReuse];_active=NO;++_generation;[self unlock];[self detach];_work=Work{};self.commentsAction=nil;self.profileAction=nil;self.musicAction=nil;self.moreAction=nil;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
 - (void)display:(const Work&)work {
- if(!_work.id.empty()&&work.id==_work.id){_work=work;[self labels];return;}++_generation;[self unlock];[self detach];_work=work;_paused=NO;_alternateUsed=NO;_boosting=NO;_dragging=NO;_recoveries=0;_photoIndex=0;_busy=NO;_pause.hidden=YES;_previewGlass.hidden=YES;_speedGlass.hidden=YES;_message.text=@"";_slider.value=0;_progress=-1;_progressAt=CACurrentMediaTime();_danmakuWindow=-1;_danmakuItems=@[];_danmakuLoading=NO;[_emitted removeAllObjects];[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];for(DGImage *i in _images)[i removeFromSuperview];[_images removeAllObjects];_cover.hidden=NO;[_cover remote:Text(work.cover)];[_avatar remote:Text(work.avatar)];[_musicAvatar remote:Text(work.avatar)];_photos.contentOffset=CGPointZero;_photos.hidden=!work.photo();_photoGlass.hidden=!work.photo();[self settingsChanged];[self labels];
+ if(!_work.id.empty()&&work.id==_work.id){_work=work;[self labels];return;}++_generation;[self unlock];[self detach];_work=work;_paused=NO;_alternateUsed=NO;_watchdogExhausted=NO;_boosting=NO;_dragging=NO;_recoveries=0;_photoIndex=0;_busy=NO;_pause.hidden=YES;_previewGlass.hidden=YES;_speedGlass.hidden=YES;_message.text=@"";_slider.value=0;_progress=-1;_progressAt=CACurrentMediaTime();_danmakuWindow=-1;_danmakuItems=@[];_danmakuLoading=NO;[_emitted removeAllObjects];[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];for(DGImage *i in _images)[i removeFromSuperview];[_images removeAllObjects];_cover.hidden=NO;[_cover remote:Text(work.cover)];[_avatar remote:Text(work.avatar)];[_musicAvatar remote:Text(work.avatar)];_photos.contentOffset=CGPointZero;_photos.hidden=!work.photo();_photoGlass.hidden=!work.photo();[self settingsChanged];[self labels];
  if(work.photo()){for(const auto &url:work.images){DGImage *i=[DGImage new];i.contentMode=UIViewContentModeScaleAspectFit;[_photos addSubview:i];[_images addObject:i];}if(!work.music.empty()){_musicPlayer=[AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:Asset(Text(work.music))]];_musicPlayer.automaticallyWaitsToMinimizeStalling=NO;__weak DGFeedCell *weak=self;_musicLoopToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_musicPlayer.currentItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){DGFeedCell *s=weak;if(!s)return;[s->_musicPlayer seekToTime:kCMTimeZero completionHandler:^(BOOL ok){if(s->_active&&!s->_paused)[s->_musicPlayer playImmediatelyAtRate:s->_rate];}];}];}}
  else[self attach:Obtain(work) position:0];[self setNeedsLayout];if(_active)[self active:YES];
 }
@@ -74,14 +88,68 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  _author.text=[@"@" stringByAppendingString:Text(_work.author)];_caption.text=Text(_work.caption);NSMutableArray *meta=[NSMutableArray array];if(_work.publishedAt>0){NSDateFormatter *f=[NSDateFormatter new];f.dateFormat=@"yyyy-MM-dd";[meta addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:_work.publishedAt]]];}if(!_work.location.empty())[meta addObject:[NSString stringWithFormat:@"%@%@",(_work.locationKind=="ip"||_work.locationKind=="IP属地")?@"IP属地 ":@"作品发布地 ",Text(_work.location)]];_metadata.text=[meta componentsJoinedByString:@" · "];NSString *music=_work.musicTitle.empty()?@"作品原声":Text(_work.musicTitle),*by=_work.musicAuthor.empty()?Text(_work.author):Text(_work.musicAuthor);[_musicButton setTitle:[NSString stringWithFormat:@"♫ %@ · %@",music,by] forState:UIControlStateNormal];_likeCount.text=Text(douglass::compact(_work.likes));_commentCount.text=Text(douglass::compact(_work.comments));_collectCount.text=Text(douglass::compact(_work.collects));[_likeButton setImage:[UIImage systemImageNamed:_work.liked?@"heart.fill":@"heart"] forState:UIControlStateNormal];_likeButton.tintColor=_work.liked?[UIColor colorWithRed:1 green:.25 blue:.38 alpha:1]:UIColor.whiteColor;[_collectButton setImage:[UIImage systemImageNamed:_work.collected?@"star.fill":@"star"] forState:UIControlStateNormal];_collectButton.tintColor=_work.collected?[UIColor colorWithRed:1 green:.83 blue:.32 alpha:1]:UIColor.whiteColor;
 }
 - (void)attach:(DGPrepared*)prepared position:(double)position {
- [self detach];if(!prepared)return;_prepared=prepared;++prepared.leases;_player=prepared.player;[_player cancelPendingPrerolls];_playerLayer.player=_player;_observedItem=prepared.item;[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];_progressAt=CACurrentMediaTime();_progress=-1;__weak DGFeedCell *weak=self;
- _loopToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){DGFeedCell *s=weak;if(!s)return;[s->_emitted removeAllObjects];s->_progressAt=CACurrentMediaTime();[s->_player seekToTime:kCMTimeZero completionHandler:^(BOOL ok){if(s->_active&&!s->_paused)[s->_player playImmediatelyAtRate:s->_rate];}];}];_clock=[_player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(.25,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime t){[weak tick:t];}];if(position>.1)[_player seekToTime:CMTimeMakeWithSeconds(position,600) toleranceBefore:CMTimeMakeWithSeconds(.2,600) toleranceAfter:CMTimeMakeWithSeconds(.2,600)];if(_active&&!_paused)[_player playImmediatelyAtRate:_rate];
+ [self detach];if(!prepared)return;_prepared=prepared;++prepared.leases;_player=prepared.player;[_player cancelPendingPrerolls];_playerLayer.player=_player;_observedItem=prepared.item;[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;_progress=-1;__weak DGFeedCell *weak=self;
+ _loopToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){DGFeedCell *s=weak;if(!s)return;[s->_emitted removeAllObjects];s->_progressAt=CACurrentMediaTime();[s->_player seekToTime:kCMTimeZero completionHandler:^(BOOL ok){if(s->_active&&!s->_paused)[s->_player playImmediatelyAtRate:s->_rate];}];}];_clock=[_player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(.25,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime t){[weak tick:t];}];if(position>.1)[_player seekToTime:CMTimeMakeWithSeconds(position,600) toleranceBefore:CMTimeMakeWithSeconds(.2,600) toleranceAfter:CMTimeMakeWithSeconds(.2,600)];if(_active&&!_paused){[_player playImmediatelyAtRate:_rate];[self queueWatchdogAfter:3];}
 }
 - (void)observeValueForKeyPath:(NSString*)key ofObject:(id)object change:(NSDictionary*)change context:(void*)context {if(object!=_observedItem)return;dispatch_async(dispatch_get_main_queue(),^{if(object!=self->_observedItem)return;if(self->_observedItem.status==AVPlayerItemStatusReadyToPlay){self->_message.text=@"";if(self->_active&&!self->_paused)[self->_player playImmediatelyAtRate:self->_rate];}else if(self->_observedItem.status==AVPlayerItemStatusFailed)[self recover];});}
-- (void)recover {if(_recoveries>=2){_message.text=@"视频暂未加载成功，点击画面重试";return;}++_recoveries;double pos=CMTimeGetSeconds(_player.currentTime);if(!std::isfinite(pos))pos=0;NSString *url=Text(_work.play);if(!_alternateUsed&&!_work.alternate.empty()&&_work.alternate!=_work.play){_alternateUsed=YES;url=Text(_work.alternate);}DGPrepared *p=[[DGPrepared alloc]initWithURL:url];[self attach:p position:pos];}
-- (void)tick:(CMTime)time {if(!_player)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);if(std::isfinite(duration)&&duration>0&&std::isfinite(seconds)&&!_dragging)_slider.value=seconds/duration;if(_playerLayer.readyForDisplay)_cover.hidden=YES;if(_active&&!_paused&&!_dragging){if(std::isfinite(seconds)&&std::fabs(seconds-_progress)>.08){_progress=seconds;_progressAt=CACurrentMediaTime();}else if(CACurrentMediaTime()-_progressAt>5.5&&(!std::isfinite(duration)||duration<=0||seconds<duration-.5)){_progressAt=CACurrentMediaTime();[self recover];}if(std::isfinite(seconds))[self updateDanmaku:seconds];}}
-- (void)active:(BOOL)value {BOOL changed=_active!=value;_active=value;if(value&&!_paused){if(changed)_progressAt=CACurrentMediaTime();if(_player.rate==0||changed)[_player playImmediatelyAtRate:_boosting?MAX(1.5,_player.rate):_rate];if(_musicPlayer.rate==0||changed)[_musicPlayer playImmediatelyAtRate:_rate];}else{[_player pause];[_musicPlayer pause];if(!value){[self unlock];_boosting=NO;_speedGlass.hidden=YES;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}}}
-- (void)toggle {if(_observedItem.status==AVPlayerItemStatusFailed||_recoveries>=2){_recoveries=0;[self recover];return;}_paused=!_paused;_pause.hidden=!_paused;[self active:_active];if(_paused)[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
+- (void)recover {
+ if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak recover];});return;}
+ if(!_active||_paused||_work.photo())return;
+ if(_recoveries>=2){_watchdogExhausted=YES;[self stopWatchdog];_message.text=@"视频暂未加载成功，点击画面重试";return;}
+ ++_recoveries;double pos=CMTimeGetSeconds(_player.currentTime);if(!std::isfinite(pos))pos=0;
+ NSString *url=Text(_work.play);if(!_alternateUsed&&!_work.alternate.empty()&&_work.alternate!=_work.play){_alternateUsed=YES;url=Text(_work.alternate);}
+ DGPrepared *old=_prepared;DGPrepared *replacement=[[DGPrepared alloc]initWithURL:url];
+ [self attach:replacement position:pos];
+ // A failed pooled item must never be offered to the next cell or prewarmed again.
+ if(old){for(NSString *key in Pool().allKeys)if(Pool()[key]==old)[Pool() removeObjectForKey:key];[old retire];}
+ Pool()[PoolKey(_work)]=replacement;
+}
+- (void)stopWatchdog {++_watchdogToken;_watchdogScheduled=NO;}
+- (void)queueWatchdogAfter:(NSTimeInterval)delay {
+ if(_watchdogScheduled||!_active||_paused||_work.photo()||!_player||_watchdogExhausted)return;
+ _watchdogScheduled=YES;NSUInteger token=++_watchdogToken,generation=_generation;__weak DGFeedCell *weak=self;
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+  DGFeedCell *s=weak;if(!s||token!=s->_watchdogToken||generation!=s->_generation)return;
+  s->_watchdogScheduled=NO;
+  if(!s->_active||s->_paused||s->_work.photo()||!s->_player)return;
+  double now=CACurrentMediaTime(),seconds=CMTimeGetSeconds(s->_player.currentTime),duration=CMTimeGetSeconds(s->_player.currentItem.duration);
+  BOOL firstFrame=s->_playerLayer.readyForDisplay;
+  if(firstFrame)s->_cover.hidden=YES;
+  if(s->_dragging){s->_progressAt=now;s->_firstFrameStarted=now;}
+  else {
+   if(std::isfinite(seconds)&&std::fabs(seconds-s->_progress)>.08){s->_progress=seconds;s->_progressAt=now;}
+   BOOL ended=std::isfinite(duration)&&duration>0&&std::isfinite(seconds)&&seconds>=duration-.35;
+   BOOL noFrame=!firstFrame&&now-s->_firstFrameStarted>=3.3;
+   BOOL noProgress=!ended&&now-s->_progressAt>=4.5;
+   if(noFrame||noProgress||s->_observedItem.status==AVPlayerItemStatusFailed){[s recover];}
+  }
+  // attach/recover may already have queued a fresh generation; never create a second chain.
+  [s queueWatchdogAfter:1];
+ });
+}
+- (void)tick:(CMTime)time {
+ if(!_player)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);
+ if(std::isfinite(duration)&&duration>0&&std::isfinite(seconds)&&!_dragging)_slider.value=seconds/duration;
+ if(_playerLayer.readyForDisplay)_cover.hidden=YES;
+ if(_active&&!_paused&&!_dragging&&std::isfinite(seconds)){
+  if(std::fabs(seconds-_progress)>.08){_progress=seconds;_progressAt=CACurrentMediaTime();}
+  [self updateDanmaku:seconds];
+ }
+}
+- (void)active:(BOOL)value {
+ if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak active:value];});return;}
+ BOOL changed=_active!=value;_active=value;
+ if(value&&!_paused){
+  if(changed){_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}
+  if(_player.rate==0||changed)[_player playImmediatelyAtRate:_boosting?MAX(1.5,_player.rate):_rate];
+  if(_musicPlayer.rate==0||changed)[_musicPlayer playImmediatelyAtRate:_rate];
+  [self queueWatchdogAfter:3];
+ }else{
+  [self stopWatchdog];[_player pause];[_musicPlayer pause];
+  if(!value){[self unlock];_boosting=NO;_speedGlass.hidden=YES;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
+ }
+}
+- (void)toggle {if(_observedItem.status==AVPlayerItemStatusFailed||_watchdogExhausted){_recoveries=0;_watchdogExhausted=NO;[self recover];return;}_paused=!_paused;_pause.hidden=!_paused;if(!_paused){_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}[self active:_active];if(_paused)[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture shouldReceiveTouch:(UITouch*)touch {for(UIView *v=touch.view;v&&v!=self.contentView;v=v.superview)if([v isKindOfClass:UIControl.class]||v==_caption||v==_author||v==_musicAvatar)return NO;return YES;}
 - (void)lock {[_locked removeAllObjects];for(UIView *v=self.superview;v;v=v.superview)if([v isKindOfClass:UIScrollView.class]&&((UIScrollView*)v).scrollEnabled){[_locked addObject:(UIScrollView*)v];((UIScrollView*)v).scrollEnabled=NO;}}
 - (void)unlock {for(UIScrollView *v in _locked)v.scrollEnabled=YES;[_locked removeAllObjects];}
