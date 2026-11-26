@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#import "DGAudio.h"
 #import <MediaPlayer/MediaPlayer.h>
 @interface DGMusicSession:NSObject
 @property(nonatomic,strong) AVPlayer *player;
@@ -55,7 +56,7 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
 
 
 - (void)publish{
- if(!_player)return;double elapsed=CMTimeGetSeconds(_player.currentTime),duration=CMTimeGetSeconds(_player.currentItem.duration);if(!std::isfinite(duration)||duration<=0)duration=[_music[@"duration"]doubleValue];
+ if(!_player)return;DGRepairPlayerAudio(_player);double elapsed=CMTimeGetSeconds(_player.currentTime),duration=CMTimeGetSeconds(_player.currentItem.duration);if(!std::isfinite(duration)||duration<=0)duration=[_music[@"duration"]doubleValue];
  NSMutableDictionary *info=[@{MPMediaItemPropertyTitle:Text(String(_music[@"title"])).length?Text(String(_music[@"title"])):@"作品原声",MPMediaItemPropertyArtist:Text(String(_music[@"author"])),MPNowPlayingInfoPropertyPlaybackRate:@(_player.rate),MPNowPlayingInfoPropertyDefaultPlaybackRate:@1,MPNowPlayingInfoPropertyElapsedPlaybackTime:@(std::isfinite(elapsed)?MAX(0,elapsed):0),MPNowPlayingInfoPropertyMediaType:@(MPNowPlayingInfoMediaTypeAudio)}mutableCopy];
  if(duration>0&&std::isfinite(duration))info[MPMediaItemPropertyPlaybackDuration]=@(duration);if(_artwork){UIImage *image=_artwork;info[MPMediaItemPropertyArtwork]=[[MPMediaItemArtwork alloc]initWithBoundsSize:image.size requestHandler:^UIImage *(CGSize size){return image;}];}
  if(self.queue.count){info[MPNowPlayingInfoPropertyPlaybackQueueIndex]=@(self.queueIndex);info[MPNowPlayingInfoPropertyPlaybackQueueCount]=@(self.queue.count);}MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=info;[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicStateChanged" object:nil];

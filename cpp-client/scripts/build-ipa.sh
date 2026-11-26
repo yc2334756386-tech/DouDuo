@@ -47,7 +47,7 @@ info={
   'CFBundleInfoDictionaryVersion':'6.0',
   'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.7.0',
+  'CFBundleShortVersionString':'0.8.0',
   'UIBackgroundModes':['audio'],
   'NSMicrophoneUsageDescription':'通过麦克风将语音转为可编辑的评论草稿',
   'NSSpeechRecognitionUsageDescription':'将语音识别为文字，检查后由你确认发表评论',
@@ -74,6 +74,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.7.0-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.7.0-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.7.0-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.8.0-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.8.0-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.8.0-unsigned.ipa"

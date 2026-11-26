@@ -1,4 +1,5 @@
 #import "DGComments.h"
+#import "DGPreferences.h"
 #include <unordered_map>
 static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=250;});return cache;}
 
@@ -102,7 +103,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     if(loading&&expanded)replyText=@"正在读取回复… 轻点收起";
     [_reply setTitle:replyText forState:UIControlStateNormal];
 }
-- (void)renderEmoji {
+- (void)renderEmoji {_body.font=DGCommentFont();_body.textColor=DGCommentColor();
     NSMutableAttributedString *text=[[NSMutableAttributedString alloc] initWithString:_plainText?:@"" attributes:@{NSFontAttributeName:_body.font,NSForegroundColorAttributeName:_body.textColor}];
     for(NSDictionary *emoji in _inlineEmoji){UIImage *image=[DGEmojiCache() objectForKey:emoji[@"url"]];NSString *name=emoji[@"name"];if(!image||!name.length)continue;NSUInteger start=0;while(start<text.length){NSRange range=[text.string rangeOfString:name options:0 range:NSMakeRange(start,text.length-start)];if(range.location==NSNotFound)break;NSTextAttachment *attachment=[NSTextAttachment new];attachment.image=image;attachment.bounds=CGRectMake(0,-4,21,21);[text replaceCharactersInRange:range withAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];start=range.location+1;}}_body.attributedText=text;
 }

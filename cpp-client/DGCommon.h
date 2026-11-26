@@ -103,6 +103,7 @@ void DGToast(UIViewController *host, NSString *message);
 void DGHaptic(void);
 void DGSaveURL(UIViewController *host, NSString *url, BOOL video);
 void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
+void DGSaveAudioDirect(UIViewController *host, NSString *url, NSString *name);
 void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, NSString *success);
 void DGConfirmImageSave(UIViewController *host, NSString *url);
