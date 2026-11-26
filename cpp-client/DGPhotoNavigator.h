@@ -1,7 +1,7 @@
 #pragma once
 #import "DGCommon.h"
 @interface DGPhotoNavigator:UIControl
-@property(nonatomic,copy) void (^selected)(NSInteger index);
+@property(nonatomic,copy) void (^onSelect)(NSInteger index);
 @property(nonatomic,readonly) BOOL browsing;
 - (void)images:(NSArray<NSString *> *)urls;
 - (void)page:(NSInteger)index;

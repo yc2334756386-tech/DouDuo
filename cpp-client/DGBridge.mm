@@ -130,7 +130,7 @@ NSString *DGUserAgent(void) {
                 NSDictionary *result = [value isKindOfClass:NSDictionary.class] ? value : nil;
                 NSString *message = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
                 if (failure || !result) message = @"网页请求未完成，请刷新或在登录网页完成验证";
-                if([operation isEqualToString:@"musicWorks"]&&message&&![result[@"verificationRequired"]boolValue]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],deliver);return;}
+                if([operation isEqualToString:@"musicWorks"]&&(message||!([result[@"items"]isKindOfClass:NSArray.class]&&[result[@"items"]count]))&&![result[@"verificationRequired"]boolValue]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],deliver);return;}
                 deliver(result, message);
                 if([result[@"verificationRequired"]boolValue]&&![operation isEqualToString:@"suggest"])dispatch_async(dispatch_get_main_queue(),^{DGOpenVerification(self,operation,parameters);});
                 if(!message&&[operation isEqualToString:@"profile"]&&[result[@"loggedIn"]boolValue])DGSessionCapture(nil);

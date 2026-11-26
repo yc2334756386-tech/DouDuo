@@ -4,7 +4,7 @@
  if(window.DGSearchPage)return;
  const expected=window.DGSearchExpected||{},raw=new Map();
  const parse=text=>{try{return JSON.parse(String(text).replace(/("(?:aweme_id|id|uid|mid|music_id|user_id)"\s*:\s*)(\d{16,})(?=\s*[,}])/g,'$1"$2"'));}catch(_){return null;}};
- const current=()=>{try{if(expected.musicID)return location.pathname.replace(/\/$/,'')==='/music/'+expected.musicID;return decodeURIComponent(location.pathname.replace(/^\/search\//,'').replace(/\/$/,''))===expected.keyword&&(new URL(location.href).searchParams.get('type')||'video')===(expected.users?'user':'video');}catch(_){return false;}};
+ const current=()=>{try{if(expected.musicID)return ['/music/'+expected.musicID,'/share/music/'+expected.musicID].includes(location.pathname.replace(/\/$/,''));return decodeURIComponent(location.pathname.replace(/^\/search\//,'').replace(/\/$/,''))===expected.keyword&&(new URL(location.href).searchParams.get('type')||'video')===(expected.users?'user':'video');}catch(_){return false;}};
  const walk=(value,depth=0,budget={left:5000},seen=new WeakSet(),target='',trustedMusic=false)=>{
   if(!value||typeof value!=='object'||depth>9||budget.left--<=0||seen.has(value))return;seen.add(value);
   if(expected.users){if(value.sec_uid&&value.nickname&&(value.uid||value.id_str)&&(!target||String(value.sec_uid)===target)){raw.set(String(value.sec_uid),value);return;}}

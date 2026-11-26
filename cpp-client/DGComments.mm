@@ -95,7 +95,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     NSString *date=comment.timestamp>0?[format stringFromDate:[NSDate dateWithTimeIntervalSince1970:comment.timestamp]]:@"";
     NSMutableArray *parts=[NSMutableArray array]; if(date.length)[parts addObject:date];
     NSString *location=Text(comment.location); if(location.length)[parts addObject:location];
-    [parts addObject:[@"♡ " stringByAppendingString:Text(douglass::compact(comment.likes))]]; _meta.text=[parts componentsJoinedByString:@"   "];
+     _meta.text=[parts componentsJoinedByString:@"   "];
     [_like setTitle:[NSString stringWithFormat:@"%@ %@",comment.liked?@"♥":@"♡",Text(douglass::compact(comment.likes))] forState:UIControlStateNormal];_like.tintColor=comment.liked?UIColor.systemPinkColor:UIColor.secondaryLabelColor;_compose.hidden=![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.comments.write"];
     _reply.hidden=nested||comment.replies<=0;
     NSString *replyText=expanded?@"收起回复 ︿":[NSString stringWithFormat:@"展开 %@ 条回复 ﹀",Text(douglass::compact(comment.replies))];

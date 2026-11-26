@@ -192,6 +192,7 @@
       if(operation==='musicDetail'){
         const data=await get('/aweme/v1/web/music/detail/',{music_id:params.id,scene:'1'});return music(data.music_info||data.music||{});
       }
+      if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return page(data,data.aweme_list,data.cursor,data.has_more);}
       if(operation==='musicWorks'){
         const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10',scene:'1'});if(!Array.isArray(data.aweme_list))throw new Error('原声作品接口没有返回作品列表');return page(data,data.aweme_list,data.cursor,data.has_more);
       }

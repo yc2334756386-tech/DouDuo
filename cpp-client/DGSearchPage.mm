@@ -7,7 +7,7 @@
 @property(nonatomic,copy) void (^imported)(NSArray<NSDictionary *> *items);
 @end
 @implementation DGSearchPage{
- WKWebView *_web;UIView *_tools;UILabel *_hint;UIButton *_import,*_reload;UIActivityIndicatorView *_spinner;BOOL _reading;
+ WKWebView *_web;UIView *_tools;UILabel *_hint;UIButton *_import,*_reload;UIActivityIndicatorView *_spinner;BOOL _reading,_musicFallback;
 }
 - (void)viewDidLoad{
  [super viewDidLoad];self.title=self.musicID.length?@"原声作品网页":@"网页翻页";self.view.backgroundColor=UIColor.systemBackgroundColor;
@@ -36,7 +36,7 @@
  if(self.musicID.length){NSString *identifier=[self.musicID stringByAddingPercentEncodingWithAllowedCharacters:allowed];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:[@"https://www.douyin.com/music/" stringByAppendingString:identifier]]]];return;}
  NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"video"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
 }
-- (void)reload{[_web reload];}
+- (void)reload{if(self.musicID.length){_musicFallback=YES;NSString *url=[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",self.musicID];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];_hint.text=@"已切换原声备用网页。手动加载作品后可导回。";}else[_web reload];}
 - (void)webBack{if(_web.canGoBack)[_web goBack];else [self loadSearch];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];[_web evaluateJavaScript:@"document.querySelectorAll('video,audio').forEach(media=>media.pause())" completionHandler:nil];}
 - (void)importResults{
@@ -44,10 +44,10 @@
  [_web evaluateJavaScript:@"window.DGSearchPage?window.DGSearchPage.read():({error:'网页尚未加载，请等搜索结果出现后再导入'})" completionHandler:^(id value,NSError *error){DGSearchPage *self=weak;if(!self)return;self->_reading=NO;self->_import.enabled=YES;[self->_spinner stopAnimating];NSDictionary *result=[value isKindOfClass:NSDictionary.class]?value:nil;NSString *message=Text(String(result[@"error"]));NSArray *items=Array(result[@"items"]);if(error||message.length||!items.count){DGToast(self,message.length?message:@"还没有读取到结果，请先手动翻页并等待内容出现");return;}DGSessionCapture(nil);if(self.imported)self.imported(items);[self.navigationController popViewControllerAnimated:YES];}];
 }
 - (void)webView:(WKWebView *)web didStartProvisionalNavigation:(WKNavigation *)navigation{[_spinner startAnimating];}
-- (void)webView:(WKWebView *)web didFinishNavigation:(WKNavigation *)navigation{if(!_reading)[_spinner stopAnimating];}
+- (void)webView:(WKWebView *)web didFinishNavigation:(WKNavigation *)navigation{if(!_reading)[_spinner stopAnimating];if(self.musicID.length){__weak DGSearchPage *weak=self;[web evaluateJavaScript:@"(document.body?.innerText||'').includes('服务出现异常')" completionHandler:^(id result,NSError *error){DGSearchPage *self=weak;if(!self||![result boolValue])return;self->_hint.text=@"官网原声服务异常，可点右下角切换备用网页；已导入结果会保留。";}];}}
 - (void)webView:(WKWebView *)web didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error{[_spinner stopAnimating];if(error.code!=NSURLErrorCancelled)DGToast(self,@"网页加载失败，可点击右下角重新加载");}
 - (void)webView:(WKWebView *)web decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decision{
- NSString *scheme=action.request.URL.scheme.lowercaseString,*host=action.request.URL.host.lowercaseString;BOOL allowed=[scheme isEqualToString:@"about"]||([@[@"http",@"https"]containsObject:scheme]&&([host isEqualToString:@"douyin.com"]||[host hasSuffix:@".douyin.com"]||[host hasSuffix:@".bytedance.com"]));if(allowed&&!action.targetFrame){decision(WKNavigationActionPolicyCancel);[web loadRequest:action.request];return;}decision(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
+ NSString *scheme=action.request.URL.scheme.lowercaseString,*host=action.request.URL.host.lowercaseString;BOOL allowed=[scheme isEqualToString:@"about"]||([@[@"http",@"https"]containsObject:scheme]&&([host isEqualToString:@"douyin.com"]||[host hasSuffix:@".douyin.com"]||[host isEqualToString:@"www.iesdouyin.com"]||[host hasSuffix:@".bytedance.com"]));if(allowed&&!action.targetFrame){decision(WKNavigationActionPolicyCancel);[web loadRequest:action.request];return;}decision(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
 }
 @end
 UIViewController *DGMakeSearchPage(NSString *keyword,BOOL users,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.keyword=keyword;page.users=users;page.imported=imported;return page;}
