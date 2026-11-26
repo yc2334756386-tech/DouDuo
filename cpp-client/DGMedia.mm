@@ -152,15 +152,15 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   [self queueWatchdogAfter:3];
  }else{
   [self stopWatchdog];[_player pause];[_musicPlayer pause];
-  if(!value){[self unlock];_boosting=NO;_speedGlass.hidden=YES;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
+  if(!value){[self unlock];_boosting=NO;_speedGlass.hidden=YES;}
  }
 }
-- (void)toggle {if(DGMusicPlayer().rate>0){DGMusicStop();_paused=NO;[self active:YES];return;}if(_observedItem.status==AVPlayerItemStatusFailed||_watchdogExhausted){_recoveries=0;_watchdogExhausted=NO;[self recover];return;}_paused=!_paused;_pause.hidden=!_paused;if(!_paused){_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}[self active:_active];}
+- (void)toggle {if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];return;}if(_observedItem.status==AVPlayerItemStatusFailed||_watchdogExhausted){_recoveries=0;_watchdogExhausted=NO;[self recover];return;}_paused=!_paused;_pause.hidden=!_paused;if(!_paused){_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}[self active:_active];}
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture shouldReceiveTouch:(UITouch*)touch {for(UIView *v=touch.view;v&&v!=self.contentView;v=v.superview)if([v isKindOfClass:UIControl.class]||v==_caption||v==_author||v==_musicAvatar)return NO;return YES;}
 - (void)lock {[_locked removeAllObjects];for(UIView *v=self.superview;v;v=v.superview)if([v isKindOfClass:UIScrollView.class]&&((UIScrollView*)v).scrollEnabled){[_locked addObject:(UIScrollView*)v];((UIScrollView*)v).scrollEnabled=NO;}}
 - (void)unlock {for(UIScrollView *v in _locked)v.scrollEnabled=YES;[_locked removeAllObjects];}
 - (void)hold:(UILongPressGestureRecognizer*)g {
- if(g.state==UIGestureRecognizerStateBegan){if(!_work.photo()&&_player){_boosting=YES;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"2× 倍速播放 · 松手恢复";if(_active&&!_paused)[_player playImmediatelyAtRate:2];}else[self download:[g locationInView:self.contentView]];}
+ if(g.state==UIGestureRecognizerStateBegan){if(!_work.photo()&&_player){if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];}_boosting=YES;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"2× 倍速播放 · 松手恢复";if(_active&&!_paused)[_player playImmediatelyAtRate:2];}else[self download:[g locationInView:self.contentView]];}
  else if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){[self unlock];_boosting=NO;_speedGlass.hidden=YES;if(_active&&!_paused)[_player playImmediatelyAtRate:1];}
 }
 - (void)copyCaption:(UILongPressGestureRecognizer*)g {if(g.state==UIGestureRecognizerStateBegan&&!_work.caption.empty())DGConfirmCopy(self.presenter,Text(_work.caption));}
