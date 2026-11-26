@@ -167,8 +167,8 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         }else if(_mode==DGExploreMusic){
             _musicControls=Glass(20);[_header addSubview:_musicControls];_play=Symbol(@"play.fill",self,@selector(toggleAudio));_play.accessibilityLabel=@"播放或暂停原声";[_musicControls.contentView addSubview:_play];
             _save=Symbol(@"square.and.arrow.down",self,@selector(saveAudio));_save.accessibilityLabel=@"保存原声";[_musicControls.contentView addSubview:_save];_collectMusic=Symbol(@"star",self,@selector(collectMusic));_collectMusic.accessibilityLabel=@"收藏原声";[_musicControls.contentView addSubview:_collectMusic];
-            [_header addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longSave:)]];
-            _context.text=@"使用这首原声的作品 · 长按保存原声";
+            
+            _context.text=@"使用这首原声的作品";
         }else{_avatar.hidden=YES;_name.text=@"关注的人";_signature.text=@"点开头像查看主页与作品";}
     }
     [self layoutHeader];_table.tableHeaderView=_header;

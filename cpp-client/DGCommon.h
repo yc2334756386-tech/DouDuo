@@ -89,6 +89,11 @@ void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
 void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
+UIViewController *DGMakeActions(DGBridge *bridge, NSDictionary *work);
+BOOL DGOptionsKeepsPlayback(UIViewController *controller);
+void DGOptimisticAction(DGBridge *bridge, UIViewController *presenter, NSDictionary *snapshot, NSString *kind, BOOL add);
+void DGResetInteractions(void);
+void DGResetMusicPages(void);
 BOOL DGContentAllowed(const Work &work);
 void DGMarkSeen(NSString *identifier);
 void DGSeenScope(NSString *uid);
@@ -104,3 +109,4 @@ UIViewController *DGMakeProfile(DGBridge *bridge, NSString *sec, NSString *name,
 UIViewController *DGMakeSearch(DGBridge *bridge);
 UIViewController *DGMakeMusic(DGBridge *bridge, NSDictionary *music);
 UIViewController *DGMakeMessages(DGBridge *bridge);
+UIViewController *DGMakeNotices(DGBridge *bridge);

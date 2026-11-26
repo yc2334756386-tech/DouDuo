@@ -53,7 +53,7 @@
     const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
     const actualContent=data&&((Array.isArray(data.aweme_list)&&data.aweme_list.length)||(Array.isArray(data.comments)&&data.comments.length)||data.user||data.user_info||(Array.isArray(data.data)&&data.data.length));
     if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
-    if(data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) throw new Error('平台要求安全验证，请在登录页完成后返回');
+    if(data && (data.verify_info||data.verify_data||data.captcha)|| /x-tt-verify-passport-decision|bdturing|x-vc-bdturing/i.test(response.headers||'')) {const error=new Error('平台要求安全验证，正在打开官方验证页面');error.verificationRequired=true;throw error;}
     if(options.strict && (!data||data.status_code==null)) throw new Error('操作结果未确认，请刷新核对，避免连续重试');
     throw new Error(response.status===-1?'连接超时，请稍后刷新':data&&(data.status_msg||data.message||data.status_message)||'平台暂未返回内容，请完成网页验证或稍后重试');
   }
@@ -105,7 +105,7 @@
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
-  window.DouGlass={version:3,async request(operation,params={}){
+  window.DouGlass={version:3,normalizeWorks:works,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
     try {
       if(operation==='feed'){
@@ -134,6 +134,13 @@
         const data=await get(operation==='profile'?'/aweme/v1/web/user/profile/self/':'/aweme/v1/web/user/profile/other/',query);
         const person=user(data.user||data.user_info);return Object.assign(person,{loggedIn:!!(person.uid&&person.uid!=='0')});
       }
+      if(operation==='detail'){const data=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});return {items:works([data.aweme_detail||data.aweme].filter(Boolean))};}
+      if(operation==='noticeCounts'){const data=await get('/aweme/v1/web/notice/count/',{is_new_notice:'1',need_social_count:'1'});return {items:(data.notice_count||data.notice_count_list||[]).map(value=>({group:Number(value.group??value.notice_group??0),count:Number(value.count||0)}))};}
+      if(operation==='notices'){
+        const data=await get('/aweme/v1/web/notice/',{is_new_notice:'1',is_mark_read:'0',count:'20',notice_group:String(params.group||700),min_time:'0',max_time:cursor});
+        const items=(data.notice_list_v2||data.notice_list||[]).map(notice=>{const type=Number(notice.type||0),general=notice.general_notice||{},comment=(notice.comment||{}).comment||{},digg=notice.digg||{},follow=notice.follow||{},at=notice.at||{},interactive=notice.interactive_notice||{};const person=comment.user||(digg.from_user||[])[0]||follow.from_user||at.user_info||(interactive.from_user||[])[0]||{};const author=user(person);const work=(notice.comment||{}).aweme||digg.aweme||at.aweme||interactive.aweme||{};const action=type===31?'评论或回复了你':type===41?'赞了你的作品':type===45?'提到了你':type===33?'关注了你':type===98?'请求关注你':general.title||interactive.title||'互动消息';return {id:id(notice.nid_str||notice.nid)||String(type)+'-'+String(notice.create_time||0),name:author.nickname||general.sender_name||'抖音通知',avatar:author.avatar,authorID:author.sec,action,detail:comment.text||at.content||digg.content||interactive.content||general.content||'',workID:id(work.aweme_id||comment.aweme_id||notice.aweme_id),time:Number(notice.create_time||0)};});
+        return {items,cursor:String(data.max_time||0),more:!!data.has_more};
+      }
       if(operation==='works'||operation==='likes'){
         const query=operation==='works'?{sec_user_id:params.sec,max_cursor:cursor,locate_query:'false',show_live_replay_strategy:'1',need_time_list:'1',time_list_query:'0',whale_cut_token:'',cut_version:'1',count:'18'}:{sec_user_id:params.sec,max_cursor:cursor,min_cursor:'0',count:'18',cut_version:'1'};
         const data=await get(operation==='works'?'/aweme/v1/web/aweme/post/':'/aweme/v1/web/aweme/favorite/',query,{postList:operation==='works'});
@@ -151,7 +158,7 @@
         const data=await get('/aweme/v1/web/music/detail/',{music_id:params.id,scene:'1'});return music(data.music_info||data.music||{});
       }
       if(operation==='musicWorks'){
-        const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10'});return page(data,data.aweme_list,data.cursor,data.has_more);
+        const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10',scene:'1'});if(!Array.isArray(data.aweme_list))throw new Error('原声作品接口没有返回作品列表');return page(data,data.aweme_list,data.cursor,data.has_more);
       }
       if(operation==='following'){
         const data=await get('/aweme/v1/web/user/following/list/',{sec_user_id:params.sec||'',user_id:params.uid||'',cursor,offset:cursor,count:'30',source_type:'1'});
@@ -168,13 +175,14 @@
       if(operation==='digg'||operation==='favorite'){
         await writeReady();const value=params.add===true||params.add===1||params.add==='1'?'1':'0';
         const query=operation==='digg'?{aweme_id:params.id,type:value,item_type:'0'}:{aweme_id:params.id,action:value};
-        await post(operation==='digg'?'/aweme/v1/web/commit/item/digg/':'/aweme/v1/web/commit/item/collect/',query,'',{strict:true});return {ok:true,added:value==='1'};
+        const inspect=async()=>{const detail=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});const item=detail.aweme_detail||detail.aweme||{};if(operation==='digg')return typeof item.user_digged==='number'||typeof item.user_digged==='boolean'?!!item.user_digged:null;if(item.is_collect!=null)return !!item.is_collect;if(item.is_collected!=null)return !!item.is_collected;if(item.collect_stat!=null)return Number(item.collect_stat)===1;return null;};
+        try{await post(operation==='digg'?'/aweme/v1/web/commit/item/digg/':'/aweme/v1/web/commit/item/collect/',query,'',{strict:true});return {ok:true,added:value==='1'};}catch(error){if(error.verificationRequired)throw error;let state=null;try{await delay(500);state=await inspect();}catch(check){if(check.verificationRequired)throw check;}if(state===(value==='1'))return {ok:true,added:value==='1',verified:true};if(operation==='favorite'&&state!==null){try{await post('/aweme/v1/web/aweme/collect/',query,'',{strict:true});return {ok:true,added:value==='1'};}catch(fallback){if(fallback.verificationRequired)throw fallback;await delay(700);if(await inspect()===(value==='1'))return {ok:true,added:value==='1',verified:true};}}throw error;}
       }
       if(operation==='emoji'){
         const data=await get('/aweme/v1/web/emoji/list/',{});return {items:(data.emoji_list||[]).filter(value=>value&&value.display_name&&!value.hide).map(value=>({name:value.display_name,url:first(value.emoji_url)})).filter(value=>value.url)};
       }
       return {error:'暂不支持此操作'};
-    }catch(error){return {error:String(error.message||'请求失败')};}
+    }catch(error){return {error:String(error.message||'请求失败'),verificationRequired:!!error.verificationRequired};}
   }};
 })();
 
