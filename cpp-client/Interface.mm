@@ -54,7 +54,7 @@
 - (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return UIStatusBarStyleLightContent;}
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
-- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];}
+- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
@@ -119,6 +119,7 @@
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate{if(!decelerate){[self activate];}}
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{[self activate];}
 - (void)warmAfterSettling{NSUInteger request=++_warmGeneration,generation=_generation;__weak DGFeed *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_MSEC),dispatch_get_main_queue(),^{DGFeed *self=weak;if(!self||request!=self->_warmGeneration||generation!=self->_generation||!self->_foreground||!self->_visible||self->_showingMessages||self->_collection.dragging||self->_collection.decelerating)return;DGWarmWorks(self->_feed.works,self->_current);});}
+- (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{if(path.item==_current){__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak activate];});}}
 - (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{[(DGFeedCell *)cell active:NO];}
 - (void)showComments:(NSString *)workID {
  if(_commentTransition)return;_closingComments=NO;if(_comments){[self closeComments];return;}_commentTransition=YES;
@@ -140,7 +141,8 @@
  for(NSUInteger index=0;index<_feed.works.size();index++){const Work &work=_feed.works[index];if((NSInteger)index<=_current||DGContentAllowed(work)){kept.push_back(work);if(index<_records.count)[records addObject:_records[index]];}else [deleted addObject:[NSIndexPath indexPathForItem:index inSection:0]];}
  if(!deleted.count)return;BOOL more=_feed.more;_feed.append(std::move(kept),more,true);_records=records;[_collection deleteItemsAtIndexPaths:deleted];[self activate];
 }
-- (void)presentPage:(UIViewController *)page{if(!page||self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:page];DGConfigurePageTransition(nav);nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self presentViewController:nav animated:YES completion:nil];}
+- (void)presentPage:(UIViewController *)page{if(!page||self.presentedViewController)return;if(_showingMessages){DGSetEmbeddedMessagesVisible(_messageChannel,NO);page.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(closeMessageDetail)];}for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:page];DGConfigurePageTransition(nav);nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self presentViewController:nav animated:YES completion:nil];}
+- (void)closeMessageDetail{[self dismissViewControllerAnimated:YES completion:^{DGSetEmbeddedMessagesVisible(self->_messageChannel,self->_showingMessages);[self activate];}];}
 - (void)search{[self presentPage:DGMakeSearch(_bridge)];}
 - (void)messages{
  if(_showingMessages)return;[self closeComments];_showingMessages=YES;
@@ -148,7 +150,7 @@
  _collection.hidden=YES;_empty.hidden=YES;_account.hidden=YES;_search.hidden=YES;
  __weak DGFeed *weak=self;
  _messageChannel=DGMakeEmbeddedMessages(_bridge,^(UIViewController *page){[weak presentPage:page];});
- [self addChildViewController:_messageChannel];[self.view insertSubview:_messageChannel.view belowSubview:_bar];[_messageChannel didMoveToParentViewController:self];
+ [self addChildViewController:_messageChannel];[self.view insertSubview:_messageChannel.view belowSubview:_bar];[_messageChannel didMoveToParentViewController:self];DGSetEmbeddedMessagesVisible(_messageChannel,YES);
  _messageBackGlass=Glass(20);UIButton *back=Symbol(@"chevron.left",self,@selector(hideMessages));back.accessibilityLabel=@"返回原频道";back.frame=CGRectMake(0,0,40,40);[_messageBackGlass.contentView addSubview:back];[self.view addSubview:_messageBackGlass];
  _messageRefreshGlass=Glass(20);UIButton *refresh=Symbol(@"arrow.clockwise",self,@selector(refreshMessages));refresh.accessibilityLabel=@"刷新信息";refresh.frame=back.frame;[_messageRefreshGlass.contentView addSubview:refresh];[self.view addSubview:_messageRefreshGlass];
  [self.view setNeedsLayout];
@@ -156,7 +158,7 @@
 - (void)refreshMessages{DGRefreshEmbeddedMessages(_messageChannel);}
 - (void)hideMessages{
  if(!_showingMessages)return;_showingMessages=NO;
- [_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];_messageChannel=nil;
+ DGSetEmbeddedMessagesVisible(_messageChannel,NO);[_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];_messageChannel=nil;
  [_messageBackGlass removeFromSuperview];_messageBackGlass=nil;[_messageRefreshGlass removeFromSuperview];_messageRefreshGlass=nil;
  _collection.hidden=NO;_empty.hidden=!_feed.works.empty();_account.hidden=NO;_search.hidden=NO;
  _navigationTabs.selectedSegmentIndex=[_operation isEqualToString:@"followFeed"]?0:1;[self activate];

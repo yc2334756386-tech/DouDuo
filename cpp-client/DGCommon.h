@@ -145,3 +145,5 @@ void DGRefreshEmbeddedMessages(UIViewController *page);
 
 BOOL DGIsOwnDanmaku(NSString *identifier);
 void DGRememberOwnDanmaku(NSString *identifier,NSString *uid);
+
+void DGSetEmbeddedMessagesVisible(UIViewController *page,BOOL visible);

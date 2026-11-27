@@ -54,9 +54,15 @@
  else{UIView *header=[[UIView alloc]initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,154)];NSArray *titles=@[@"新的关注",@"互动消息"],*subtitles=@[@"查看新粉丝与关注动态",@"评论、赞与提到我的消息"],*icons=@[@"person.2.fill",@"bubble.left.and.bubble.right.fill"];for(NSInteger index=0;index<2;index++){UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];button.tag=index;button.frame=CGRectMake(0,index*76,self.view.bounds.size.width,76);button.autoresizingMask=UIViewAutoresizingFlexibleWidth;[button addTarget:self action:@selector(noticeCategory:) forControlEvents:UIControlEventTouchUpInside];UIView *circle=[[UIView alloc]initWithFrame:CGRectMake(18,13,50,50)];circle.backgroundColor=index?UIColor.systemPinkColor:UIColor.systemBlueColor;circle.layer.cornerRadius=25;circle.userInteractionEnabled=NO;UIImageView *icon=[[UIImageView alloc]initWithImage:[UIImage systemImageNamed:icons[index]]];icon.tintColor=UIColor.whiteColor;icon.contentMode=UIViewContentModeScaleAspectFit;icon.frame=CGRectMake(12,12,26,26);[circle addSubview:icon];[button addSubview:circle];UILabel *title=Label(16,UIFontWeightSemibold);title.frame=CGRectMake(82,13,self.view.bounds.size.width-120,24);title.text=titles[index];[button addSubview:title];UILabel *subtitle=Label(12,UIFontWeightRegular);subtitle.textColor=UIColor.secondaryLabelColor;subtitle.frame=CGRectMake(82,42,self.view.bounds.size.width-120,20);subtitle.text=subtitles[index];[button addSubview:subtitle];[header addSubview:button];}_table.tableHeaderView=header;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];__weak DGMessages *weak=self;[_bridge request:@"profile" parameters:@{} completion:^(NSDictionary *result,NSString *error){if(!error)weak.uid=Text(String(result[@"uid"]));}];}
 }
 - (void)noticeCategory:(UIButton *)button{UIViewController *page=DGMakeNoticesGroup(self.bridge,button.tag?0:4);if(self.navigate)self.navigate(page);else[self.navigationController pushViewController:page animated:YES];}
-- (void)openNotices{UIViewController *page=DGMakeNotices(self.bridge);if(self.navigate)self.navigate(page);else[self.navigationController pushViewController:page animated:YES];}
-- (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];_visible=YES;[_service attach:self.view];[self poll];__weak DGMessages *weak=self;_timer=[NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer){[weak poll];}];}
-- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];_visible=NO;[_timer invalidate];_timer=nil;}
+- (void)setChannelVisible:(BOOL)visible{
+ if(_visible==visible)return;
+ _visible=visible;[_timer invalidate];_timer=nil;
+ if(!visible)return;
+ [_service attach:self.view];[self poll];
+ __weak DGMessages *weak=self;_timer=[NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer){[weak poll];}];
+}
+- (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];[self setChannelVisible:YES];}
+- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];[self setChannelVisible:NO];}
 - (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat safe=self.view.safeAreaInsets.bottom,bottom=MAX(safe,_keyboard),height=self.view.bounds.size.height;_table.frame=CGRectMake(0,0,self.view.bounds.size.width,MAX(0,height-(self.conversation?64+bottom:0)));_composer.frame=CGRectMake(10,height-bottom-60,self.view.bounds.size.width-20,54);_input.frame=CGRectMake(10,5,_composer.bounds.size.width-66,44);_send.frame=CGRectMake(_composer.bounds.size.width-52,4,48,46);}
 - (void)keyboard:(NSNotification *)note{CGRect rect=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboard=MAX(0,self.view.bounds.size.height-rect.origin.y);[self.view setNeedsLayout];[self.view layoutIfNeeded];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
@@ -81,3 +87,5 @@ UIViewController *DGMakeMessages(DGBridge *bridge){DGMessages *messages=[DGMessa
 UIViewController *DGMakeEmbeddedMessages(DGBridge *bridge,void (^navigate)(UIViewController *)){DGMessages *messages=[DGMessages new];messages.bridge=bridge;messages.embedded=YES;messages.navigate=navigate;return messages;}
 
 void DGRefreshEmbeddedMessages(UIViewController *page){if([page isKindOfClass:DGMessages.class])[(DGMessages *)page refresh];}
+
+void DGSetEmbeddedMessagesVisible(UIViewController *page,BOOL visible){if([page isKindOfClass:DGMessages.class])[(DGMessages *)page setChannelVisible:visible];}
