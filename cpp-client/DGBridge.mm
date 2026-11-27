@@ -2,6 +2,7 @@
 #import "DGDiagnostics.h"
 #import "DGSession.h"
 #import "DGVerification.h"
+#import "DGMobileMusic.h"
 
 NSString *DGUserAgent(void) {
     return @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
@@ -109,6 +110,7 @@ NSString *DGUserAgent(void) {
     decisionHandler(([@[@"http", @"https", @"about"] containsObject:scheme]) ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
 }
 - (void)request:(NSString *)operation parameters:(NSDictionary *)parameters completion:(DGResult)completion {
+    if([operation isEqualToString:@"musicWorks"]||[operation isEqualToString:@"musicDetail"]){DGReadMobileMusic(self,operation,parameters,completion);return;}
     if (_failure) { completion(nil, _failure); return; }
     NSUInteger generation = _generation;
     __block DGResult pending=[completion copy];

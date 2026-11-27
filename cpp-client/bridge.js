@@ -129,6 +129,11 @@
   window.DouGlass={version:3,normalizeWorks:works,normalizeMusicWorks:musicWorks,normalizeUsers:users,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
     try {
+      if(operation==='normalizeMusicResponse'){
+        const data=parse(params.json);if(!data||Number(data.status_code??-1)!==0)throw new Error(data?.status_msg||data?.message||'原声移动接口未返回有效内容');
+        if(params.detail){const result=music(data.music_info||data.music||data.data?.music_info||{});if(result.id!==String(params.id))throw new Error('官网返回的原声标识与当前作品不一致');return result;}
+        return Object.assign(musicPage(data,String(params.id)),{lookup:'mobile'});
+      }
       if(operation==='feed'){
         const data=await get('/aweme/v1/web/tab/feed/',{count:'10',refresh_index:String(params.refresh||1),video_type_select:'1',aweme_pc_rec_raw_data:JSON.stringify({is_client:false,ff_danmaku_status:0,danmaku_switch_status:0}),globalwid:'',pull_type:Number(params.refresh||1)<3?'0':'2',min_window:'0',free_right:'0',ug_source:'',creative_id:''});
         if(!Array.isArray(data.aweme_list))throw new Error('推荐接口没有返回作品，请稍后刷新；当前登录信息会保留');

@@ -12,14 +12,14 @@
 }
 - (void)viewDidLoad{
  [super viewDidLoad];self.title=self.musicID.length?@"原声作品网页":@"网页翻页";self.view.backgroundColor=UIColor.systemBackgroundColor;
- WKWebViewConfiguration *config=[WKWebViewConfiguration new];DGSessionConfigure(config);config.allowsInlineMediaPlayback=YES;config.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeAll;config.defaultWebpagePreferences.preferredContentMode=WKContentModeDesktop;
+ WKWebViewConfiguration *config=[WKWebViewConfiguration new];DGSessionConfigure(config);config.allowsInlineMediaPlayback=YES;config.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeAll;config.defaultWebpagePreferences.preferredContentMode=self.musicID.length?WKContentModeMobile:WKContentModeDesktop;
  NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"keyword":self.keyword?:@"",@"users":@(self.users),@"musicID":self.musicID?:@""} options:0 error:nil];NSString *json=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
  NSString *capture=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"search-page" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]?:@"";
  NSString *script=[[NSString stringWithFormat:@"window.DGSearchExpected=%@;\n",json?:@"{}"]stringByAppendingString:capture];
  [config.userContentController addUserScript:[[WKUserScript alloc]initWithSource:script injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
  NSString *adapter=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"bridge" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil]?:@"";
  [config.userContentController addUserScript:[[WKUserScript alloc]initWithSource:adapter injectionTime:WKUserScriptInjectionTimeAtDocumentEnd forMainFrameOnly:YES]];
- _web=[[WKWebView alloc]initWithFrame:CGRectZero configuration:config];_web.customUserAgent=DGUserAgent();_web.navigationDelegate=self;[self.view addSubview:_web];
+ _web=[[WKWebView alloc]initWithFrame:CGRectZero configuration:config];_web.customUserAgent=self.musicID.length?@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1":DGUserAgent();_web.navigationDelegate=self;[self.view addSubview:_web];
  self.navigationItem.rightBarButtonItems=@[[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(loadSearch)],[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];
  if(self.musicID.length){UIBarButtonItem *original=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"music.note"] style:UIBarButtonItemStylePlain target:self action:@selector(loadMusicOriginal)];original.accessibilityLabel=@"打开官方原声页";self.navigationItem.rightBarButtonItems=@[original,[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];}
  _tools=[UIView new];_tools.backgroundColor=UIColor.secondarySystemBackgroundColor;[self.view addSubview:_tools];
@@ -40,7 +40,7 @@
 }
 - (void)loadMusicOriginal{
  NSURL *url=[NSURL URLWithString:self.musicURL?:@""];NSString *path=url.path;BOOL matching=[path isEqualToString:[@"/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[@"/share/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[NSString stringWithFormat:@"/share/music/%@/",self.musicID]];
- if(![url.scheme.lowercaseString isEqual:@"https"]||![@[@"www.douyin.com",@"www.iesdouyin.com"]containsObject:url.host.lowercaseString]||!matching)url=[NSURL URLWithString:[@"https://www.douyin.com/music/" stringByAppendingString:self.musicID]];
+ if(![url.scheme.lowercaseString isEqual:@"https"]||![url.host.lowercaseString isEqual:@"www.iesdouyin.com"]||!matching)url=[NSURL URLWithString:[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",self.musicID]];
  _musicFallback=[url.host.lowercaseString isEqual:@"www.iesdouyin.com"];[_web loadRequest:[NSURLRequest requestWithURL:url]];
 }
 - (void)reload{if(self.musicID.length){_musicFallback=!_musicFallback;NSString *url=_musicFallback?[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",self.musicID]:[@"https://www.douyin.com/music/" stringByAppendingString:self.musicID];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];_hint.text=@"已重新打开这首原声的官网页面。作品出现后可导回。";}else[_web reload];}

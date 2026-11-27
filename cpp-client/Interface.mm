@@ -107,7 +107,7 @@
  _messageChannel.view.frame=CGRectMake(0,top+62,size.width,MAX(0,size.height-top-62));_messageBackGlass.frame=CGRectMake(14,top+12,40,40);_messageRefreshGlass.frame=CGRectMake(size.width-54,top+12,40,40);
  CGFloat panel=_comments?MIN(size.height*.64,size.height-top-150):0;CGFloat media=size.height-panel;
  _commentHost.bounds=CGRectMake(0,0,size.width,MAX(0,panel));_commentHost.center=CGPointMake(size.width/2,media+MAX(0,panel)/2);_comments.view.frame=_commentHost.bounds;
- CGFloat w=MIN(size.width-136,330);_bar.frame=CGRectMake((size.width-w)/2,top+7,w,48);_account.frame=CGRectMake(14,top+7,44,48);_navigationTabs.frame=CGRectMake(5,6,w-10,36);_recommendRefreshGlass.frame=CGRectMake((size.width-34)/2,top+61,34,34);_recommendRefreshSpinner.center=CGPointMake(17,17);_search.frame=CGRectMake(size.width-58,top+7,44,48);
+ CGFloat w=MIN(size.width-136,330);_bar.frame=CGRectMake((size.width-w)/2,top+7,w,48);_account.frame=CGRectMake(14,top+7,44,48);_navigationTabs.frame=CGRectMake(5,6,w-10,36);CGFloat refreshX=CGRectGetMinX(_bar.frame)+5+(MAX(0,MIN(1,_navigationTabs.selectedSegmentIndex))+.5)*(w-10)/3;_recommendRefreshGlass.frame=CGRectMake(refreshX-17,top+61,34,34);_recommendRefreshSpinner.center=CGPointMake(17,17);_search.frame=CGRectMake(size.width-58,top+7,44,48);
  _accountImage.frame=CGRectMake((_account.bounds.size.width-32)/2,8,32,32);_back.frame=CGRectMake(12,top+4,44,44);_empty.frame=CGRectMake(28,media/2-90,size.width-56,260);_subtitle.preferredMaxLayoutWidth=MIN(size.width-56,420);[self layoutCleanKnob];
  _follow.tintColor=[_operation isEqualToString:@"followFeed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;_recommend.tintColor=[_operation isEqualToString:@"feed"]?UIColor.whiteColor:UIColor.secondaryLabelColor;
  if(_staticFeed&&!_positioned&&!_feed.works.empty()){_positioned=YES;_current=MAX(0,MIN(_selected,(NSInteger)_feed.works.size()-1));[_collection setContentOffset:CGPointMake(0,_current*size.height) animated:NO];}
@@ -223,14 +223,16 @@
 - (void)navigationHold:(UILongPressGestureRecognizer *)gesture{if([gesture locationInView:_navigationTabs].x<_navigationTabs.bounds.size.width/3)[self followList:gesture];}
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
  if(gesture.view!=_navigationTabs)return YES;
- if(_showingMessages||_navigationTabs.selectedSegmentIndex!=1||![_operation isEqualToString:@"feed"])return NO;
+ if(_showingMessages)return NO;
  CGFloat width=_navigationTabs.bounds.size.width,x=[touch locationInView:_navigationTabs].x;
- return x>=width/3&&x<width*2/3;
+ if(_navigationTabs.selectedSegmentIndex==0&&[_operation isEqualToString:@"followFeed"])return x>=0&&x<width/3;
+ return _navigationTabs.selectedSegmentIndex==1&&[_operation isEqualToString:@"feed"]&&x>=width/3&&x<width*2/3;
 }
 - (void)navigationTap:(UITapGestureRecognizer *)gesture {
- if(_staticFeed||!_foreground||_showingMessages||_manualRecommendationRefresh||_navigationTabs.selectedSegmentIndex!=1||![_operation isEqualToString:@"feed"])return;
+ BOOL selected=(_navigationTabs.selectedSegmentIndex==0&&[_operation isEqualToString:@"followFeed"])||(_navigationTabs.selectedSegmentIndex==1&&[_operation isEqualToString:@"feed"]);
+ if(_staticFeed||!_foreground||_inactive||_showingMessages||_manualRecommendationRefresh||!selected)return;
  DGHaptic();_manualRecommendationRefresh=YES;++_refreshFeedback;
- [_recommendRefreshSpinner startAnimating];[self syncCleanScreen];
+ [_recommendRefreshSpinner startAnimating];[self syncCleanScreen];[self.view setNeedsLayout];
  ++_feedRequest;_deferredFeedUpdate=nil;_loading=NO;
  [self refreshFeed];
 }
@@ -253,7 +255,7 @@
  });
 }
 - (void)recommend{[self hideMessages];_navigationTabs.selectedSegmentIndex=1;if(![_operation isEqualToString:@"feed"]){_operation=@"feed";[self resetChannel];}else [self activate];}
-- (void)followFeed{[self hideMessages];_navigationTabs.selectedSegmentIndex=0;if(![_operation isEqualToString:@"followFeed"]){_operation=@"followFeed";[self resetChannel];}else[self refreshFeed];}
+- (void)followFeed{[self hideMessages];_navigationTabs.selectedSegmentIndex=0;if(![_operation isEqualToString:@"followFeed"]){_operation=@"followFeed";[self resetChannel];}else[self activate];}
 - (void)resetChannel{_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();[self cancelRecommendationFeedback];[self finishPaging];DGCacheSetIdle(NO);_cachedBootstrap=NO;_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;_loading=NO;[self closeComments];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];_feed.clear();[_records removeAllObjects];[_collection reloadData];_current=0;_cursor=@"0";_refreshIndex=1;_emptyPages=0;if([_operation isEqualToString:@"feed"])[self startWithCachedRecommendation];[self loadFeed:YES];[self.view setNeedsLayout];}
 - (void)refreshFeed{if(_staticFeed||_loading){[_pull endRefreshing];return;}_retainedComments=nil;_retainedCommentWorkID=nil;[self closeComments];if(_failed)[_bridge reload];_refreshIndex=1;_cursor=@"0";_emptyPages=0;[self loadFeed:YES];}
 - (void)startWithCachedRecommendation {
