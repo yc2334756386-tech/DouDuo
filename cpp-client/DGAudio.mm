@@ -6,6 +6,7 @@
 using namespace douglass::audio;
 namespace {
 struct TapState {State dsp;AudioStreamBasicDescription format{};};
+std::atomic<bool> AudioForeground{true};
 void Init(MTAudioProcessingTapRef,void *client,void **storage){*storage=client;}
 void Finalize(MTAudioProcessingTapRef tap){delete static_cast<TapState *>(MTAudioProcessingTapGetStorage(tap));}
 void Prepare(MTAudioProcessingTapRef tap,CMItemCount,const AudioStreamBasicDescription *format){
@@ -18,10 +19,13 @@ void Prepare(MTAudioProcessingTapRef tap,CMItemCount,const AudioStreamBasicDescr
 }
 void Unprepare(MTAudioProcessingTapRef){}
 void Process(MTAudioProcessingTapRef tap,CMItemCount frames,MTAudioProcessingTapFlags,AudioBufferList *buffers,CMItemCount *produced,MTAudioProcessingTapFlags *flags){
+ if(!buffers||!produced||!flags)return;
  auto &tapState=*static_cast<TapState *>(MTAudioProcessingTapGetStorage(tap));
  State &s=tapState.dsp;
  if(MTAudioProcessingTapGetSourceAudio(tap,frames,buffers,flags,nullptr,produced)!=noErr){s.metrics->faults.fetch_add(1);*produced=0;return;}
- if(!*produced)return;if(*flags&kMTAudioProcessingTapFlag_StartOfStream)Reset(s);
+ if(!*produced)return;
+ if(!AudioForeground.load(std::memory_order_relaxed))return;
+ if(*flags&kMTAudioProcessingTapFlag_StartOfStream)Reset(s);
  double rate=tapState.format.mSampleRate;unsigned bits=tapState.format.mBitsPerChannel;
  bool floating=tapState.format.mFormatFlags&kAudioFormatFlagIsFloat,signedInt=tapState.format.mFormatFlags&kAudioFormatFlagIsSignedInteger;
  bool supported=rate>0&&tapState.format.mFormatID==kAudioFormatLinearPCM&&!(tapState.format.mFormatFlags&kAudioFormatFlagIsBigEndian)&&((floating&&(bits==32||bits==64))||(signedInt&&(bits==16||bits==32)));
@@ -39,7 +43,7 @@ void Process(MTAudioProcessingTapRef tap,CMItemCount frames,MTAudioProcessingTap
 @implementation DGAudioProbe
 - (instancetype)init{if((self=[super init]))metrics=std::make_shared<Metrics>();return self;}
 @end
-static NSHashTable<AVPlayerItem *> *Items(){static NSHashTable *items;static dispatch_once_t once;dispatch_once(&once,^{items=[NSHashTable weakObjectsHashTable];});return items;}
+static __weak AVPlayerItem *ConfiguredItem;
 static const void *PendingKey=&PendingKey,*ProbeKey=&ProbeKey;
 static __weak AVPlayer *ActivePlayer;
 BOOL DGAirPodsConnected(void){for(AVAudioSessionPortDescription *output in AVAudioSession.sharedInstance.currentRoute.outputs){BOOL bluetooth=[@[AVAudioSessionPortBluetoothA2DP,AVAudioSessionPortBluetoothLE,AVAudioSessionPortBluetoothHFP]containsObject:output.portType];if(bluetooth&&[output.portName rangeOfString:@"AirPods" options:NSCaseInsensitiveSearch].location!=NSNotFound)return YES;}return NO;}
@@ -73,23 +77,31 @@ static void Apply(AVPlayerItem *item){
  // Older systems use per-track processing. HLS does not support this route.
  if([item.asset isKindOfClass:AVURLAsset.class]&&[[((AVURLAsset *)item.asset).URL.absoluteString lowercaseString]containsString:@".m3u8"]){probe.message=@"当前系统的 HLS 音轨不支持自定义 EQ，保留原声";return;}
  NSObject *pending=[NSObject new];objc_setAssociatedObject(item,PendingKey,pending,OBJC_ASSOCIATION_RETAIN_NONATOMIC);__weak AVPlayerItem *weak=item;
- [item.asset loadTracksWithMediaType:AVMediaTypeAudio completionHandler:^(NSArray<AVAssetTrack *> *tracks,NSError *error){dispatch_async(dispatch_get_main_queue(),^{AVPlayerItem *item=weak;if(!item||objc_getAssociatedObject(item,PendingKey)!=pending)return;objc_setAssociatedObject(item,PendingKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.eq.enabled"])return;if(error||!tracks.count){probe.message=@"尚未取得可处理音轨，当前保持原声";return;}NSMutableArray *parameters=[NSMutableArray array];for(AVAssetTrack *track in tracks){AVMutableAudioMixInputParameters *input=TapParameters(track,probe,NO);if(input)[parameters addObject:input];}if(parameters.count){AVMutableAudioMix *mix=[AVMutableAudioMix audioMix];mix.inputParameters=parameters;item.audioMix=mix;}});}];
+ [item.asset loadTracksWithMediaType:AVMediaTypeAudio completionHandler:^(NSArray<AVAssetTrack *> *tracks,NSError *error){dispatch_async(dispatch_get_main_queue(),^{AVPlayerItem *item=weak;if(!item||objc_getAssociatedObject(item,PendingKey)!=pending)return;objc_setAssociatedObject(item,PendingKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);if(item!=ConfiguredItem||!AudioForeground.load(std::memory_order_relaxed))return;if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.eq.enabled"])return;if(error||!tracks.count){probe.message=@"尚未取得可处理音轨，当前保持原声";return;}NSMutableArray *parameters=[NSMutableArray array];for(AVAssetTrack *track in tracks){AVMutableAudioMixInputParameters *input=TapParameters(track,probe,NO);if(input)[parameters addObject:input];}if(parameters.count){AVMutableAudioMix *mix=[AVMutableAudioMix audioMix];mix.inputParameters=parameters;item.audioMix=mix;}});}];
 }
 @interface DGAudioRouteObserver:NSObject
 @end
 @implementation DGAudioRouteObserver
-- (void)interruption:(NSNotification *)note{if([note.userInfo[AVAudioSessionInterruptionTypeKey]integerValue]==AVAudioSessionInterruptionTypeEnded&&([note.userInfo[AVAudioSessionInterruptionOptionKey]unsignedIntegerValue]&AVAudioSessionInterruptionOptionShouldResume)){[AVAudioSession.sharedInstance setActive:YES error:nil];[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}}
-- (void)changed:(NSNotification *)note{DGRefreshAudioPreferences();[NSNotificationCenter.defaultCenter postNotificationName:@"DGAudioRouteChanged" object:nil];}
+- (void)interruption:(NSNotification *)note {
+ if([note.userInfo[AVAudioSessionInterruptionTypeKey]integerValue]!=AVAudioSessionInterruptionTypeEnded||!([note.userInfo[AVAudioSessionInterruptionOptionKey]unsignedIntegerValue]&AVAudioSessionInterruptionOptionShouldResume))return;
+ dispatch_async(dispatch_get_main_queue(),^{
+  if(UIApplication.sharedApplication.applicationState==UIApplicationStateActive){[AVAudioSession.sharedInstance setActive:YES error:nil];[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}
+ });
+}
+- (void)changed:(NSNotification *)note {
+ dispatch_async(dispatch_get_main_queue(),^{DGRefreshAudioPreferences();[NSNotificationCenter.defaultCenter postNotificationName:@"DGAudioRouteChanged" object:nil];});
+}
 @end
-void DGConfigureAudio(AVPlayerItem *item){if(!item)return;static dispatch_once_t once;dispatch_once(&once,^{static DGAudioRouteObserver *observer;observer=[DGAudioRouteObserver new];[NSNotificationCenter.defaultCenter addObserver:observer selector:@selector(changed:) name:AVAudioSessionRouteChangeNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:observer selector:@selector(interruption:) name:AVAudioSessionInterruptionNotification object:nil];DGRefreshAudioPreferences();});[Items()addObject:item];Apply(item);}
+void DGConfigureAudio(AVPlayerItem *item){if(!item)return;static dispatch_once_t once;dispatch_once(&once,^{static DGAudioRouteObserver *observer;observer=[DGAudioRouteObserver new];[NSNotificationCenter.defaultCenter addObserver:observer selector:@selector(changed:) name:AVAudioSessionRouteChangeNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:observer selector:@selector(interruption:) name:AVAudioSessionInterruptionNotification object:nil];DGRefreshAudioPreferences();});ConfiguredItem=item;Apply(item);}
 void DGRefreshAudioPreferences(void){
  NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;NSArray *old=@[@"douglass.eq.low",@"douglass.eq.mid",@"douglass.eq.high"];
  for(int i=0;i<N;i++){id gain=[prefs objectForKey:[NSString stringWithFormat:@"douglass.eq.gain.%d",i]],frequency=[prefs objectForKey:[NSString stringWithFormat:@"douglass.eq.freq.%d",i]],q=[prefs objectForKey:[NSString stringWithFormat:@"douglass.eq.q.%d",i]];Gains[i].store(std::clamp(gain?[gain floatValue]:[prefs floatForKey:old[i<3?0:i<7?1:2]],-18.f,18.f));Frequencies[i].store(frequency?std::clamp([frequency floatValue],20.f,20000.f):DefaultF[i]);Quality[i].store(q?std::clamp([q floatValue],.2f,8.f):1.1f);}
  NSArray *keys=@[@"tone.low",@"tone.mid",@"tone.high",@"width",@"room",@"mix",@"transparency",@"clarity",@"dynamics",@"bass",@"airpods.strength"];
  for(int i=0;i<EffectCount;i++){id value=[prefs objectForKey:[@"douglass.audio." stringByAppendingString:keys[i]]];float number=value?[value floatValue]:i==Mix?100:i==AirStrength?60:0;Effects[i].store(std::clamp(number,i<=High?-100.f:0.f,100.f));}
  Adaptive=[prefs boolForKey:@"douglass.eq.adaptive"];ListeningStyle=std::clamp((int)[prefs integerForKey:@"douglass.eq.style"],0,4);AirPods=DGAirPodsConnected();Enhance=[prefs boolForKey:@"douglass.airpods.enhance"];SystemSpatial=[prefs boolForKey:@"douglass.dolby"];Revision.fetch_add(1,std::memory_order_release);
- if(AVAudioSession.sharedInstance.supportsMultichannelContent!=[prefs boolForKey:@"douglass.dolby"])[AVAudioSession.sharedInstance setSupportsMultichannelContent:[prefs boolForKey:@"douglass.dolby"] error:nil];for(AVPlayerItem *item in Items().allObjects)Apply(item);
+ if(AudioForeground.load(std::memory_order_relaxed)&&AVAudioSession.sharedInstance.supportsMultichannelContent!=[prefs boolForKey:@"douglass.dolby"])[AVAudioSession.sharedInstance setSupportsMultichannelContent:[prefs boolForKey:@"douglass.dolby"] error:nil];if(AudioForeground.load(std::memory_order_relaxed))Apply(ConfiguredItem);
 }
-void DGRepairPlayerAudio(AVPlayer *player){if(!player)return;ActivePlayer=player;if(player.muted)player.muted=NO;if(player.volume<.99)player.volume=1;DGAudioProbe *probe=objc_getAssociatedObject(player.currentItem,ProbeKey);if(probe&&probe->metrics->faults.load()>=3&&!probe.bypassed){probe.bypassed=YES;player.currentItem.audioMix=nil;}BOOL selected=NO;AVPlayerItemTrack *candidate=nil;for(AVPlayerItemTrack *track in player.currentItem.tracks)if([track.assetTrack.mediaType isEqualToString:AVMediaTypeAudio]){if(track.enabled)selected=YES;if(!candidate)candidate=track;}if(!selected&&candidate)candidate.enabled=YES;}
+void DGRepairPlayerAudio(AVPlayer *player){if(!player)return;ActivePlayer=player;if(player.muted)player.muted=NO;if(player.volume<.99)player.volume=1;AVPlayerItem *item=player.currentItem;DGAudioProbe *probe=item?objc_getAssociatedObject(item,ProbeKey):nil;if(probe&&probe->metrics->faults.load()>=3&&!probe.bypassed){probe.bypassed=YES;player.currentItem.audioMix=nil;}BOOL selected=NO;AVPlayerItemTrack *candidate=nil;for(AVPlayerItemTrack *track in player.currentItem.tracks)if([track.assetTrack.mediaType isEqualToString:AVMediaTypeAudio]){if(track.enabled)selected=YES;if(!candidate)candidate=track;}if(!selected&&candidate)candidate.enabled=YES;}
 void DGSetAudioMetering(BOOL enabled){Metering=enabled;}
-NSDictionary *DGAudioSnapshot(void){DGAudioProbe *probe=objc_getAssociatedObject(ActivePlayer.currentItem,ProbeKey);NSMutableArray *levels=[NSMutableArray array],*adjust=[NSMutableArray array];BOOL attached=ActivePlayer.currentItem.audioMix!=nil;for(int i=0;i<N;i++){[levels addObject:@(probe&&attached&&ActivePlayer.rate>0?probe->metrics->levels[i].load():0)];[adjust addObject:@(probe?probe->metrics->adjust[i].load():0)];}return @{@"levels":levels,@"adjust":adjust,@"frames":@(probe?probe->metrics->frames.load():0),@"channels":@(probe?probe->metrics->channels.load():0),@"peak":@(probe?probe->metrics->peak.load():0),@"supported":@(!probe||probe->metrics->supported.load()),@"bypassed":@(probe.bypassed),@"playing":@(ActivePlayer.rate>0),@"attached":@(attached),@"message":probe.message?:@""};}
+void DGSetAudioRuntimeForeground(BOOL foreground){AudioForeground.store(foreground,std::memory_order_relaxed);if(foreground)DGRefreshAudioPreferences();}
+NSDictionary *DGAudioSnapshot(void){AVPlayerItem *item=ActivePlayer.currentItem;DGAudioProbe *probe=item?objc_getAssociatedObject(item,ProbeKey):nil;NSMutableArray *levels=[NSMutableArray array],*adjust=[NSMutableArray array];BOOL attached=ActivePlayer.currentItem.audioMix!=nil;for(int i=0;i<N;i++){[levels addObject:@(probe&&attached&&ActivePlayer.rate>0?probe->metrics->levels[i].load():0)];[adjust addObject:@(probe?probe->metrics->adjust[i].load():0)];}return @{@"levels":levels,@"adjust":adjust,@"frames":@(probe?probe->metrics->frames.load():0),@"channels":@(probe?probe->metrics->channels.load():0),@"peak":@(probe?probe->metrics->peak.load():0),@"supported":@(!probe||probe->metrics->supported.load()),@"bypassed":@(probe.bypassed),@"playing":@(ActivePlayer.rate>0),@"attached":@(attached),@"message":probe.message?:@""};}

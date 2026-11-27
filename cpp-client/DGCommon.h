@@ -102,6 +102,7 @@ void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge 
 void DGToast(UIViewController *host, NSString *message);
 void DGHaptic(void);
 void DGSaveURL(UIViewController *host, NSString *url, BOOL video);
+void DGSaveAudioDirect(UIViewController *host,NSString *url,NSString *name);
 void DGSaveAudio(UIViewController *host, NSString *url, NSString *name);
 void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, NSString *success);
@@ -138,12 +139,10 @@ UIViewController *DGMakeNotices(DGBridge *bridge);
 UIViewController *DGMakeEmbeddedMessages(DGBridge *bridge,void (^navigate)(UIViewController *));
 UIViewController *DGMakeNoticesGroup(DGBridge *bridge,NSInteger group);
 
-void DGFeedNowPlaying(AVPlayer *player,NSString *title,NSString *author,UIImage *cover);
-void DGFeedNowPlayingClear(AVPlayer *player);
 
 void DGRefreshEmbeddedMessages(UIViewController *page);
 
-BOOL DGIsOwnDanmaku(NSString *identifier);
-void DGRememberOwnDanmaku(NSString *identifier,NSString *uid);
 
 void DGSetEmbeddedMessagesVisible(UIViewController *page,BOOL visible);
+
+NSArray *DGNormalizeWebItems(id items);

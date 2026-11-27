@@ -1,10 +1,6 @@
 #import "DGCommon.h"
 #import <MediaPlayer/MediaPlayer.h>
 #import "DGAudio.h"
-static __weak AVPlayer *FeedPlayer;
-static NSDictionary *FeedMetadata;
-static void PublishFeed(void);
-static void RemoteFeedPlayback(BOOL playing){AVPlayer *player=FeedPlayer;if(!player)return;if(playing)[player play];else[player pause];[NSNotificationCenter.defaultCenter postNotificationName:@"DGRemoteFeedPlayback" object:player userInfo:@{@"playing":@(playing)}];PublishFeed();}
 @interface DGMusicSession:NSObject
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) NSDictionary *music;
@@ -27,10 +23,10 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
 @implementation DGMusicSession
 - (instancetype)init{if((self=[super init])){
  MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;__weak DGMusicSession *weak=self;
- [commands.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;if(s.player){[s.player play];[s publish];}else{RemoteFeedPlayback(YES);}});return MPRemoteCommandHandlerStatusSuccess;}];
- [commands.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{if(weak.player)[weak pause];else{RemoteFeedPlayback(NO);}});return MPRemoteCommandHandlerStatusSuccess;}];
- [commands.togglePlayPauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;if(s.player){if(s.player.rate>0)[s pause];else{[s.player play];[s publish];}}else{if(FeedPlayer.rate>0)[FeedPlayer pause];else RemoteFeedPlayback(YES);}});return MPRemoteCommandHandlerStatusSuccess;}];
- [commands.changePlaybackPositionCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){NSTimeInterval position=((MPChangePlaybackPositionCommandEvent *)event).positionTime;dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;AVPlayer *player=s.player?:FeedPlayer;[player seekToTime:CMTimeMakeWithSeconds(position,600) completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{if(s.player==player)[s publish];else if(FeedPlayer==player)PublishFeed();});}];});return MPRemoteCommandHandlerStatusSuccess;}];
+ [commands.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;[s.player play];[s publish];});return MPRemoteCommandHandlerStatusSuccess;}];
+ [commands.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{[weak pause];});return MPRemoteCommandHandlerStatusSuccess;}];
+ [commands.togglePlayPauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;if(s.player.rate>0)[s pause];else{[s.player play];[s publish];}});return MPRemoteCommandHandlerStatusSuccess;}];
+ [commands.changePlaybackPositionCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){NSTimeInterval position=((MPChangePlaybackPositionCommandEvent *)event).positionTime;dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;AVPlayer *player=s.player;[player seekToTime:CMTimeMakeWithSeconds(position,600) completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{if(s.player==player)[s publish];});}];});return MPRemoteCommandHandlerStatusSuccess;}];
  [commands.nextTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{[weak advance:1];});return MPRemoteCommandHandlerStatusSuccess;}];[commands.previousTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event){dispatch_async(dispatch_get_main_queue(),^{[weak advance:-1];});return MPRemoteCommandHandlerStatusSuccess;}];
  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(interruption:) name:AVAudioSessionInterruptionNotification object:nil];
  [UIApplication.sharedApplication beginReceivingRemoteControlEvents];
@@ -71,34 +67,9 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
 void DGMusicPlay(NSDictionary *music){DGMusicSession *session=DGMusicShared();++session.queueGeneration;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session playItem:music];}
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music,NSInteger index,DGBridge *bridge,NSString *cursor,BOOL more){if(!music.count||index<0||index>=(NSInteger)music.count)return;DGMusicSession *session=DGMusicShared();++session.queueGeneration;session.queue=music.copy;session.queueIndex=index;session.queueBridge=bridge;session.queueCursor=cursor?:@"0";session.queueMore=more;session.queueLoading=NO;[session playItem:music[index]];[session loadQueue];}
 void DGMusicPause(void){[DGMusicShared()pause];}
-void DGMusicStop(void){DGMusicSession *session=DGMusicShared();BOOL existed=session.player!=nil;++session.queueGeneration;session.owner=nil;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session.player pause];if(session.clock&&session.player)[session.player removeTimeObserver:session.clock];session.clock=nil;if(session.endToken)[NSNotificationCenter.defaultCenter removeObserver:session.endToken];session.endToken=nil;[session.player replaceCurrentItemWithPlayerItem:nil];session.player=nil;session.music=nil;session.artwork=nil;if(existed)MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;commands.playCommand.enabled=NO;commands.pauseCommand.enabled=NO;commands.togglePlayPauseCommand.enabled=NO;commands.changePlaybackPositionCommand.enabled=NO;commands.nextTrackCommand.enabled=NO;commands.previousTrackCommand.enabled=NO;if(FeedPlayer)PublishFeed();if(existed)[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicStateChanged" object:nil];}
+void DGMusicStop(void){DGMusicSession *session=DGMusicShared();BOOL existed=session.player!=nil;++session.queueGeneration;session.owner=nil;session.queue=nil;session.queueBridge=nil;session.queueMore=NO;session.queueLoading=NO;[session.player pause];if(session.clock&&session.player)[session.player removeTimeObserver:session.clock];session.clock=nil;if(session.endToken)[NSNotificationCenter.defaultCenter removeObserver:session.endToken];session.endToken=nil;[session.player replaceCurrentItemWithPlayerItem:nil];session.player=nil;session.music=nil;session.artwork=nil;if(existed)MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;commands.playCommand.enabled=NO;commands.pauseCommand.enabled=NO;commands.togglePlayPauseCommand.enabled=NO;commands.changePlaybackPositionCommand.enabled=NO;commands.nextTrackCommand.enabled=NO;commands.previousTrackCommand.enabled=NO;if(existed)[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicStateChanged" object:nil];}
 void DGMusicSetOwner(UIViewController *owner){DGMusicShared().owner=owner;}
 void DGMusicStopOwned(UIViewController *owner){if(DGMusicShared().owner==owner)DGMusicStop();}
 AVPlayer *DGMusicPlayer(void){return DGMusicShared().player;}
 BOOL DGMusicMatches(NSString *identifier){return identifier.length&&[Text(String(DGMusicShared().music[@"id"]))isEqualToString:identifier];}
 NSString *DGCurrentMusicID(void){return Text(String(DGMusicShared().music[@"id"]));}
-
-
-static void PublishFeed(void){
- AVPlayer *player=FeedPlayer;if(!player||DGMusicPlayer())return;
- NSMutableDictionary *info=[FeedMetadata mutableCopy];double elapsed=CMTimeGetSeconds(player.currentTime),duration=CMTimeGetSeconds(player.currentItem.duration);
- info[MPNowPlayingInfoPropertyPlaybackRate]=@(player.rate);info[MPNowPlayingInfoPropertyElapsedPlaybackTime]=@(std::isfinite(elapsed)?MAX(0,elapsed):0);
- if(std::isfinite(duration)&&duration>0)info[MPMediaItemPropertyPlaybackDuration]=@(duration);
- MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=info;
- MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;
- commands.playCommand.enabled=YES;commands.pauseCommand.enabled=YES;commands.togglePlayPauseCommand.enabled=YES;commands.changePlaybackPositionCommand.enabled=YES;
-}
-void DGFeedNowPlaying(AVPlayer *player,NSString *title,NSString *author,UIImage *cover){
- if(!player||DGMusicPlayer())return;
- if(FeedPlayer!=player||!FeedMetadata){
-  FeedPlayer=player;NSMutableDictionary *data=[@{MPMediaItemPropertyTitle:title,MPMediaItemPropertyArtist:author,MPNowPlayingInfoPropertyMediaType:@(MPNowPlayingInfoMediaTypeAudio)}mutableCopy];
-  if(cover){CGSize size=cover.size;CGFloat scale=MIN(1,180/MAX(1,MAX(size.width,size.height)));CGSize artworkSize=CGSizeMake(MAX(1,size.width*scale),MAX(1,size.height*scale));UIImage *thumb=[[[UIGraphicsImageRenderer alloc]initWithSize:artworkSize]imageWithActions:^(UIGraphicsImageRendererContext *context){[cover drawInRect:(CGRect){CGPointZero,artworkSize}];}];data[MPMediaItemPropertyArtwork]=[[MPMediaItemArtwork alloc]initWithBoundsSize:thumb.size requestHandler:^UIImage *(CGSize requested){return thumb;}];}
-  FeedMetadata=data;
- }
- PublishFeed();
-}
-void DGFeedNowPlayingClear(AVPlayer *player){
- if(!player||FeedPlayer!=player)return;FeedPlayer=nil;FeedMetadata=nil;if(DGMusicPlayer())return;
- MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;
- commands.playCommand.enabled=NO;commands.pauseCommand.enabled=NO;commands.togglePlayPauseCommand.enabled=NO;commands.changePlaybackPositionCommand.enabled=NO;
-}

@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.10.0
+抖音极简版 / DouGlass 0.11.0
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -16,4 +16,4 @@ the user controls pagination and completes any verification themselves.
 Comment sorting applies only to the comments already loaded in the client.
 Messages use the official
 website transport with the same local login session, rendered by native UI.
-Comments are read-only. Danmaku is submitted only on an explicit send action.
+Comments are read-only. Danmaku in the app is read-only.

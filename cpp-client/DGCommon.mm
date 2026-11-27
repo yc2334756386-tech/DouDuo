@@ -12,7 +12,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 - (void)setRenderedImage:(UIImage *)image{[super setImage:image];}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
-    dispatch_once(&once, ^{ cache = [NSCache new]; cache.totalCostLimit = 32 * 1024 * 1024; });
+    dispatch_once(&once, ^{ cache = [NSCache new]; cache.totalCostLimit = 16 * 1024 * 1024; });
     return cache;
 }
 + (void)purgeCache{[DGImage.cache removeAllObjects];}
@@ -20,7 +20,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     if ([_source isEqualToString:url]) return;
     NSUInteger load=++_loadGeneration;[_task cancel]; _source = url.copy;self.image = nil;
     if (!url.length) return;
-    NSUInteger maxPixels=self.maximumPixelSize?:1440;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
+    NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached; return; }
     NSURL *address = [NSURL URLWithString:url];
@@ -42,7 +42,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         size_t frames=CGImageSourceGetCount(source);
         if(frames>1 && data.length<12*1024*1024){
             NSMutableArray<UIImage *> *animation=[NSMutableArray array];double duration=0;
-            size_t stride=MAX((size_t)1,(frames+23)/24);
+            size_t stride=MAX((size_t)1,(frames+11)/12);
             for(size_t index=0;index<frames;index+=stride){
                 CGImageRef frame=CGImageSourceCreateThumbnailAtIndex(source,index,(__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
 (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@320});

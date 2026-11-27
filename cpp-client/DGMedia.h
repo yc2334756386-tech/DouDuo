@@ -13,9 +13,11 @@
 - (void)display:(const Work &)work;
 - (void)active:(BOOL)active;
 - (void)compact:(BOOL)compact;
+- (void)cleanScreen:(BOOL)clean;
 - (void)mediaHeight:(CGFloat)height;
 - (void)interactiveMediaHeight:(CGFloat)height;
-- (void)backgroundAudio:(BOOL)enabled;
+- (void)enterBackgroundKeepingPlayback:(BOOL)keep audioOnly:(BOOL)audioOnly;
+- (void)leaveBackground;
 - (NSString *)selectedImageURL;
 - (void)releaseUnusedResources;
 @end
@@ -23,3 +25,5 @@ void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);
 
 void DGTrimPlayers(void);
+
+BOOL DGAutomaticPiPAvailable(void);

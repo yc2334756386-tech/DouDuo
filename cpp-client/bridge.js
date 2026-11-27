@@ -85,29 +85,13 @@
     if(item.cell_room){let room=item.cell_room.rawdata;try{if(typeof room==='string')room=JSON.parse(room);}catch(_){room=null;}room=room||{};const owner=room.owner||{},stream=room.stream_url||{},hls=stream.hls_pull_url_map||{};const play=hls.FULL_HD1||hls.HD1||hls.SD1||stream.hls_pull_url||Object.values(hls)[0]||'';return {id:'live_'+String(room.id_str||room.id||item.aweme_id||''),caption:room.title||item.desc||'直播中',author:owner.nickname||'主播',authorID:owner.sec_uid||'',authorUID:id(owner.id_str||owner.id),avatar:first(owner.avatar_thumb),cover:first(room.cover),play,alternate:'',images:[],duration:0,comments:0,likes:0,collects:0,isLive:true,isAd};}
     const video=item.video||{},stats=item.statistics||{},author=item.author||{},sound=item.music||{};
     const images=(item.images||(item.image_post_info||{}).images||[]).map(image=>first(image.display_image)||first(image)).filter(Boolean);
-    const rates=(video.bit_rate||[]).filter(rate=>rate&&(!rate.format||rate.format==='mp4')&&first(rate.play_addr));
-    const dimension=rate=>Math.min(Number((rate.play_addr||{}).width||video.width||0),Number((rate.play_addr||{}).height||video.height||0));
-    const avc=rates.filter(rate=>!rate.is_h265&&!/h265|hevc/i.test(rate.gear_name||''));
-    const candidates=avc.length?avc:rates;
-    candidates.sort((a,b)=>{
-      const score=rate=>(dimension(rate)>=540?0:100000000)+Math.abs(Number(rate.bit_rate||1200000)-1200000);
-      return score(a)-score(b);
-    });
-    const selected=candidates[0];
-    const selectedURLs=selected?selected.play_addr.url_list||[]:(video.play_addr||{}).url_list||[];
-    const allURLs=[...selectedURLs,...((video.play_addr||{}).url_list||[]),...rates.flatMap(rate=>rate.play_addr.url_list||[])];
-    const direct=selectedURLs.find(url=>/^https?:\/\//.test(url)&&!url.includes('/aweme/v1/play/'));
-    const redirect=selectedURLs.find(url=>url.includes('/aweme/v1/play/'))||allURLs.find(url=>url.includes('/aweme/v1/play/'));
-    const primary=redirect||direct||selectedURLs[0]||'';
-    const alternate=direct&&direct!==primary?direct:allURLs.find(url=>url!==primary)||'';
-    const fps=rate=>Math.max(0,Number(rate.FPS||rate.fps||(rate.play_addr||{}).fps||0));
-    const rateOrder=(a,b)=>dimension(b)-dimension(a)||Number(b.bit_rate||0)-Number(a.bit_rate||0);
-    const quality=[...candidates].sort(rateOrder)[0];
-    const knownFPS=candidates.filter(value=>fps(value)>0);
-    const smooth=[...knownFPS].sort((a,b)=>fps(b)-fps(a)||rateOrder(a,b))[0];
-    const qualityFPS=[...knownFPS].filter(value=>!smooth||fps(value)>=fps(smooth)).sort(rateOrder)[0]||quality;
-    const variant=rate=>{if(!rate)return null;const urls=(rate.play_addr||{}).url_list||[];const direct=urls.find(url=>/^https?:\/\//.test(url)&&!url.includes('/aweme/v1/play/')),redirect=urls.find(url=>url.includes('/aweme/v1/play/'));const play=redirect||direct||first(rate.play_addr);return play?{play,alternate:direct&&direct!==play?direct:urls.find(url=>url!==play)||'',fps:fps(rate),shortSide:dimension(rate)}:null;};
-    const variants={quality:variant(quality),smooth:variant(smooth),qualityFPS:variant(qualityFPS)};
+    const addresses=value=>Array.isArray(value?.url_list)&&value.url_list.length?value.url_list:first(value)?[first(value)]:[];
+    const candidates=(Array.isArray(video.bit_rate)?video.bit_rate:[]).filter(rate=>rate&&(!rate.format||rate.format==='mp4')&&addresses(rate.play_addr).length).slice(0,32).map(rate=>({
+      urls:addresses(rate.play_addr).slice(0,12),
+      shortSide:Math.min(Number(rate.play_addr?.width||video.width||0),Number(rate.play_addr?.height||video.height||0)),
+      bitrate:Number(rate.bit_rate||0),fps:Number(rate.FPS||rate.fps||rate.play_addr?.fps||0),avc:!rate.is_h265&&!/h265|hevc/i.test(rate.gear_name||'')
+    }));
+    const mediaSources={urls:addresses(video.play_addr).slice(0,12),candidates};
     const rawIP=ipFrom(author)||ipFrom(item);
     // Human-readable work publication fields are not proof of a person's precise IP city.
     const ip=rawIP.replace(/^IP属地[:：\s]*/,'');
@@ -115,7 +99,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',play:primary,alternate,variants,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -123,7 +107,7 @@
     for(const name of new Set(String(item.text||'').match(/\[[^\]\r\n]{1,14}\]/g)||[]))if(emojiCatalog[name])inline.push({name,url:emojiCatalog[name]});
     return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),liked:!!item.user_digged,likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
-  const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length));
+  const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length||item.mediaSources?.urls.length||item.mediaSources?.candidates.length));
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
   const users=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(entry=>user(entry.user_info||entry.user||entry)).filter(value=>value.sec);
   window.DouGlass={version:3,normalizeWorks:works,normalizeUsers:users,async request(operation,params={}){
@@ -214,10 +198,7 @@
       if(operation==='danmaku'){
         const duration=Math.max(15000,Number(params.duration||30000)),from=Math.max(0,Number(params.from||0)),to=Math.min(duration,Math.max(from+1,Number(params.to||from+30000)));
         const data=await get('/aweme/v1/web/danmaku/get_v2/',{app_name:'aweme',format:'json',group_id:params.id,item_id:params.id,start_time:String(from),end_time:String(to),duration:String(duration)});
-        await Promise.race([loadEmojis(),delay(500)]);const items=(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>{const identifier=id(value.danmaku_id||value.id),person=value.user||value.user_info||{},uid=id(value.user_id||value.uid||person.uid);return {id:identifier,text:value.text,offset:Number(value.offset_time||0)/1000,isMine:Number(value.is_self??value.is_me??person.is_me)===1||!!(selfUID&&uid===selfUID),emoticons:[...new Set(String(value.text).match(/\[[^\]\r\n]{1,14}\]/g)||[])].filter(name=>emojiCatalog[name]).map(name=>({name,url:emojiCatalog[name]}))};});items.sort((a,b)=>a.offset-b.offset);return {items};
-      }
-      if(operation==='danmakuSend'){
-        await writeReady();const text=String(params.text||'').trim();if(!text)throw new Error('请输入弹幕内容');const data=await post('/aweme/v1/web/danmaku/post_v2/',{item_id:params.id,offset_time:String(Math.max(0,Math.round(Number(params.offset||0)*1000))),text,user_id:'',enter_from:'video_detail',previous_page:'video_detail'},'',{strict:true});const value=data.danmaku||data.data||{};const identifier=id(value.danmaku_id||data.danmaku_id);if(!identifier)throw new Error('平台未确认弹幕，先刷新查看，避免重复发送');return {ok:true,id:identifier,uid:selfUID};
+        await Promise.race([loadEmojis(),delay(500)]);const items=(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>{const identifier=id(value.danmaku_id||value.id);return {id:identifier,text:value.text,offset:Number(value.offset_time||0)/1000,emoticons:[...new Set(String(value.text).match(/\[[^\]\r\n]{1,14}\]/g)||[])].filter(name=>emojiCatalog[name]).map(name=>({name,url:emojiCatalog[name]}))};});items.sort((a,b)=>a.offset-b.offset);return {items};
       }
       if(operation==='digg'||operation==='favorite'){
         await writeReady();const value=params.add===true||params.add===1||params.add==='1'?'1':'0';

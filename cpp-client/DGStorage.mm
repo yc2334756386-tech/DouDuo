@@ -56,7 +56,8 @@ void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
         }] resume];
     }];
 }
-static void DGDownloadAudioConfirmed(UIViewController *host,NSString *url,NSString *name) {
+void DGSaveAudioDirect(UIViewController *host,NSString *url,NSString *name) {
+    if(!host||host.presentedViewController)return;
     if(!url.length){DGToast(host,@"平台未提供可保存的原声地址");return;}
     DGHaptic();
     DGToast(host,@"正在下载原声…");
@@ -75,7 +76,7 @@ static void DGDownloadAudioConfirmed(UIViewController *host,NSString *url,NSStri
 }
 void DGSaveAudio(UIViewController *host,NSString *url,NSString *name){
     if(!host||host.presentedViewController)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"下载原声？" message:name.length?name:@"下载后可保存到文件或分享" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGDownloadAudioConfirmed(host,url,name);}]];[host presentViewController:alert animated:YES completion:nil];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认下载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGSaveAudioDirect(host,url,name);}]];[host presentViewController:alert animated:YES completion:nil];
 }
 void DGConfirmTextCopy(UIViewController *host,NSString *text,NSString *title,NSString *success){
     if(!host||host.presentedViewController||!text.length)return;NSString *preview=text.length>180?[[text substringToIndex:180]stringByAppendingString:@"…"]:text;UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:preview preferredStyle:UIAlertControllerStyleAlert];

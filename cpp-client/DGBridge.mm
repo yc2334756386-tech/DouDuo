@@ -1,4 +1,4 @@
-#import "DGBridge.h"
+#import "DGCommon.h"
 #import "DGSession.h"
 #import "DGVerification.h"
 void DGReadMusicPage(DGBridge *,NSString *,NSString *,DGResult);
@@ -8,7 +8,7 @@ NSString *DGUserAgent(void) {
 }
 @implementation DGBridge {
     WKWebView *_web;
-    BOOL _ready, _started;
+    BOOL _ready, _started, _webReloadPending;
     NSUInteger _generation;
     NSMutableArray *_waiters;
     NSString *_script, *_failure;
@@ -26,13 +26,13 @@ NSString *DGUserAgent(void) {
         configuration.allowsInlineMediaPlayback = YES;
         configuration.allowsPictureInPictureMediaPlayback = NO;
         configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
-        NSString *quiet = @"(()=>{HTMLMediaElement.prototype.play=function(){this.muted=true;return Promise.resolve()};let pending=false;const silence=()=>{pending=false;document.querySelectorAll('video,audio').forEach(v=>{v.muted=true;v.pause()})};new MutationObserver(()=>{if(!pending){pending=true;setTimeout(silence,250)}}).observe(document,{childList:true,subtree:true})})();";
-        [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:quiet injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
         [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:_script injectionTime:WKUserScriptInjectionTimeAtDocumentEnd forMainFrameOnly:YES]];
         _web = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1280, 900) configuration:configuration];
         _web.customUserAgent = DGUserAgent();
         _web.navigationDelegate = self;
         _web.userInteractionEnabled = NO;
+        [_web setAllMediaPlaybackSuspended:YES completionHandler:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationActive) name:UIApplicationDidBecomeActiveNotification object:nil];
         NSString *rules = @"[{\"trigger\":{\"url-filter\":\".*\",\"resource-type\":[\"media\"]},\"action\":{\"type\":\"block\"}}]";
         __weak DGBridge *weakSelf = self;
         [WKContentRuleListStore.defaultStore compileContentRuleListForIdentifier:@"douglass-signer-media-v2" encodedContentRuleList:rules completionHandler:^(WKContentRuleList *list, NSError *error) {
@@ -97,7 +97,13 @@ NSString *DGUserAgent(void) {
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     [self webView:webView didFailNavigation:navigation withError:error];
 }
-- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView { [self reload]; }
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    _ready=NO;
+    if(UIApplication.sharedApplication.applicationState==UIApplicationStateActive)[self reload];
+    else _webReloadPending=YES;
+}
+- (void)applicationActive {if(_webReloadPending){_webReloadPending=NO;[self reload];}}
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSString *scheme = action.request.URL.scheme.lowercaseString;
     decisionHandler(([@[@"http", @"https", @"about"] containsObject:scheme]) ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
@@ -106,11 +112,9 @@ NSString *DGUserAgent(void) {
     if([operation isEqualToString:@"musicWorks"]&&[parameters[@"cursor"]hasPrefix:@"web:"]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],completion);return;}
     if (_failure) { completion(nil, _failure); return; }
     NSUInteger generation = _generation;
-    __block BOOL delivered = NO;
+    __block DGResult pending=[completion copy];
     void (^deliver)(NSDictionary *, NSString *) = ^(NSDictionary *result, NSString *error) {
-        if (delivered) return;
-        delivered = YES;
-        completion(result, error);
+        DGResult callback=pending;pending=nil;if(callback)callback(result,error);
     };
     // Includes queueing and JS execution. A stuck page may not strand a screen forever.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ([operation isEqualToString:@"musicWorks"]?55:32) * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -119,7 +123,7 @@ NSString *DGUserAgent(void) {
     __weak DGBridge *weakSelf = self;
     void (^execute)(NSString *) = ^(NSString *error) {
         DGBridge *self = weakSelf;
-        if (delivered) return;
+        if (!pending) return;
         if (!self || error) { deliver(nil, error ?: @"网页已关闭"); return; }
         if (generation != self->_generation) { deliver(nil, @"账号状态已变化，请刷新"); return; }
         [self->_web callAsyncJavaScript:@"return await window.DouGlass.request(operation, params);"
@@ -128,6 +132,7 @@ NSString *DGUserAgent(void) {
                 DGBridge *self = weakSelf;
                 if (!self || generation != self->_generation) { deliver(nil, @"账号状态已变化，请刷新"); return; }
                 NSDictionary *result = [value isKindOfClass:NSDictionary.class] ? value : nil;
+                if([result[@"items"]isKindOfClass:NSArray.class]){NSMutableDictionary *native=[result mutableCopy];native[@"items"]=DGNormalizeWebItems(result[@"items"]);result=native;}
                 NSString *message = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
                 if (failure || !result) message = @"网页请求未完成，请刷新或在登录网页完成验证";
                 if([operation isEqualToString:@"musicWorks"]&&(message||!([result[@"items"]isKindOfClass:NSArray.class]&&[result[@"items"]count]))&&![result[@"verificationRequired"]boolValue]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],deliver);return;}

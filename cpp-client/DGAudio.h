@@ -6,3 +6,5 @@ void DGRepairPlayerAudio(AVPlayer *player);
 NSDictionary *DGAudioSnapshot(void);
 UIViewController *DGMakeEQSettings(void);
 void DGSetAudioMetering(BOOL enabled);
+
+void DGSetAudioRuntimeForeground(BOOL foreground);
