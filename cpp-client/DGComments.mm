@@ -62,7 +62,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 }
 - (void)addImage:(NSString *)url sticker:(BOOL)sticker nested:(BOOL)nested {
     if(!url.length)return;
-    DGCommentImage *image=[DGCommentImage new]; image.sourceURL=url;
+    DGCommentImage *image=[DGCommentImage new]; image.sourceURL=url;image.showsLoadingIndicator=YES;
     image.contentMode=UIViewContentModeScaleAspectFit; image.clipsToBounds=YES; image.layer.cornerRadius=sticker?0:12;
     image.userInteractionEnabled=YES; image.isAccessibilityElement=YES;
     image.accessibilityTraits=UIAccessibilityTraitButton|UIAccessibilityTraitImage;

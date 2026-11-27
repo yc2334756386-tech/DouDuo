@@ -4,7 +4,26 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     NSURLSessionDataTask *_task;
     NSString *_source;
     NSUInteger _loadGeneration;
+    BOOL _loading,_loadFailed,_showsLoadingIndicator,_previewLoading;
+    UIActivityIndicatorView *_loadingSpinner;
+    UILabel *_failureLabel;
 }
+- (BOOL)showsLoadingIndicator{return _showsLoadingIndicator;}
+- (void)setShowsLoadingIndicator:(BOOL)value{_showsLoadingIndicator=value;[self updateLoadingState];}
+- (BOOL)previewLoading{return _previewLoading;}
+- (void)setPreviewLoading:(BOOL)value{_previewLoading=value;[self updateLoadingState];}
+- (void)updateLoadingState{
+    if(_showsLoadingIndicator&&!_loadingSpinner){
+        _loadingSpinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_loadingSpinner.color=UIColor.secondaryLabelColor;_loadingSpinner.hidesWhenStopped=YES;_loadingSpinner.userInteractionEnabled=NO;[self addSubview:_loadingSpinner];
+        _failureLabel=Label(12,UIFontWeightRegular);_failureLabel.text=@"加载失败";_failureLabel.textColor=UIColor.secondaryLabelColor;_failureLabel.textAlignment=NSTextAlignmentCenter;_failureLabel.userInteractionEnabled=NO;[self addSubview:_failureLabel];[self setNeedsLayout];
+    }
+    BOOL loading=_showsLoadingIndicator&&(_loading||_previewLoading);
+    if(loading&&self.window)[_loadingSpinner startAnimating];else [_loadingSpinner stopAnimating];
+    _failureLabel.hidden=!_showsLoadingIndicator||loading||!_loadFailed;
+    if(_showsLoadingIndicator)self.accessibilityValue=loading?@"加载中":_loadFailed?@"加载失败":nil;
+}
+- (void)layoutSubviews{[super layoutSubviews];_loadingSpinner.center=CGPointMake(self.bounds.size.width/2,self.bounds.size.height/2);_failureLabel.frame=CGRectMake(4,(self.bounds.size.height-22)/2,MAX(0,self.bounds.size.width-8),22);}
+- (void)didMoveToWindow{[super didMoveToWindow];[self updateLoadingState];}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
     dispatch_once(&once, ^{ cache = [NSCache new]; cache.totalCostLimit = 16 * 1024 * 1024; });
@@ -13,21 +32,23 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 + (void)purgeCache{[DGImage.cache removeAllObjects];}
 - (void)remote:(NSString *)url {
     if ([_source isEqualToString:url]) return;
-    NSUInteger load=++_loadGeneration;[_task cancel];_task=nil; _source = url.copy;self.image = nil;
+    NSUInteger load=++_loadGeneration;[_task cancel];_task=nil; _source = url.copy;self.image = nil;_loading=NO;_loadFailed=NO;[self updateLoadingState];
     if (!url.length) return;
     NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached; return; }
     NSURL *address = [NSURL URLWithString:url];
-    if (!address) return;
+    if (!address){_loadFailed=YES;[self updateLoadingState];return;}
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:address cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:20];
     [request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     __weak DGImage *weakSelf = self;
+    void (^finish)(UIImage *)=^(UIImage *image){dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weakSelf;if(!self||load!=self->_loadGeneration||![self->_source isEqualToString:url])return;self->_task=nil;self->_loading=NO;self->_loadFailed=image==nil;self.image=image;[self updateLoadingState];});};
+    _loading=YES;[self updateLoadingState];
     _task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (!data || error) return;
+        if (!data.length || error||([response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode>=400)){finish(nil);return;}
         CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
-        if (!source) return;
+        if (!source){finish(nil);return;}
         CGImageRef thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)@{
             (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
 
@@ -52,9 +73,9 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         }
         if (thumbnail) CGImageRelease(thumbnail);
         CFRelease(source);
-        if (!image) return;
+        if (!image){finish(nil);return;}
         [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
-        dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && load==self->_loadGeneration && [self->_source isEqualToString:url]){self->_task=nil;self.image=image;} });
+        finish(image);
     }];
     [_task resume];
 }

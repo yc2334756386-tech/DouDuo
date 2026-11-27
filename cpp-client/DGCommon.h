@@ -86,6 +86,8 @@ static inline AVURLAsset *Asset(NSString *url) {
 
 @interface DGImage : UIImageView
 @property(nonatomic) NSUInteger maximumPixelSize;
+@property(nonatomic) BOOL showsLoadingIndicator;
+@property(nonatomic) BOOL previewLoading;
 - (void)remote:(NSString *)url;
 + (void)purgeCache;
 @end
