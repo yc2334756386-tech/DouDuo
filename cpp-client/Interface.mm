@@ -36,7 +36,7 @@
     UIRefreshControl *_pull;
     DGComments *_comments,*_retainedComments;NSString *_retainedCommentWorkID;
     UIView *_commentHost;CGFloat _commentDragOffset;
-    UIVisualEffectView *_cleanKnob;UIButton *_cleanKnobButton;BOOL _cleanScreen;UIViewController *_messageChannel;BOOL _showingMessages;UIVisualEffectView *_messageBackGlass,*_messageRefreshGlass;
+    UIVisualEffectView *_cleanKnob;UIButton *_cleanKnobButton;BOOL _cleanScreen;UIViewController *_messageChannel;BOOL _showingMessages;UIVisualEffectView *_messageRefreshGlass;
     NSDictionary *_profile;NSString *_messageScope;
     NSString *_operation,*_cursor;
     BOOL _loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
@@ -107,7 +107,7 @@
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
  if(!CGSizeEqualToSize(_collection.bounds.size,size)){_relayout=YES;_collection.frame=self.view.bounds;[_collection.collectionViewLayout invalidateLayout];[_collection layoutIfNeeded];[_collection setContentOffset:CGPointMake(0,MAX(0,_current)*size.height) animated:NO];_relayout=NO;}
- _messageChannel.view.frame=CGRectMake(0,top+62,size.width,MAX(0,size.height-top-62));_messageBackGlass.frame=CGRectMake(14,top+12,40,40);_messageRefreshGlass.frame=CGRectMake(size.width-54,top+12,40,40);
+ _messageChannel.view.frame=CGRectMake(0,top+62,size.width,MAX(0,size.height-top-62));_messageRefreshGlass.frame=CGRectMake(size.width-54,top+12,40,40);
  CGFloat panel=_comments?MIN(size.height*.64,size.height-top-150):0;CGFloat media=size.height-panel;
  _commentHost.bounds=CGRectMake(0,0,size.width,MAX(0,panel));_commentHost.center=CGPointMake(size.width/2,media+MAX(0,panel)/2);_comments.view.frame=_commentHost.bounds;
  CGFloat w=MIN(size.width-136,330);_bar.frame=CGRectMake((size.width-w)/2,top+7,w,48);_account.frame=CGRectMake(14,top+7,44,48);_navigationTabs.frame=CGRectMake(5,6,w-10,36);CGFloat refreshX=CGRectGetMinX(_bar.frame)+5+(MAX(0,MIN(1,_navigationTabs.selectedSegmentIndex))+.5)*(w-10)/3;_recommendRefreshGlass.frame=CGRectMake(refreshX-17,top+61,34,34);_recommendRefreshSpinner.center=CGPointMake(17,17);_search.frame=CGRectMake(size.width-58,top+7,44,48);
@@ -494,15 +494,14 @@
  __weak DGFeed *weak=self;
  if(!_messageChannel||![_messageScope isEqualToString:DGCurrentFeedScope()]){_messageChannel=DGMakeEmbeddedMessages(_bridge,^(UIViewController *page){[weak presentPage:page];});_messageScope=DGCurrentFeedScope();}
  [self addChildViewController:_messageChannel];[self.view insertSubview:_messageChannel.view belowSubview:_bar];[_messageChannel didMoveToParentViewController:self];DGSetEmbeddedMessagesVisible(_messageChannel,YES);
- _messageBackGlass=Glass(20);UIButton *back=Symbol(@"chevron.left",self,@selector(hideMessages));back.accessibilityLabel=@"返回原频道";back.frame=CGRectMake(0,0,40,40);[_messageBackGlass.contentView addSubview:back];[self.view addSubview:_messageBackGlass];
- _messageRefreshGlass=Glass(20);UIButton *refresh=Symbol(@"arrow.clockwise",self,@selector(refreshMessages));refresh.accessibilityLabel=@"刷新信息";refresh.frame=back.frame;[_messageRefreshGlass.contentView addSubview:refresh];[self.view addSubview:_messageRefreshGlass];[self syncCleanScreen];
+ _messageRefreshGlass=Glass(20);UIButton *refresh=Symbol(@"arrow.clockwise",self,@selector(refreshMessages));refresh.accessibilityLabel=@"刷新信息";refresh.frame=CGRectMake(0,0,40,40);[_messageRefreshGlass.contentView addSubview:refresh];[self.view addSubview:_messageRefreshGlass];[self syncCleanScreen];
  [self.view setNeedsLayout];
 }
 - (void)refreshMessages{DGRefreshEmbeddedMessages(_messageChannel);}
 - (void)hideMessages{
  if(!_showingMessages)return;_showingMessages=NO;_bar.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];
  DGSetEmbeddedMessagesVisible(_messageChannel,NO);[_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];
- [_messageBackGlass removeFromSuperview];_messageBackGlass=nil;[_messageRefreshGlass removeFromSuperview];_messageRefreshGlass=nil;
+ [_messageRefreshGlass removeFromSuperview];_messageRefreshGlass=nil;
  _collection.hidden=NO;_empty.hidden=!_feed.works.empty();_account.hidden=NO;_search.hidden=NO;
  _navigationTabs.selectedSegmentIndex=[_operation isEqualToString:@"followFeed"]?0:1;[self syncCleanScreen];[self activate];
 }
