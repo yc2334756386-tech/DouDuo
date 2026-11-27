@@ -35,7 +35,7 @@
     DGComments *_comments,*_retainedComments;NSString *_retainedCommentWorkID;
     UIView *_commentHost;CGFloat _commentDragOffset;
     UIVisualEffectView *_cleanKnob;UIButton *_cleanKnobButton;BOOL _cleanScreen;UIViewController *_messageChannel;BOOL _showingMessages;UIVisualEffectView *_messageBackGlass,*_messageRefreshGlass;
-    NSDictionary *_profile;
+    NSDictionary *_profile;NSString *_messageScope;
     NSString *_operation,*_cursor;
     BOOL _loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
@@ -323,7 +323,7 @@
   DGRecordViewed(current);[self warmAfterSettling];
  };if(_ownsBridge)cell.checkpointAction=^{DGFeed *self=weakSelf;if(self&&!self->_inactive&&CACurrentMediaTime()-self->_checkpointAttemptAt>=15)[self savePlaybackCheckpoint];};
  cell.advanceAction=^BOOL{return [weakSelf advanceWork];};cell.commentsAction=^{[weakSelf showComments:workID];};cell.profileAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,workID)];};
-    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"contextWork":record})];};return cell;
+    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"shareURL":record[@"musicShareURL"]?:@"",@"contextWork":record})];};return cell;
 }
 - (void)activate {
  if(_relayout||!_foreground||_inactive||_pagingMotion)return;
@@ -457,7 +457,7 @@
  for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];
  _collection.hidden=YES;_empty.hidden=YES;_account.hidden=YES;_search.hidden=YES;
  __weak DGFeed *weak=self;
- _messageChannel=DGMakeEmbeddedMessages(_bridge,^(UIViewController *page){[weak presentPage:page];});
+ if(!_messageChannel||![_messageScope isEqualToString:DGCurrentFeedScope()]){_messageChannel=DGMakeEmbeddedMessages(_bridge,^(UIViewController *page){[weak presentPage:page];});_messageScope=DGCurrentFeedScope();}
  [self addChildViewController:_messageChannel];[self.view insertSubview:_messageChannel.view belowSubview:_bar];[_messageChannel didMoveToParentViewController:self];DGSetEmbeddedMessagesVisible(_messageChannel,YES);
  _messageBackGlass=Glass(20);UIButton *back=Symbol(@"chevron.left",self,@selector(hideMessages));back.accessibilityLabel=@"返回原频道";back.frame=CGRectMake(0,0,40,40);[_messageBackGlass.contentView addSubview:back];[self.view addSubview:_messageBackGlass];
  _messageRefreshGlass=Glass(20);UIButton *refresh=Symbol(@"arrow.clockwise",self,@selector(refreshMessages));refresh.accessibilityLabel=@"刷新信息";refresh.frame=back.frame;[_messageRefreshGlass.contentView addSubview:refresh];[self.view addSubview:_messageRefreshGlass];[self syncCleanScreen];
@@ -466,7 +466,7 @@
 - (void)refreshMessages{DGRefreshEmbeddedMessages(_messageChannel);}
 - (void)hideMessages{
  if(!_showingMessages)return;_showingMessages=NO;_bar.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];
- DGSetEmbeddedMessagesVisible(_messageChannel,NO);[_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];_messageChannel=nil;
+ DGSetEmbeddedMessagesVisible(_messageChannel,NO);[_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];
  [_messageBackGlass removeFromSuperview];_messageBackGlass=nil;[_messageRefreshGlass removeFromSuperview];_messageRefreshGlass=nil;
  _collection.hidden=NO;_empty.hidden=!_feed.works.empty();_account.hidden=NO;_search.hidden=NO;
  _navigationTabs.selectedSegmentIndex=[_operation isEqualToString:@"followFeed"]?0:1;[self syncCleanScreen];[self activate];
@@ -480,7 +480,7 @@
     [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
 - (void)openLogin{if(self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];DGLogin *login=[DGLogin new];__weak DGFeed *weakSelf=self;login.finished=^{[weakSelf sessionChanged:YES];};UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:login];DGConfigurePageTransition(nav);[self presentViewController:nav animated:YES completion:nil];}
-- (void)sessionChanged:(BOOL)reload{DGClearNavigationResume();_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
+- (void)sessionChanged:(BOOL)reload{DGClearNavigationResume();_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
 @end
 UIViewController *DGMakeFeedController(void){return [DGFeed new];}
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works,NSInteger selected,DGBridge *bridge){return [[DGFeed alloc] initWithRecords:works selected:selected bridge:bridge];}

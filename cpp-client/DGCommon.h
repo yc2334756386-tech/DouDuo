@@ -108,7 +108,7 @@ void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, 
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 void DGConfirmAvatarSave(UIViewController *host, NSString *url);
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
-UIViewController *DGMakeMusicWebPage(NSString *identifier, NSString *keyword, void (^imported)(NSArray<NSDictionary *> *items));
+UIViewController *DGMakeMusicWebPage(NSString *identifier, NSString *shareURL, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
 UIViewController *DGMakeActions(DGBridge *bridge, NSDictionary *work);
 BOOL DGOptionsKeepsPlayback(UIViewController *controller);

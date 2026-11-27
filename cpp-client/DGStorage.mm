@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#import "DGMedia.h"
 
 void DGToast(UIViewController *host, NSString *message) {
     if (!host || !message.length) return;
@@ -6,7 +7,8 @@ void DGToast(UIViewController *host, NSString *message) {
         UILabel *label=Label(13,UIFontWeightMedium);label.text=message;label.numberOfLines=0;label.textAlignment=NSTextAlignmentCenter;
         UIVisualEffectView *glass=Glass(18); [glass.contentView addSubview:label]; [host.view addSubview:glass];
         CGFloat w=MIN(host.view.bounds.size.width-40,360);CGSize size=[label sizeThatFits:CGSizeMake(w-28,150)];
-        glass.frame=CGRectMake((host.view.bounds.size.width-w)/2,MAX(90,host.view.safeAreaInsets.top+76),w,size.height+28);
+        CGFloat top=MAX(MAX(90,host.view.safeAreaInsets.top+76),DGFeedNotificationTop(host));
+        glass.frame=CGRectMake((host.view.bounds.size.width-w)/2,top,w,size.height+28);
         label.frame=CGRectInset(glass.bounds,14,14);glass.alpha=0;
         [UIView animateWithDuration:0.2 animations:^{glass.alpha=1;}];
         [UIView animateWithDuration:0.25 delay:2.8 options:0 animations:^{glass.alpha=0;} completion:^(BOOL done){[glass removeFromSuperview];}];

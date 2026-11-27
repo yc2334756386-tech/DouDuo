@@ -80,7 +80,7 @@
   const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.id)||id(value?.music_id)||id(value?.mid);
   const music=value=>{
     value=value||{};
-    return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),duration:Number(value.duration||0)};
+    return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),shareURL:first(value.share_info?.share_url),duration:Number(value.duration||0)};
   };
   const work=item=>{
     const isAd=!!(item.is_ads||item.is_ad||(item.raw_ad_data&&Object.keys(item.raw_ad_data).length));
@@ -101,7 +101,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),contentKey:typeof video.play_addr?.uri==='string'&&!/^(?:https?:)?\//i.test(video.play_addr.uri)?video.play_addr.uri:'',caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:musicIdentifier(sound)||id(item.music_id_str)||id(item.music_id),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),contentKey:typeof video.play_addr?.uri==='string'&&!/^(?:https?:)?\//i.test(video.play_addr.uri)?video.play_addr.uri:'',caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:musicIdentifier(sound)||id(item.music_id_str)||id(item.music_id),musicTitle:sound.title||'原声',musicShareURL:first(sound.share_info?.share_url),musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -194,27 +194,13 @@
       if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return musicPage(data,params.id);}
       if(operation==='musicWorks'){
         const identifier=id(params.id);if(!identifier)throw new Error('平台未提供有效原声标识');
-        if(!cursor.startsWith('search:')){
-          try{
-            const data=await get('/aweme/v1/web/music/aweme/',{music_id:identifier,cursor,count:'10',scene:'1'},{timeout:4000});
-            const result=musicPage(data,identifier);
-            if(result.items.length)return Object.assign(result,{lookup:'official'});
-          }catch(error){if(error.verificationRequired)throw error;}
+        try{
+          const data=await get('/aweme/v1/web/music/aweme/',{music_id:identifier,cursor:/^\d+$/.test(cursor)?cursor:'0',count:'12'},{timeout:8000});
+          return Object.assign(musicPage(data,identifier),{lookup:'official'});
+        }catch(error){
+          if(error.verificationRequired)throw error;
+          throw new Error('平台未返回原声作品列表，请打开该原声的官网页面；已识别的作品会保留');
         }
-        const title=String(params.title||'').trim(),author=String(params.author||'').trim();
-        if(!title||/^(?:原声|作品原声)$/.test(title))throw new Error('平台原声列表暂不可用，且未提供可搜索的音乐名称');
-        const keyword=[title,author&&!title.includes(author)?author:''].filter(Boolean).join(' ');
-        let offset=cursor.startsWith('search:')?cursor.slice(7):'0',more=false,scanned=0;
-        const found=new Map();
-        for(let pageIndex=0;pageIndex<3;pageIndex++){
-          const data=await get('/aweme/v1/web/search/item/',{search_channel:'aweme_video_web',keyword,search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset,count:'24',need_filter_settings:offset==='0'?'1':'0',list_type:'single'},{timeout:6500});
-          const list=data.data||data.aweme_list||[],normalized=works(list);scanned+=normalized.length;
-          for(const item of normalized)if(item.musicID===identifier)found.set(item.id,item);
-          const next=id(data.cursor??data.offset),advance=next&&Number(next)>Number(offset);
-          more=!!data.has_more&&!!advance;offset=advance?next:offset;
-          if(found.size||!more)break;
-        }
-        return {items:[...found.values()],cursor:'search:'+offset,more,lookup:'search',scanned};
       }
       if(operation==='following'){
         const data=await get('/aweme/v1/web/user/following/list/',{sec_user_id:params.sec||'',user_id:params.uid||'',cursor,offset:cursor,count:'30',source_type:'1'});

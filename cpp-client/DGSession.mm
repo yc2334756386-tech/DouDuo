@@ -1,4 +1,5 @@
 #import "DGSession.h"
+#import "DGInboxCache.h"
 #import <Security/Security.h>
 static NSDictionary *DGKey(void){return @{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,(__bridge id)kSecAttrService:@"io.github.yc2334756386.douglass.session",(__bridge id)kSecAttrAccount:@"website"};}
 static BOOL DGDomain(NSString *domain){return [domain isEqualToString:@"douyin.com"]||[domain hasSuffix:@".douyin.com"];}
@@ -33,5 +34,5 @@ void DGSessionRestore(void (^completion)(void)){
   dispatch_group_notify(group,dispatch_get_main_queue(),^{if(completion)completion();});
  }];
 }
-void DGSessionForget(void){SecItemDelete((__bridge CFDictionaryRef)DGKey());}
+void DGSessionForget(void){DGClearInboxCache();SecItemDelete((__bridge CFDictionaryRef)DGKey());}
 

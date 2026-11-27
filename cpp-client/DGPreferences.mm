@@ -1,5 +1,5 @@
 #import "DGPreferences.h"
-double DGHoldSpeed(void){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.holdSpeed"];return speed>=1.5&&speed<=3?speed:2;}
+double DGHoldSpeed(void){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.holdMaximum"];return speed>=2&&speed<=4?speed:3;}
 void DGRenderDanmaku(UILabel *label,NSString *plain,NSArray *emoticons){
  NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;CGFloat size=[prefs doubleForKey:@"douglass.danmaku.size"];if(size<12||size>28)size=14;
  NSString *fontName=[prefs stringForKey:@"douglass.danmaku.fontName"];UIFont *font=fontName.length?[UIFont fontWithName:fontName size:size]:nil;

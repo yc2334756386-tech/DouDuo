@@ -3,6 +3,7 @@
 @interface DGSearchPage:UIViewController<WKNavigationDelegate>
 @property(nonatomic,copy) NSString *keyword;
 @property(nonatomic,copy) NSString *musicID;
+@property(nonatomic,copy) NSString *musicURL;
 @property(nonatomic) BOOL users;
 @property(nonatomic,copy) void (^imported)(NSArray<NSDictionary *> *items);
 @end
@@ -20,9 +21,9 @@
  [config.userContentController addUserScript:[[WKUserScript alloc]initWithSource:adapter injectionTime:WKUserScriptInjectionTimeAtDocumentEnd forMainFrameOnly:YES]];
  _web=[[WKWebView alloc]initWithFrame:CGRectZero configuration:config];_web.customUserAgent=DGUserAgent();_web.navigationDelegate=self;[self.view addSubview:_web];
  self.navigationItem.rightBarButtonItems=@[[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(loadSearch)],[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];
- if(self.musicID.length){UIBarButtonItem *original=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"music.note"] style:UIBarButtonItemStylePlain target:self action:@selector(loadMusicOriginal)];original.accessibilityLabel=@"打开官方原声页";self.navigationItem.rightBarButtonItems=[self.navigationItem.rightBarButtonItems arrayByAddingObject:original];}
+ if(self.musicID.length){UIBarButtonItem *original=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"music.note"] style:UIBarButtonItemStylePlain target:self action:@selector(loadMusicOriginal)];original.accessibilityLabel=@"打开官方原声页";self.navigationItem.rightBarButtonItems=@[original,[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];}
  _tools=[UIView new];_tools.backgroundColor=UIColor.secondarySystemBackgroundColor;[self.view addSubview:_tools];
- _hint=Label(12,UIFontWeightRegular);_hint.numberOfLines=2;_hint.textColor=UIColor.secondaryLabelColor;_hint.text=self.musicID.length?@"手动搜索翻页后导回，仅保留原声 ID 一致的作品；音符按钮可打开官方原声页。":@"手动翻页或下滑加载，再导回结果；再次进入会保留网页位置。";[_tools addSubview:_hint];
+ _hint=Label(12,UIFontWeightRegular);_hint.numberOfLines=2;_hint.textColor=UIColor.secondaryLabelColor;_hint.text=self.musicID.length?@"当前打开这首原声的官网页面。作品出现后可导回；官网未返回作品时无法导入。":@"手动翻页或下滑加载，再导回结果；再次进入会保留网页位置。";[_tools addSubview:_hint];
  _import=[UIButton buttonWithType:UIButtonTypeSystem];[_import setTitle:@"导入已加载结果并返回" forState:UIControlStateNormal];_import.titleLabel.font=[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];[_import addTarget:self action:@selector(importResults) forControlEvents:UIControlEventTouchUpInside];[_tools addSubview:_import];
  _reload=Symbol(@"arrow.clockwise",self,@selector(reload));_reload.accessibilityLabel=@"重新加载官方搜索页";[_tools addSubview:_reload];
  _spinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_spinner.hidesWhenStopped=YES;[_tools addSubview:_spinner];
@@ -34,11 +35,15 @@
 }
 - (void)loadSearch{
  NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"];
- if(self.musicID.length&&!self.keyword.length){[self loadMusicOriginal];return;}
+ if(self.musicID.length){[self loadMusicOriginal];return;}
  NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"video"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
 }
-- (void)loadMusicOriginal{_musicFallback=NO;NSString *url=[NSString stringWithFormat:@"https://www.douyin.com/music/%@",self.musicID];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];}
-- (void)reload{if(self.musicID.length&&[_web.URL.path hasPrefix:@"/music/"]){_musicFallback=YES;NSString *url=[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",self.musicID];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];_hint.text=@"已切换原声备用网页。放大镜按钮可按音乐名搜索并核对原声 ID。";}else if(self.musicID.length&&_musicFallback&&self.keyword.length){_musicFallback=NO;[self loadSearch];}else[_web reload];}
+- (void)loadMusicOriginal{
+ NSURL *url=[NSURL URLWithString:self.musicURL?:@""];NSString *path=url.path;BOOL matching=[path isEqualToString:[@"/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[@"/share/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[NSString stringWithFormat:@"/share/music/%@/",self.musicID]];
+ if(![url.scheme.lowercaseString isEqual:@"https"]||![@[@"www.douyin.com",@"www.iesdouyin.com"]containsObject:url.host.lowercaseString]||!matching)url=[NSURL URLWithString:[@"https://www.douyin.com/music/" stringByAppendingString:self.musicID]];
+ _musicFallback=[url.host.lowercaseString isEqual:@"www.iesdouyin.com"];[_web loadRequest:[NSURLRequest requestWithURL:url]];
+}
+- (void)reload{if(self.musicID.length){_musicFallback=!_musicFallback;NSString *url=_musicFallback?[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",self.musicID]:[@"https://www.douyin.com/music/" stringByAppendingString:self.musicID];[_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];_hint.text=@"已重新打开这首原声的官网页面。作品出现后可导回。";}else[_web reload];}
 - (void)webBack{if(_web.canGoBack)[_web goBack];else [self loadSearch];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];[_web evaluateJavaScript:@"document.querySelectorAll('video,audio').forEach(media=>media.pause())" completionHandler:nil];}
 - (void)importResults{
@@ -46,11 +51,11 @@
  [_web evaluateJavaScript:@"window.DGSearchPage?window.DGSearchPage.read():({error:'网页尚未加载，请等搜索结果出现后再导入'})" completionHandler:^(id value,NSError *error){DGSearchPage *self=weak;if(!self)return;self->_reading=NO;self->_import.enabled=YES;[self->_spinner stopAnimating];NSDictionary *result=[value isKindOfClass:NSDictionary.class]?value:nil;NSString *message=Text(String(result[@"error"]));NSArray *items=DGNormalizeWebItems(result[@"items"]);if(error||message.length||!items.count){DGToast(self,message.length?message:@"还没有读取到结果，请先手动翻页并等待内容出现");return;}DGSessionCapture(nil);if(self.imported)self.imported(items);[self.navigationController popViewControllerAnimated:YES];}];
 }
 - (void)webView:(WKWebView *)web didStartProvisionalNavigation:(WKNavigation *)navigation{[_spinner startAnimating];}
-- (void)webView:(WKWebView *)web didFinishNavigation:(WKNavigation *)navigation{if(!_reading)[_spinner stopAnimating];if(self.musicID.length){__weak DGSearchPage *weak=self;[web evaluateJavaScript:@"(document.body?.innerText||'').includes('服务出现异常')" completionHandler:^(id result,NSError *error){DGSearchPage *self=weak;if(!self||![result boolValue])return;self->_hint.text=@"官网原声服务异常，可点放大镜按音乐名搜索，导回时会核对原声 ID。";}];}}
+- (void)webView:(WKWebView *)web didFinishNavigation:(WKNavigation *)navigation{if(!_reading)[_spinner stopAnimating];if(self.musicID.length){__weak DGSearchPage *weak=self;[web evaluateJavaScript:@"(document.body?.innerText||'').includes('服务出现异常')" completionHandler:^(id result,NSError *error){DGSearchPage *self=weak;if(!self||![result boolValue])return;self->_hint.text=@"官网原声服务未返回作品，可重新加载；已有作品会保留。";}];}}
 - (void)webView:(WKWebView *)web didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error{[_spinner stopAnimating];if(error.code!=NSURLErrorCancelled)DGToast(self,@"网页加载失败，可点击右下角重新加载");}
 - (void)webView:(WKWebView *)web decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decision{
  NSString *scheme=action.request.URL.scheme.lowercaseString,*host=action.request.URL.host.lowercaseString;BOOL allowed=[scheme isEqualToString:@"about"]||([@[@"http",@"https"]containsObject:scheme]&&([host isEqualToString:@"douyin.com"]||[host hasSuffix:@".douyin.com"]||[host isEqualToString:@"www.iesdouyin.com"]||[host hasSuffix:@".bytedance.com"]));if(allowed&&!action.targetFrame){decision(WKNavigationActionPolicyCancel);[web loadRequest:action.request];return;}decision(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
 }
 @end
 UIViewController *DGMakeSearchPage(NSString *keyword,BOOL users,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.keyword=keyword;page.users=users;page.imported=imported;return page;}
-UIViewController *DGMakeMusicWebPage(NSString *identifier,NSString *keyword,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.musicID=identifier;page.keyword=keyword;page.imported=imported;return page;}
+UIViewController *DGMakeMusicWebPage(NSString *identifier,NSString *shareURL,void (^imported)(NSArray<NSDictionary *> *items)){DGSearchPage *page=[DGSearchPage new];page.musicID=identifier;page.musicURL=shareURL;page.imported=imported;return page;}

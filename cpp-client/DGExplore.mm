@@ -405,7 +405,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         DGExplore *self=weakSelf;if(!self||generation!=self->_generation)return;self->_loading=NO;[self->_refresh endRefreshing];
         if(error){[self endLocate];self->_failed=YES;if(self->_mode==DGExploreMusic&&self->_records.count)self->_context.text=[NSString stringWithFormat:@"平台列表暂不可用 · 已识别 %lu 条",(unsigned long)self->_records.count];if(!self->_records.count)self->_empty.text=error;[self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal];self->_footer.enabled=YES;return;}
         BOOL people=[self peopleRows],music=[self musicRows];
-        if(self->_mode==DGExploreMusic)DGDiagnostic(@"music.lookup",[NSString stringWithFormat:@"source=%@ returned=%lu scanned=%ld more=%d",[result[@"lookup"]isEqual:@"search"]?@"search":@"official",(unsigned long)Array(result[@"items"]).count,(long)Number(result[@"scanned"]),[result[@"more"]boolValue]]);
+        if(self->_mode==DGExploreMusic)DGDiagnostic(@"music.lookup",[NSString stringWithFormat:@"source=official returned=%lu more=%d",(unsigned long)Array(result[@"items"]).count,[result[@"more"]boolValue]]);
         for(id raw in Array(result[@"items"])){
             if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *record=raw;NSString *identifier=DGValue(record[people?@"sec":@"id"]);
             if(!identifier.length||[self->_ids containsObject:identifier])continue;
@@ -415,13 +415,9 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         }
         if(self->_mode==DGExploreProfile&&self->_selectedTab==0)[self->_records sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){BOOL first=[a[@"pinned"]boolValue],second=[b[@"pinned"]boolValue];return first==second?NSOrderedSame:first?NSOrderedAscending:NSOrderedDescending;}];++self->_seekPages;self->_cursor=DGValue(result[@"cursor"]);if(!self->_cursor.length)self->_cursor=@"0";
         self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
-        if(self->_mode==DGExploreMusic)self->_context.text=[NSString stringWithFormat:[result[@"lookup"]isEqual:@"search"]?@"已按原声 ID 核对 %lu 条 · 搜索结果可能不全":@"使用这首原声的作品 · 已识别 %lu 条",(unsigned long)self->_records.count];
+        if(self->_mode==DGExploreMusic)self->_context.text=[NSString stringWithFormat:@"使用这首原声的作品 · 已识别 %lu 条",(unsigned long)self->_records.count];
         self->_empty.text=self->_records.count?@"":people?@"暂无可查看的用户":music?@"还没有收藏音乐":@"暂无可查看的作品，内容也可能被账号隐私设置限制";
         [self->_footer setTitle:self->_more?@"继续加载":@"已显示全部可查看内容" forState:UIControlStateNormal];self->_footer.enabled=self->_more;
-        if(self->_mode==DGExploreMusic&&[result[@"lookup"]isEqual:@"search"]){
-            if(!self->_records.count)self->_empty.text=@"当前搜索页未找到同一原声的作品，可继续查找或打开网页翻页";
-            [self->_footer setTitle:self->_more?@"继续查找同原声作品":@"本次搜索结束，可使用网页继续查找" forState:UIControlStateNormal];
-        }
         self->_filteredWorks=nil;[self->_table reloadData];[self locateIfNeeded];
         if(self->_libraryQuery.length){
             BOOL found=[self listed].count>0;[self showKeywordResult];
@@ -467,7 +463,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)openMusicPage{
     NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length){DGToast(self,@"平台未提供原声标识");return;}
-    if(!_searchPage){NSString *title=DGValue(self.music[@"title"]),*author=DGValue(self.music[@"author"]);NSString *keyword=[title isEqual:@"原声"]||[title isEqual:@"作品原声"]?@"":title;if(keyword.length&&author.length&&[title rangeOfString:author].location==NSNotFound)keyword=[keyword stringByAppendingFormat:@" %@",author];__weak DGExplore *weak=self;_searchPage=DGMakeMusicWebPage(identifier,keyword,^(NSArray<NSDictionary *> *items){[weak importSearchItems:items];});}
+    if(!_searchPage){__weak DGExplore *weak=self;_searchPage=DGMakeMusicWebPage(identifier,DGValue(self.music[@"shareURL"]),^(NSArray<NSDictionary *> *items){[weak importSearchItems:items];});}
     [self.navigationController pushViewController:_searchPage animated:YES];
 }
 - (void)showFollowing {

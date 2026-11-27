@@ -29,6 +29,7 @@
 - (double)currentPlaybackPosition;
 - (BOOL)isPlaybackPaused;
 - (void)restorePlaybackPosition:(double)seconds paused:(BOOL)paused;
+- (CGFloat)notificationTopInView:(UIView *)view;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);
@@ -37,3 +38,4 @@ void DGResetWorkPlayback(NSString *identifier);
 void DGTrimPlayers(void);
 
 BOOL DGAutomaticPiPAvailable(void);
+CGFloat DGFeedNotificationTop(UIViewController *host);
