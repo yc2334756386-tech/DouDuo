@@ -4,7 +4,7 @@
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const id = value => value == null || typeof value === 'number' && !Number.isSafeInteger(value) ? '' : String(value);
   const parse = text => {
-    try { return JSON.parse(String(text).replace(/("(?:aweme_id|cid|parent_id|item_id|id|uid|mid|music_id|user_id|reply_id|reply_to_reply_id|danmaku_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g,'$1"$2"')); }
+    try { return JSON.parse(String(text).replace(/("(?:aweme_id|cid|parent_id|item_id|extract_item_id|id|uid|mid|music_id|user_id|reply_id|reply_to_reply_id|danmaku_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g,'$1"$2"')); }
     catch (_) { return null; }
   };
   const first = value => {
@@ -80,7 +80,8 @@
   const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.id)||id(value?.music_id)||id(value?.mid);
   const music=value=>{
     value=value||{};
-    return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),shareURL:first(value.share_info?.share_url),duration:Number(value.duration||0)};
+    const extra=typeof value.extra==='string'?parse(value.extra):value.extra;
+    return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),shareURL:first(value.share_info?.share_url),sourceWorkID:id(extra?.extract_item_id),duration:Number(value.duration||0)};
   };
   const work=item=>{
     const isAd=!!(item.is_ads||item.is_ad||(item.raw_ad_data&&Object.keys(item.raw_ad_data).length));

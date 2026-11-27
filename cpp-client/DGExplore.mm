@@ -311,7 +311,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
   NSString *key=DGValue(record[@"id"]);if(!key.length||[_ids containsObject:key]||!ReadWork(record).playable())continue;
   [_ids addObject:key];[_records addObject:record];
  }
- if(_records.count){_empty.text=@"";_context.text=[NSString stringWithFormat:@"本机已识别 %lu 条 · 正在查找更多",(unsigned long)_records.count];[_table reloadData];}
+ if(_records.count){_empty.text=@"";_context.text=[NSString stringWithFormat:_failed?@"平台列表暂不可用 · 已识别 %lu 条":@"本机已识别 %lu 条",(unsigned long)_records.count];[_table reloadData];}
 }
 - (void)resolveMusicIdentifier {
  NSDictionary *origin=self.music[@"contextWork"];NSString *work=[origin isKindOfClass:NSDictionary.class]?DGValue(origin[@"id"]):@"";
@@ -326,9 +326,16 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  }];
 }
 - (void)loadMusicDetail {
-    NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length)return;__weak DGExplore *weakSelf=self;
+    NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length)return;NSUInteger generation=_generation;__weak DGExplore *weakSelf=self;
     [_bridge request:@"musicDetail" parameters:@{@"id":identifier} completion:^(NSDictionary *result,NSString *error){DGExplore *self=weakSelf;if(!self)return;
-        if(!error){NSMutableDictionary *music=[self.music mutableCopy]?:[NSMutableDictionary dictionary];for(NSString *key in result)if(![key isEqualToString:@"id"]&&DGValue(result[key]).length)music[key]=result[key];self.music=music;[self updateMusicHeader];}
+        if(generation!=self->_generation||![identifier isEqualToString:DGValue(self.music[@"id"])])return;
+        if(!error){NSMutableDictionary *music=[self.music mutableCopy]?:[NSMutableDictionary dictionary];for(NSString *key in result)if(![key isEqualToString:@"id"]&&DGValue(result[key]).length)music[key]=result[key];self.music=music;[self updateMusicHeader];
+            NSString *source=DGValue(result[@"sourceWorkID"]);if(!source.length)return;
+            [self->_bridge request:@"detail" parameters:@{@"id":source} completion:^(NSDictionary *origin,NSString *failure){
+                DGExplore *self=weakSelf;if(!self||failure||generation!=self->_generation||![identifier isEqualToString:DGValue(self.music[@"id"])])return;
+                for(NSDictionary *record in Array(origin[@"items"]))if([identifier isEqualToString:DGValue(record[@"musicID"])]){DGIndexMusicWorks(@[record]);[self seedKnownMusicWorks];break;}
+            }];
+        }
     }];
 }
 - (void)updateMusicHeader {

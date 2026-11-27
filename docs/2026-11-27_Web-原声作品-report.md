@@ -17,6 +17,8 @@
 
 E1 的响应是 6662 字节 JSON，`status_code=0`、`music_info.id_str=7149936801028131598`，声明使用数量为 1247111。E2 的 HTTP 状态为 200，但响应正文为 0 字节。该请求的查询参数包含官网生成的 `timestamp` 与 `x-secsdk-web-signature`；本报告不保存签名值、会话信息或浏览器指纹值。
 
+E1 的 `music_info.extra` 还包含 `extract_item_id=7149936767662132488`。适配器新增保留该 64 位来源作品标识，并尝试读取作品详情；仅在作品返回的原声 ID 与当前原声一致时将其补入列表。这是读取真实来源作品，不能替代完整同原声作品列表。
+
 ## Findings
 
 | F-id | 等级 | evidence_ids | 置信度 | location | status |
