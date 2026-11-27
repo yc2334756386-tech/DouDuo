@@ -203,8 +203,9 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  if(!_active||_paused||_work.photo()||_backgroundMode||_pagingMotion)return;
  if(_recoveries>=2){DGDiagnostic(@"playback.exhausted",nil);_watchdogExhausted=YES;[_loadingSpinner stopAnimating];[self stopWatchdog];_message.text=@"视频暂未加载成功，点击画面重试";return;}
  ++_recoveries;double pos=CMTimeGetSeconds(_player.currentTime);if(!std::isfinite(pos)||pos<.05)pos=MAX(0,_lastPlaybackTime);
- NSString *url=Text(_work.play);if(!_alternateUsed&&!_work.alternate.empty()&&_work.alternate!=_work.play){_alternateUsed=YES;url=Text(_work.alternate);}
- BOOL local=[((AVURLAsset *)_player.currentItem.asset).URL isFileURL];if(local)url=Text(_work.play);
+ NSString *url=Text(_work.play);
+ AVAsset *asset=_player.currentItem.asset;BOOL local=[asset isKindOfClass:AVURLAsset.class]&&[((AVURLAsset *)asset).URL isFileURL];
+ if(!local&&!_alternateUsed&&!_work.alternate.empty()&&_work.alternate!=_work.play){_alternateUsed=YES;url=Text(_work.alternate);}
  DGDiagnostic(@"playback.retry",[NSString stringWithFormat:@"attempt=%ld local=%d",(long)_recoveries,local]);
  DGPrepared *old=_prepared;DGPrepared *replacement=[[DGPrepared alloc]initWithURL:url];
  [self attach:replacement position:pos];
@@ -246,6 +247,10 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   if(std::fabs(seconds-_progress)>.08){_progress=seconds;_progressAt=CACurrentMediaTime();}
   [self updateDanmaku:seconds];
  }
+}
+- (BOOL)hasRenderedMedia {
+ if(_work.photo())return _photoIndex>=0&&_photoIndex<(NSInteger)_images.count&&_images[_photoIndex].image!=nil;
+ return _playerLayer.player&&_playerLayer.readyForDisplay;
 }
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;

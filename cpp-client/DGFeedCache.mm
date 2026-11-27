@@ -37,7 +37,7 @@ BOOL LooksLikeVideo(NSURL *file){
  NSURL *_folder,*_currentFile;
  NSMutableArray<NSDictionary *> *_queue;
  NSMutableDictionary<NSString *,NSNumber *> *_mediaSizes;
- NSMutableSet<NSString *> *_failed;
+ NSMutableSet<NSString *> *_failed,*_staging;
  NSURLSession *_session;
  NSURLSessionDownloadTask *_task;
  BOOL _idle,_suspended,_persistQueued;
@@ -62,7 +62,7 @@ BOOL LooksLikeVideo(NSURL *file){
  if([_scope isEqualToString:scope])return;
  ++_generation;NSURL *oldFolder=_folder;[_task cancel];_task=nil;_downloading=nil;_suspended=NO;_persistQueued=NO;_current=nil;_currentFile=nil;
  _scope=scope.copy;_folder=[Root() URLByAppendingPathComponent:scope isDirectory:YES];
- _queue=[NSMutableArray array];_mediaSizes=[NSMutableDictionary dictionary];_failed=[NSMutableSet set];
+ _queue=[NSMutableArray array];_mediaSizes=[NSMutableDictionary dictionary];_failed=[NSMutableSet set];_staging=[NSMutableSet set];
  NSData *manifest=[NSData dataWithContentsOfURL:[_folder URLByAppendingPathComponent:@"unwatched.json"]];
  NSDictionary *saved=manifest.length?[NSJSONSerialization JSONObjectWithData:manifest options:0 error:nil]:nil;
  if([saved isKindOfClass:NSDictionary.class])for(NSDictionary *row in Array(saved[@"records"])){
@@ -138,12 +138,12 @@ BOOL LooksLikeVideo(NSURL *file){
  if(idle)[self pump];
 }
 - (void)pump {
- if(!_idle||_task||!_folder||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+ if(!_idle||_task||_staging.count||!_folder||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
  unsigned long long total=0;for(NSNumber *size in _mediaSizes.allValues)total+=size.unsignedLongLongValue;
  if(total>=DiskLimit)return;
  for(NSDictionary *row in _queue){
   Work work=ReadWork(row);NSString *identifier=Text(work.id);
-  if(_mediaSizes[identifier]||[_failed containsObject:identifier]||DGIsSeenWork(work)||[_current isEqualToString:identifier])continue;
+  if(_mediaSizes[identifier]||[_staging containsObject:identifier]||[_failed containsObject:identifier]||DGIsSeenWork(work)||[_current isEqualToString:identifier])continue;
   NSURL *url=[NSURL URLWithString:Text(work.play)];if(![url.scheme.lowercaseString isEqualToString:@"https"]&&![url.scheme.lowercaseString isEqualToString:@"http"])continue;
   NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];
   [request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
@@ -166,13 +166,15 @@ BOOL LooksLikeVideo(NSURL *file){
   NSString *identifier=self->_downloading;NSURL *destination=[self file:identifier];NSUInteger generation=self->_generation;
   unsigned long long total=size.unsignedLongLongValue;for(NSNumber *used in self->_mediaSizes.allValues)total+=used.unsignedLongLongValue;
   if(total>DiskLimit||!destination){[self->_failed addObject:identifier];Remove(stage);return;}
+  [self->_staging addObject:identifier];
   dispatch_async(Disk(),^{
    BOOL moved=[NSFileManager.defaultManager moveItemAtURL:stage toURL:destination error:nil];if(!moved)Remove(stage);
    dispatch_async(dispatch_get_main_queue(),^{
-    if(!moved){if(generation==self->_generation)[self->_failed addObject:identifier];return;}
-    if(generation!=self->_generation||[self->_queue indexOfObjectPassingTest:^BOOL(NSDictionary *row,NSUInteger i,BOOL *stop){return [row[@"id"]isEqual:identifier];}]==NSNotFound){Remove(destination);return;}
+    if(generation==self->_generation)[self->_staging removeObject:identifier];
+    if(!moved){if(generation==self->_generation){[self->_failed addObject:identifier];[self pump];}return;}
+    if(generation!=self->_generation||[self->_queue indexOfObjectPassingTest:^BOOL(NSDictionary *row,NSUInteger i,BOOL *stop){return [row[@"id"]isEqual:identifier];}]==NSNotFound){Remove(destination);[self pump];return;}
     self->_mediaSizes[identifier]=size;
-    DGDiagnostic(@"cache.ready",[NSString stringWithFormat:@"files=%lu bytes=%llu",(unsigned long)self->_mediaSizes.count,total]);
+    DGDiagnostic(@"cache.ready",[NSString stringWithFormat:@"files=%lu bytes=%llu",(unsigned long)self->_mediaSizes.count,total]);[self pump];
    });
   });
  });
