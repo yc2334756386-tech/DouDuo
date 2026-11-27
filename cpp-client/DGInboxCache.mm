@@ -35,3 +35,28 @@ void DGReloadInboxRows(UITableView *table,NSArray *previous,NSArray *next){
  for(NSUInteger i=0;i<next.count;i++){if(![Text(String(previous[i][@"id"]))isEqualToString:Text(String(next[i][@"id"]))]){[table reloadData];return;}if(![previous[i]isEqual:next[i]])[changed addObject:[NSIndexPath indexPathForRow:i inSection:0]];}
  if(changed.count)[UIView performWithoutAnimation:^{[table reloadRowsAtIndexPaths:changed withRowAnimation:UITableViewRowAnimationNone];}];
 }
+void DGInboxUpdateNoticeCounts(NSArray *counts){
+ NSMutableDictionary *state=[DGReadInboxCache(@"notice-badges")mutableCopy],*values=[NSMutableDictionary dictionary];
+ for(id raw in counts){if(![raw isKindOfClass:NSDictionary.class])continue;NSInteger group=Number(raw[@"group"]);if(group>0)values[[@(group)stringValue]]=@(MAX(0,Number(raw[@"count"])));}
+ state[@"counts"]=values;DGWriteInboxCache(@"notice-badges",state);[NSNotificationCenter.defaultCenter postNotificationName:@"DGInboxUnreadChanged" object:nil];
+}
+void DGInboxMarkNoticesRead(NSInteger group){
+ NSMutableDictionary *state=[DGReadInboxCache(@"notice-badges")mutableCopy];
+ NSMutableDictionary *values=[state[@"counts"]isKindOfClass:NSDictionary.class]?[state[@"counts"]mutableCopy]:[NSMutableDictionary dictionary];
+ NSMutableDictionary *mask=[state[@"mask"]isKindOfClass:NSDictionary.class]?[state[@"mask"]mutableCopy]:[NSMutableDictionary dictionary];
+ NSArray *groups=group==700?@[@700,@2,@3,@6,@401]:@[@(group)];
+ for(NSNumber *value in groups){NSString *key=value.stringValue;mask[key]=@(NSDate.date.timeIntervalSince1970+30);values[key]=@0;}
+ state[@"counts"]=values;state[@"mask"]=mask;DGWriteInboxCache(@"notice-badges",state);[NSNotificationCenter.defaultCenter postNotificationName:@"DGInboxUnreadChanged" object:nil];
+}
+BOOL DGInboxCategoryUnread(BOOL followers){
+ NSDictionary *state=DGReadInboxCache(@"notice-badges"),*counts=[state[@"counts"]isKindOfClass:NSDictionary.class]?state[@"counts"]:@{},*mask=[state[@"mask"]isKindOfClass:NSDictionary.class]?state[@"mask"]:@{};
+ auto count=[&](NSString *key)->long long{return [mask[key]doubleValue]>NSDate.date.timeIntervalSince1970?0:MAX(0,Number(counts[key]));};
+ if(followers)return count(@"401")>0;
+ if(counts[@"2"]||counts[@"3"]||counts[@"6"])return count(@"2")>0||count(@"3")>0||count(@"6")>0;
+ return count(@"700")>count(@"401");
+}
+void DGInboxMarkConversationRead(NSString *identifier){
+ if(!identifier.length)return;NSMutableArray *rows=[Array(DGReadInboxCache(@"conversations")[@"items"])mutableCopy];
+ for(NSUInteger i=0;i<rows.count;i++)if([Text(String(rows[i][@"id"]))isEqualToString:identifier]){NSMutableDictionary *row=[rows[i]mutableCopy];row[@"unread"]=@NO;row[@"unreadCount"]=@0;row[@"badge"]=@"";rows[i]=row;break;}
+ DGWriteInboxCache(@"conversations",@{@"items":rows});[NSNotificationCenter.defaultCenter postNotificationName:@"DGInboxUnreadChanged" object:nil];
+}

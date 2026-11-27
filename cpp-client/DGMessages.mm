@@ -1,6 +1,7 @@
 #import "DGCommon.h"
 #import "DGInboxCache.h"
 #import "DGFeedCache.h"
+#import <QuartzCore/QuartzCore.h>
 @interface DGChatService:NSObject<WKNavigationDelegate>
 @property(nonatomic,strong) WKWebView *web;
 @property(nonatomic,strong) UIView *mount;
@@ -27,10 +28,10 @@
 @interface DGConversationCell:UITableViewCell
 - (void)record:(NSDictionary *)record;
 @end
-@implementation DGConversationCell{DGImage *_avatar;UILabel *_name,*_preview,*_time,*_badge;}
+@implementation DGConversationCell{DGImage *_avatar;UILabel *_name,*_preview,*_time,*_badge;BOOL _dotOnly;}
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier{if((self=[super initWithStyle:style reuseIdentifier:identifier])){self.backgroundColor=UIColor.clearColor;_avatar=[DGImage new];_avatar.layer.cornerRadius=25;_avatar.clipsToBounds=YES;_avatar.contentMode=UIViewContentModeScaleAspectFill;_name=Label(16,UIFontWeightSemibold);_preview=Label(13,UIFontWeightRegular);_preview.textColor=UIColor.secondaryLabelColor;_time=Label(11,UIFontWeightRegular);_time.textColor=UIColor.tertiaryLabelColor;_time.textAlignment=NSTextAlignmentRight;_badge=Label(11,UIFontWeightSemibold);_badge.textAlignment=NSTextAlignmentCenter;_badge.backgroundColor=UIColor.systemRedColor;_badge.layer.cornerRadius=10;_badge.clipsToBounds=YES;for(UIView *view in @[_avatar,_name,_preview,_time,_badge])[self.contentView addSubview:view];}return self;}
-- (void)layoutSubviews{[super layoutSubviews];CGFloat w=self.contentView.bounds.size.width;_avatar.frame=CGRectMake(18,16,50,50);_name.frame=CGRectMake(82,15,w-170,24);_preview.frame=CGRectMake(82,45,w-130,22);_time.frame=CGRectMake(w-92,16,74,20);_badge.frame=CGRectMake(w-40,47,22,20);}
-- (void)record:(NSDictionary *)record{[_avatar remote:Text(String(record[@"avatar"]))];_name.text=Text(String(record[@"name"]));_preview.text=Text(String(record[@"preview"]));_time.text=Text(String(record[@"time"]));_badge.text=Text(String(record[@"badge"]));_badge.hidden=!_badge.text.length;}
+- (void)layoutSubviews{[super layoutSubviews];CGFloat w=self.contentView.bounds.size.width;_avatar.frame=CGRectMake(18,16,50,50);_name.frame=CGRectMake(82,15,w-170,24);_preview.frame=CGRectMake(82,45,w-130,22);_time.frame=CGRectMake(w-92,16,74,20);_badge.frame=_dotOnly?CGRectMake(w-30,51,9,9):CGRectMake(w-48,47,30,20);_badge.layer.cornerRadius=_dotOnly?4.5:10;}
+- (void)record:(NSDictionary *)record{[_avatar remote:Text(String(record[@"avatar"]))];_name.text=Text(String(record[@"name"]));_preview.text=Text(String(record[@"preview"]));_time.text=Text(String(record[@"time"]));_badge.text=Text(String(record[@"badge"]));BOOL unread=[record[@"unread"]boolValue]||Number(record[@"unreadCount"])>0||(_badge.text.length&&![_badge.text isEqual:@"0"]);_dotOnly=!_badge.text.length;_badge.hidden=!unread;self.accessibilityValue=unread?@"有未读私信":nil;[self setNeedsLayout];}
 @end
 @interface DGChatBubble:UITableViewCell
 - (void)record:(NSDictionary *)record;
@@ -47,15 +48,16 @@
 @property(nonatomic) BOOL embedded;
 @property(nonatomic,copy) void (^navigate)(UIViewController *);
 @end
-@implementation DGMessages{UITableView *_table;NSArray *_rows;NSTimer *_timer;UILabel *_empty;UIRefreshControl *_refresh;UIVisualEffectView *_composer;UITextView *_input;UIButton *_send;BOOL _busy,_sending,_opened,_visible,_positioned;CGFloat _keyboard;UIButton *_noticeButton;}
+@implementation DGMessages{UITableView *_table;NSArray *_rows;NSTimer *_timer;UILabel *_empty;UIRefreshControl *_refresh;UIVisualEffectView *_composer;UITextView *_input;UIButton *_send;BOOL _busy,_sending,_opened,_visible,_positioned,_noticeBusy;CGFloat _keyboard;NSArray<UIView *> *_noticeDots;CFTimeInterval _noticeCheckedAt;}
 - (void)viewDidLoad{
  [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;if(!_service)_service=[DGChatService new];_rows=Array(DGReadInboxCache([self cacheKey])[@"items"]);self.title=self.conversation?Text(String(self.conversation[@"name"])):@"信息";
  _table=[[UITableView alloc]initWithFrame:self.view.bounds style:UITableViewStylePlain];_table.backgroundColor=UIColor.clearColor;_table.separatorStyle=UITableViewCellSeparatorStyleNone;_table.rowHeight=self.conversation?UITableViewAutomaticDimension:82;_table.estimatedRowHeight=72;_table.dataSource=self;_table.delegate=self;_table.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[_table registerClass:DGConversationCell.class forCellReuseIdentifier:@"conversation"];[_table registerClass:DGChatBubble.class forCellReuseIdentifier:@"message"];[self.view addSubview:_table];
  _empty=Label(14,UIFontWeightRegular);_empty.textColor=UIColor.secondaryLabelColor;_empty.textAlignment=NSTextAlignmentCenter;_empty.numberOfLines=0;_empty.text=@"正在同步消息…";_table.backgroundView=_empty;_refresh=[UIRefreshControl new];[_refresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];_table.refreshControl=_refresh;
  self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
  if(self.conversation){_composer=Glass(22);[self.view addSubview:_composer];_input=[UITextView new];_input.backgroundColor=UIColor.clearColor;_input.textColor=UIColor.labelColor;_input.font=[UIFont systemFontOfSize:16];_input.delegate=self;_input.accessibilityLabel=@"输入消息";[_composer.contentView addSubview:_input];_send=Symbol(@"arrow.up.circle.fill",self,@selector(send));_send.accessibilityLabel=@"发送";[_composer.contentView addSubview:_send];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboard:) name:UIKeyboardWillChangeFrameNotification object:nil];}
- else{UIView *header=[[UIView alloc]initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,154)];NSArray *titles=@[@"新的关注",@"互动消息"],*subtitles=@[@"查看新粉丝与关注动态",@"评论、赞与提到我的消息"],*icons=@[@"person.2.fill",@"bubble.left.and.bubble.right.fill"];for(NSInteger index=0;index<2;index++){UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];button.tag=index;button.frame=CGRectMake(0,index*76,self.view.bounds.size.width,76);button.autoresizingMask=UIViewAutoresizingFlexibleWidth;[button addTarget:self action:@selector(noticeCategory:) forControlEvents:UIControlEventTouchUpInside];UIView *circle=[[UIView alloc]initWithFrame:CGRectMake(18,13,50,50)];circle.backgroundColor=index?UIColor.systemPinkColor:UIColor.systemBlueColor;circle.layer.cornerRadius=25;circle.userInteractionEnabled=NO;UIImageView *icon=[[UIImageView alloc]initWithImage:[UIImage systemImageNamed:icons[index]]];icon.tintColor=UIColor.whiteColor;icon.contentMode=UIViewContentModeScaleAspectFit;icon.frame=CGRectMake(12,12,26,26);[circle addSubview:icon];[button addSubview:circle];UILabel *title=Label(16,UIFontWeightSemibold);title.frame=CGRectMake(82,13,self.view.bounds.size.width-120,24);title.text=titles[index];[button addSubview:title];UILabel *subtitle=Label(12,UIFontWeightRegular);subtitle.textColor=UIColor.secondaryLabelColor;subtitle.frame=CGRectMake(82,42,self.view.bounds.size.width-120,20);subtitle.text=subtitles[index];[button addSubview:subtitle];[header addSubview:button];}_table.tableHeaderView=header;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];__weak DGMessages *weak=self;[_bridge request:@"profile" parameters:@{} completion:^(NSDictionary *result,NSString *error){if(!error)weak.uid=Text(String(result[@"uid"]));}];}
+ else{UIView *header=[[UIView alloc]initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,154)];NSMutableArray *dots=[NSMutableArray array];NSArray *titles=@[@"新的关注",@"互动消息"],*subtitles=@[@"查看新粉丝与关注动态",@"评论、赞与提到我的消息"],*icons=@[@"person.2.fill",@"bubble.left.and.bubble.right.fill"];for(NSInteger index=0;index<2;index++){UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];button.tag=index;button.frame=CGRectMake(0,index*76,self.view.bounds.size.width,76);button.autoresizingMask=UIViewAutoresizingFlexibleWidth;[button addTarget:self action:@selector(noticeCategory:) forControlEvents:UIControlEventTouchUpInside];UIView *circle=[[UIView alloc]initWithFrame:CGRectMake(18,13,50,50)];circle.backgroundColor=index?UIColor.systemPinkColor:UIColor.systemBlueColor;circle.layer.cornerRadius=25;circle.userInteractionEnabled=NO;UIImageView *icon=[[UIImageView alloc]initWithImage:[UIImage systemImageNamed:icons[index]]];icon.tintColor=UIColor.whiteColor;icon.contentMode=UIViewContentModeScaleAspectFit;icon.frame=CGRectMake(12,12,26,26);[circle addSubview:icon];[button addSubview:circle];UILabel *title=Label(16,UIFontWeightSemibold);title.frame=CGRectMake(82,13,self.view.bounds.size.width-120,24);title.text=titles[index];[button addSubview:title];UILabel *subtitle=Label(12,UIFontWeightRegular);subtitle.textColor=UIColor.secondaryLabelColor;subtitle.frame=CGRectMake(82,42,self.view.bounds.size.width-120,20);subtitle.text=subtitles[index];[button addSubview:subtitle];UIView *dot=[[UIView alloc]initWithFrame:CGRectMake(self.view.bounds.size.width-30,32,9,9)];dot.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;dot.backgroundColor=UIColor.systemRedColor;dot.layer.cornerRadius=4.5;dot.userInteractionEnabled=NO;dot.hidden=YES;dot.isAccessibilityElement=YES;dot.accessibilityLabel=index?@"有新的互动消息":@"有新的关注";[button addSubview:dot];[dots addObject:dot];[header addSubview:button];}_noticeDots=dots;_table.tableHeaderView=header;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];__weak DGMessages *weak=self;[_bridge request:@"profile" parameters:@{} completion:^(NSDictionary *result,NSString *error){if(!error)weak.uid=Text(String(result[@"uid"]));}];}
  if(_rows.count)_empty.text=@"";
+ [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateUnreadIndicators) name:@"DGInboxUnreadChanged" object:nil];[self updateUnreadIndicators];
 }
 - (NSString *)cacheKey{return self.conversation?[@"thread:" stringByAppendingString:Text(String(self.conversation[@"id"]))]:@"conversations";}
 - (void)noticeCategory:(UIButton *)button{UIViewController *page=DGMakeNoticesGroup(self.bridge,button.tag?0:4);if(self.navigate)self.navigate(page);else[self.navigationController pushViewController:page animated:YES];}
@@ -63,6 +65,7 @@
  if(_visible==visible)return;
  _visible=visible;[_timer invalidate];_timer=nil;
  if(!visible)return;
+ [self updateUnreadIndicators];
  [_service attach:self.view];[self poll];
  __weak DGMessages *weak=self;_timer=[NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer){[weak poll];}];
 }
@@ -72,14 +75,24 @@
 - (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat safe=self.view.safeAreaInsets.bottom,bottom=MAX(safe,_keyboard),height=self.view.bounds.size.height;_table.frame=CGRectMake(0,0,self.view.bounds.size.width,MAX(0,height-(self.conversation?64+bottom:0)));_composer.frame=CGRectMake(10,height-bottom-60,self.view.bounds.size.width-20,54);_input.frame=CGRectMake(10,5,_composer.bounds.size.width-66,44);_send.frame=CGRectMake(_composer.bounds.size.width-52,4,48,46);}
 - (void)keyboard:(NSNotification *)note{CGRect rect=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboard=MAX(0,self.view.bounds.size.height-rect.origin.y);[self.view setNeedsLayout];[self.view layoutIfNeeded];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
-- (void)refresh{if(self.conversation){[self query:@"older"];}else{if(_service.failure)[_service reload];[self poll];}}
-- (void)poll{if(!_visible||_busy||_sending||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;if(!_service.ready&&!_service.loading&&!_service.failure)[_service attach:self.view];[self query:self.conversation?(_opened?@"messages":@"open"):@"list"];}
+- (void)refresh{if(self.conversation){[self query:@"older"];}else{_noticeCheckedAt=0;if(_service.failure)[_service reload];[self poll];}}
+- (void)updateUnreadIndicators{
+ if(self.conversation)return;
+ if(_noticeDots.count==2){_noticeDots[0].hidden=!DGInboxCategoryUnread(YES);_noticeDots[1].hidden=!DGInboxCategoryUnread(NO);}
+ NSArray *rows=Array(DGReadInboxCache(@"conversations")[@"items"]);if(rows.count&& ![_rows isEqual:rows]){NSArray *old=_rows;_rows=rows;DGReloadInboxRows(_table,old,rows);_empty.text=@"";}
+}
+- (void)pollNoticeCounts{
+ if(self.conversation||_noticeBusy||CACurrentMediaTime()-_noticeCheckedAt<30)return;
+ _noticeBusy=YES;_noticeCheckedAt=CACurrentMediaTime();NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
+ [_bridge request:@"noticeCounts" parameters:@{} completion:^(NSDictionary *result,NSString *error){DGMessages *self=weak;if(!self)return;self->_noticeBusy=NO;if(error||![scope isEqual:DGCurrentFeedScope()])return;DGInboxUpdateNoticeCounts(Array(result[@"items"]));}];
+}
+- (void)poll{if(!_visible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;[self pollNoticeCounts];if(_busy||_sending)return;if(!_service.ready&&!_service.loading&&!_service.failure)[_service attach:self.view];[self query:self.conversation?(_opened?@"messages":@"open"):@"list"];}
 - (void)query:(NSString *)action{
  if(_busy||_sending)return;_busy=YES;NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
  [_service call:action parameters:@{@"id":self.conversation[@"id"]?:@"",@"uid":self.uid?:@""} completion:^(NSDictionary *result,NSString *error){
   DGMessages *self=weak;if(!self)return;self->_busy=NO;[self->_refresh endRefreshing];if(![scope isEqual:DGCurrentFeedScope()])return;
   if(error){if(self.conversation&&self->_service.ready)self->_opened=NO;if(!self->_rows.count)self->_empty.text=error;return;}
-  if([action isEqualToString:@"open"])self->_opened=YES;
+  if([action isEqualToString:@"open"]){self->_opened=YES;DGInboxMarkConversationRead(Text(String(self.conversation[@"id"])));}
   NSArray *previous=self->_rows,*incoming=Array(result[@"items"]);BOOL older=[action isEqualToString:@"older"];
   NSArray *rows=DGMergeInboxRows(previous,incoming,!self.conversation||older,self.conversation?200:100);
   self->_empty.text=rows.count?@"":self.conversation?@"还没有可显示的消息":[result[@"ready"]boolValue]?@"暂时没有会话":@"正在同步会话；若长时间无内容，请返回完成登录后刷新";

@@ -17,6 +17,7 @@
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge;
 - (void)prepareNoticeFocus:(NSString *)comment parent:(NSString *)parent;
 - (void)prepareResumeState:(NSDictionary *)state;
+- (NSString *)currentWorkIdentifier;
 @end
 @implementation DGFeed {
     douglass::Feed _feed;
@@ -163,6 +164,11 @@
  double seconds=cell?[cell currentPlaybackPosition]:_restoredPosition;
  NSString *identifier=Text(String(_records[selected][@"id"]));
  return @{@"kind":@"player",@"records":[_records subarrayWithRange:NSMakeRange(start,count)],@"selected":@(selected-start),@"workID":identifier,@"position":@(std::isfinite(seconds)?seconds:0),@"paused":@(cell?[cell isPlaybackPaused]:_restoredPaused),@"comment":_noticeComment?:@"",@"parent":_noticeParent?:@""};
+}
+- (NSString *)currentWorkIdentifier{
+ NSInteger index=_positioned?_current:_selected;
+ if(_collection.bounds.size.height>0)index=MAX(0,(NSInteger)llround(_collection.contentOffset.y/_collection.bounds.size.height));
+ return index>=0&&index<(NSInteger)_feed.works.size()?Text(_feed.works[index].id):nil;
 }
 - (void)prepareResumeState:(NSDictionary *)state {
  _restoredWork=Text(String(state[@"workID"]));double seconds=[state[@"position"]doubleValue];_restoredPosition=std::isfinite(seconds)?MAX(0.,seconds):0;
@@ -484,6 +490,7 @@
 @end
 UIViewController *DGMakeFeedController(void){return [DGFeed new];}
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works,NSInteger selected,DGBridge *bridge){return [[DGFeed alloc] initWithRecords:works selected:selected bridge:bridge];}
+NSString *DGCurrentWorkID(UIViewController *player){return [player isKindOfClass:DGFeed.class]?[(DGFeed *)player currentWorkIdentifier]:nil;}
 UIViewController *DGMakeResumedWorkPlayer(DGBridge *bridge,NSDictionary *state){
  NSMutableArray *records=[NSMutableArray array];NSString *identifier=Text(String(state[@"workID"]));NSInteger selected=NSNotFound;
  for(id value in Array(state[@"records"])){if(![value isKindOfClass:NSDictionary.class]||!ReadWork(value).playable())continue;if([Text(String(value[@"id"]))isEqualToString:identifier])selected=records.count;[records addObject:value];if(records.count==61)break;}

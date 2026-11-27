@@ -16,9 +16,10 @@
 - (void)load{
  if(_loading||!_more)return;_loading=YES;_footer.enabled=NO;[_footer setTitle:_items.count?@"正在检查新消息…":@"正在读取…" forState:UIControlStateNormal];
  NSUInteger generation=_generation;NSString *cursor=_cursor,*scope=DGCurrentFeedScope();BOOL refreshTop=_refreshTop;NSNumber *group=@[@700,@2,@3,@6,@401][_filter.selectedSegmentIndex];__weak DGNotices *weak=self;
- [_bridge request:@"notices" parameters:@{@"group":group,@"cursor":cursor} completion:^(NSDictionary *result,NSString *error){
+ [_bridge request:@"notices" parameters:@{@"group":group,@"cursor":cursor,@"markRead":@YES} completion:^(NSDictionary *result,NSString *error){
   DGNotices *self=weak;if(!self||generation!=self->_generation)return;self->_loading=NO;self->_footer.enabled=YES;if(![scope isEqual:DGCurrentFeedScope()])return;
   if(error){if(!self->_items.count)self->_empty.text=error;[self->_footer setTitle:@"更新失败，点此重试" forState:UIControlStateNormal];return;}
+  DGInboxMarkNoticesRead(group.integerValue);
   NSArray *previous=self->_items.copy,*incoming=Array(result[@"items"]);
   NSArray *merged=DGMergeInboxRows(previous,incoming,refreshTop,NSUIntegerMax);self->_items=merged.mutableCopy;
   [self->_ids removeAllObjects];for(NSDictionary *item in merged)[self->_ids addObject:Text(String(item[@"id"]))];

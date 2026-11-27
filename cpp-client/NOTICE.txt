@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.17.0
+抖音极简版 / DouGlass 0.18.0
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:

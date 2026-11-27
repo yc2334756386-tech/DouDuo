@@ -30,6 +30,12 @@ static void DGFreezeLayer(CALayer *layer,BOOL freeze){
  if(freeze){if(layer.speed==0)return;CFTimeInterval time=[layer convertTime:CACurrentMediaTime() fromLayer:nil];layer.speed=0;layer.timeOffset=time;}
  else if(layer.speed==0){CFTimeInterval time=layer.timeOffset;layer.speed=1;layer.timeOffset=0;layer.beginTime=0;layer.beginTime=[layer convertTime:CACurrentMediaTime() fromLayer:nil]-time;}
 }
+static void DGSetLayerPlaybackRate(CALayer *layer,double rate){
+ if(!std::isfinite(rate)||rate<0||fabs(layer.speed-rate)<.001)return;
+ CFTimeInterval now=CACurrentMediaTime(),local=[layer convertTime:now fromLayer:nil];
+ CFTimeInterval parent=layer.superlayer?[layer.superlayer convertTime:now fromLayer:nil]:now;
+ layer.speed=rate;layer.timeOffset=local;layer.beginTime=parent;
+}
 @interface DGPrepared:NSObject
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) AVPlayerItem *item;
@@ -84,7 +90,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 @interface DGFeedCell()<UIScrollViewDelegate,UIGestureRecognizerDelegate,AVPictureInPictureControllerDelegate>
 @end
 @implementation DGFeedCell {
- DGAmbient *_ambient;UIPanGestureRecognizer *_railShield,*_moreShield;NSCache *_frameCache;BOOL _previewBusy;double _desiredPreview,_seekOriginal;NSMutableArray<NSNumber *> *_cachedTimes;
+ DGAmbient *_ambient;UIPanGestureRecognizer *_railShield,*_moreShield;NSCache *_frameCache;BOOL _previewBusy;double _desiredPreview;NSMutableArray<NSNumber *> *_cachedTimes;
  UIActivityIndicatorView *_loadingSpinner;UILabel *_elapsed,*_totalTime;UIButton *_expandCaption;BOOL _captionExpanded;BOOL _backgroundSoundState;UITapGestureRecognizer *_danmakuTap;NSString *_tappedDanmaku;
  DGPhotoNavigator *_photoNavigator;Work _work;DGImage *_cover,*_avatar,*_musicAvatar;UIScrollView *_photos;NSMutableArray<DGImage*> *_images;
  UIView *_shade,*_danmaku;CAGradientLayer *_gradient;UILabel *_author,*_caption,*_metadata,*_photoCount,*_likeCount,*_commentCount,*_collectCount,*_pause,*_message,*_speedText,*_previewTime;
@@ -143,6 +149,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)suspendForegroundWork {
  _appInactive=YES;[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
+ [self syncDanmakuPlayback];
 }
 - (void)leaveBackground {
  _appInactive=NO;
@@ -246,7 +253,11 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  [_emitted removeAllObjects];[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
 }
 - (void)handlePlaybackEnd:(NSNotification *)event {
- if(event.object!=_observedItem||!_active||_dragging||_seeking||_prepared.needsBeginning)return;
+ if(event.object!=_observedItem||!_active||_seeking||_prepared.needsBeginning)return;
+ if(_dragging){
+  NSUInteger request=++_restartToken;__weak DGFeedCell *weak=self;__weak AVPlayer *weakPlayer=_player;
+  [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{DGFeedCell *cell=weak;AVPlayer *player=weakPlayer;if(!cell||!player||player!=cell->_player||request!=cell->_restartToken||!finished)return;[cell->_emitted removeAllObjects];[cell->_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];if(cell->_active&&!cell->_paused&&!cell->_pagingMotion)[player playImmediatelyAtRate:cell->_boosting?cell->_boostRate:cell->_rate];});}];return;
+ }
  [self resetPlaybackForWork:Text(_work.id)];
  BOOL automatic=!_paused&&!_compact&&!_pagingMotion&&UIApplication.sharedApplication.applicationState==UIApplicationStateActive&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.autoScroll"];
  if(automatic&&self.advanceAction&&self.advanceAction())return;
@@ -352,10 +363,11 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)tick:(CMTime)time {
  if(!_player||_backgroundMode||_appInactive||_pagingMotion||_prepared.needsBeginning)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);
+ [self syncDanmakuPlayback];
  if(_active&&!_paused&&!_dragging&&!_seeking)[_slider followPlayer:_player duration:duration];
  _elapsed.text=TimeLabel(seconds);_totalTime.text=TimeLabel(duration);[self displayFirstFrame];
  if(std::isfinite(seconds)&&seconds>=0)_lastPlaybackTime=seconds;
- if(_active&&!_paused&&!_dragging&&!_backgroundMode&&std::isfinite(seconds)){
+ if(_active&&!_paused&&!_seeking&&!_backgroundMode&&std::isfinite(seconds)){
   if(!_reportedView&&seconds>.12&&_playerLayer.readyForDisplay&&self.viewedAction){_reportedView=YES;self.viewedAction();}
   if(_reportedView&&self.checkpointAction)self.checkpointAction();
 
@@ -381,10 +393,11 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;
  if(inMotion){[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
+ [self syncDanmakuPlayback];
 }
 - (void)active:(BOOL)value {
  if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak active:value];});return;}
- BOOL changed=_active!=value;_active=value;if(value&&!_backgroundMode&&!_pagingMotion){if(!_work.photo()&&!_player&&!_work.id.empty())[self attach:Obtain(_work) position:_lastPlaybackTime];else if(_work.photo()&&!_musicPlayer)[self attachPhotoSound:_lastPlaybackTime];}if(value&&!_paused)[self showLoadingIndicatorIfNeeded];else [self cancelLoadingIndicator];if(!value||_backgroundMode||_pagingMotion)[_ambient item:nil imageView:nil];else if(!_work.photo())[_ambient item:_observedItem imageView:nil];[_ambient active:value&&!_paused&&!_backgroundMode&&!_pagingMotion];if((changed||_foregroundRebind)&&_work.photo()&&value&&!_backgroundMode)[self loadPhotos];if(_work.photo()&&value&&!_backgroundMode)[_ambient item:nil imageView:_images.count?_images[MIN((NSUInteger)MAX(0,_photoIndex),_images.count-1)]:_cover];DGFreezeLayer(_danmaku.layer,!value||_paused||_backgroundMode);if(![_musicAvatar.layer animationForKey:@"album-spin"]){CABasicAnimation *spin=[CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];spin.fromValue=@0;spin.toValue=@(M_PI*2);spin.duration=9;spin.repeatCount=HUGE_VALF;[_musicAvatar.layer addAnimation:spin forKey:@"album-spin"];}DGFreezeLayer(_musicAvatar.layer,!value||_paused||_backgroundMode);
+ BOOL changed=_active!=value;_active=value;if(value&&!_backgroundMode&&!_pagingMotion){if(!_work.photo()&&!_player&&!_work.id.empty())[self attach:Obtain(_work) position:_lastPlaybackTime];else if(_work.photo()&&!_musicPlayer)[self attachPhotoSound:_lastPlaybackTime];}if(value&&!_paused)[self showLoadingIndicatorIfNeeded];else [self cancelLoadingIndicator];if(!value||_backgroundMode||_pagingMotion)[_ambient item:nil imageView:nil];else if(!_work.photo())[_ambient item:_observedItem imageView:nil];[_ambient active:value&&!_paused&&!_backgroundMode&&!_pagingMotion];if((changed||_foregroundRebind)&&_work.photo()&&value&&!_backgroundMode)[self loadPhotos];if(_work.photo()&&value&&!_backgroundMode)[_ambient item:nil imageView:_images.count?_images[MIN((NSUInteger)MAX(0,_photoIndex),_images.count-1)]:_cover];[self syncDanmakuPlayback];if(![_musicAvatar.layer animationForKey:@"album-spin"]){CABasicAnimation *spin=[CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];spin.fromValue=@0;spin.toValue=@(M_PI*2);spin.duration=9;spin.repeatCount=HUGE_VALF;[_musicAvatar.layer addAnimation:spin forKey:@"album-spin"];}DGFreezeLayer(_musicAvatar.layer,!value||_paused||_backgroundMode);
  if(value&&!_paused){
   if(_backgroundMode||_pagingMotion)return;
   if(_work.photo()&&!_reportedView&&self.viewedAction){_reportedView=YES;self.viewedAction();}
@@ -412,9 +425,10 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)hold:(UILongPressGestureRecognizer*)g {
  if(_cleanScreen)return;
  CGPoint point=[g locationInView:self.contentView];BOOL edge=point.x<56||point.x>self.contentView.bounds.size.width-80;
- if(g.state==UIGestureRecognizerStateBegan){if(edge&&!_work.photo()&&_player){if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];}_boosting=YES;_boostRate=1.5;_holdY=point.y;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"1.5× · 上滑提速，松手恢复";_player.currentItem.preferredForwardBufferDuration=8;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_boostRate;}else if(self.actionMenuAction)self.actionMenuAction(point);}
- else if(g.state==UIGestureRecognizerStateChanged&&_boosting){double distance=MAX(80.,MIN(200.,self.contentView.bounds.size.height*.25));double fraction=std::clamp((_holdY-point.y)/distance,0.,1.);double speed=1.5+fraction*(DGHoldSpeed()-1.5);if(fabs(speed-_boostRate)>.01){_boostRate=speed;_speedText.text=[NSString stringWithFormat:@"%.1f× · 上滑提速，松手恢复",speed];if(_active&&!_paused&&!_prepared.needsBeginning&&!_seeking)_player.rate=speed;}}
+ if(g.state==UIGestureRecognizerStateBegan){if(edge&&!_work.photo()&&_player){if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];}_boosting=YES;_boostRate=1.5;_holdY=point.y;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"1.5× · 上滑换档，松手恢复";_player.currentItem.preferredForwardBufferDuration=8;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_boostRate;}else if(self.actionMenuAction)self.actionMenuAction(point);}
+ else if(g.state==UIGestureRecognizerStateChanged&&_boosting){double upward=MAX(0.,_holdY-point.y),speed=upward<48?1.5:upward<112?2.:DGHoldSpeed();if(fabs(speed-_boostRate)>.01){_boostRate=speed;DGHaptic();_speedText.text=[NSString stringWithFormat:@"%.1f× · 上滑换档，松手恢复",speed];if(_active&&!_paused&&!_prepared.needsBeginning&&!_seeking)_player.rate=speed;}}
  else if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){[self unlock];_boosting=NO;_speedGlass.hidden=YES;_player.currentItem.preferredForwardBufferDuration=4;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_rate;}
+ [self syncDanmakuPlayback];
 }
 - (void)expandCaption{CGFloat width=MAX(80,MIN(self.contentView.bounds.size.width-103,680));CGFloat full=[Text(_work.caption)boundingRectWithSize:CGSizeMake(width,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:_caption.font} context:nil].size.height;if(!_captionExpanded&&full>self.contentView.bounds.size.height*.45){DGShowFullCaption(self.presenter,Text(_work.caption));return;}_captionExpanded=!_captionExpanded;[self setNeedsLayout];DGAnimate(.2,^{[self layoutIfNeeded];},nil);}
 - (void)copyCaption:(UILongPressGestureRecognizer*)g {if(g.state==UIGestureRecognizerStateBegan&&!_work.caption.empty())DGConfirmCopy(self.presenter,Text(_work.caption));}
@@ -461,8 +475,8 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)cacheFrame:(UIImage *)frame key:(NSNumber *)key{if(!frame)return;[_frameCache setObject:frame forKey:key cost:CGImageGetBytesPerRow(frame.CGImage)*CGImageGetHeight(frame.CGImage)];[_cachedTimes removeObject:key];[_cachedTimes addObject:key];while(_cachedTimes.count>48)[_cachedTimes removeObjectAtIndex:0];}
 - (UIImage *)closestFrame:(double)seconds{UIImage *frame=nil;double distance=1.01;for(NSNumber *key in _cachedTimes){double delta=fabs(key.doubleValue/2-seconds);if(delta<distance){UIImage *candidate=[_frameCache objectForKey:key];if(candidate){distance=delta;frame=candidate;}}}return frame;}
 - (void)seekStart {
- if(!_player||_prepared.needsBeginning)return;
- ++_restartToken;++_previewGeneration;[_generator cancelAllCGImageGeneration];_dragging=YES;_seeking=YES;_seekOriginal=CMTimeGetSeconds(_player.currentTime);[_player pause];_previewImage.image=nil;_previewGlass.hidden=YES;_previewBusy=NO;
+ if(!_player||_seeking||_prepared.needsBeginning)return;
+ ++_restartToken;++_previewGeneration;[_generator cancelAllCGImageGeneration];_dragging=YES;_previewImage.image=nil;_previewGlass.hidden=YES;_previewBusy=NO;
 }
 - (void)preparePreview {
  if(!_generator&&_player.currentItem.asset){_generator=[[AVAssetImageGenerator alloc]initWithAsset:_player.currentItem.asset];_generator.appliesPreferredTrackTransform=YES;_generator.maximumSize=CGSizeMake(360,480);_generator.requestedTimeToleranceBefore=CMTimeMakeWithSeconds(.12,600);_generator.requestedTimeToleranceAfter=CMTimeMakeWithSeconds(.12,600);}
@@ -502,7 +516,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)seekCancel{
  if(!_dragging)return;
  _dragging=NO;_seeking=NO;_previewGlass.hidden=YES;++_previewGeneration;_previewBusy=NO;[_generator cancelAllCGImageGeneration];
- double duration=CMTimeGetSeconds(_player.currentItem.duration);if(std::isfinite(duration)&&duration>0&&std::isfinite(_seekOriginal))_slider.value=_seekOriginal/duration;
+ double duration=CMTimeGetSeconds(_player.currentItem.duration),position=CMTimeGetSeconds(_player.currentTime);if(std::isfinite(duration)&&duration>0&&std::isfinite(position))_slider.value=position/duration;
  _progressAt=CACurrentMediaTime();[self playCurrentVideo];
 }
 - (void)seekEnd {
@@ -514,10 +528,14 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)settingsChanged {[self configurePiP];[self setNeedsLayout];[self emojiReady];_rate=1;BOOL state=DGBackgroundAudioEnabled();if(_backgroundSoundState!=state){_backgroundSoundState=state;[UIView transitionWithView:_fillButton duration:.25 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{[self->_fillButton setImage:[UIImage systemImageNamed:state?@"headphones.circle.fill":@"headphones"] forState:UIControlStateNormal];} completion:nil];[UIView animateWithDuration:.12 animations:^{self->_fillButton.transform=CGAffineTransformMakeScale(1.15,1.15);} completion:^(BOOL done){[UIView animateWithDuration:.18 animations:^{self->_fillButton.transform=CGAffineTransformIdentity;}];}];}else [_fillButton setImage:[UIImage systemImageNamed:state?@"headphones.circle.fill":@"headphones"] forState:UIControlStateNormal];id enabled=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku"];_danmaku.hidden=_cleanScreen||(enabled&&![enabled boolValue]);if(_danmaku.hidden)[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];if(_active&&!_paused&&!_boosting){if(fabs(_player.rate-_rate)>.01&&_player.rate>0)_player.rate=_rate;if(fabs(_musicPlayer.rate-_rate)>.01&&_musicPlayer.rate>0)_musicPlayer.rate=_rate;}}
 - (void)copyDanmaku:(UITapGestureRecognizer *)gesture{if(gesture.state!=UIGestureRecognizerStateRecognized)return;NSString *text=_tappedDanmaku;_tappedDanmaku=nil;if(text.length)DGConfirmTextCopy(self.presenter,text,@"复制这条弹幕？",@"弹幕已复制");}
 - (void)emojiReady{for(DGDanmakuLabel *label in _danmaku.subviews)DGRenderDanmaku(label,label.plain,label.emoticons);}
+- (void)syncDanmakuPlayback{
+ double speed=_active&&!_paused&&!_backgroundMode&&!_appInactive&&!_pagingMotion&&!_seeking&&_player.timeControlStatus==AVPlayerTimeControlStatusPlaying?MAX(0.,_player.rate):0;
+ DGSetLayerPlaybackRate(_danmaku.layer,speed);
+}
 - (void)updateDanmaku:(double)seconds {
  if(_danmaku.hidden||_work.photo()||!self.bridge)return;NSInteger window=(NSInteger)seconds/30;
  if(window!=_danmakuWindow&&!_danmakuLoading){_danmakuLoading=YES;NSUInteger generation=_generation;__weak DGFeedCell *weak=self;[self.bridge request:@"danmaku" parameters:@{@"id":Text(_work.id),@"from":@(window*30000),@"to":@((window+1)*30000),@"duration":@(MAX(30000.,_work.duration*1000))} completion:^(NSDictionary *result,NSString *error){DGFeedCell *self=weak;if(!self||generation!=self->_generation)return;self->_danmakuLoading=NO;self->_danmakuWindow=window;self->_danmakuItems=error?@[]:Array(result[@"items"]);[self->_emitted removeAllObjects];}];}
- if(window!=_danmakuWindow)return;double font=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(font<12||font>28)font=14;NSInteger lanes=MAX(1,MIN(3,(NSInteger)(_danmaku.bounds.size.height/(font+12))));CGFloat area=_danmaku.bounds.size.width;CFTimeInterval now=CACurrentMediaTime();NSUInteger index=0;
+ if(window!=_danmakuWindow)return;double font=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(font<12||font>28)font=14;NSInteger lanes=MAX(1,MIN(3,(NSInteger)(_danmaku.bounds.size.height/(font+12))));CGFloat area=_danmaku.bounds.size.width;CFTimeInterval now=[_danmaku.layer convertTime:CACurrentMediaTime() fromLayer:nil];NSUInteger index=0;
  for(NSDictionary *row in _danmakuItems){double offset=[row[@"offset"]doubleValue];NSString *rowID=Text(String(row[@"id"]));NSString *key=rowID.length?[@"id:" stringByAppendingString:rowID]:[NSString stringWithFormat:@"%ld:%lu",(long)window,(unsigned long)index];++index;if(offset>seconds+.2||offset<seconds-1.2||[_emitted containsObject:key])continue;
   NSInteger lane=-1;for(NSInteger candidate=0;candidate<lanes;candidate++){BOOL free=YES;for(DGDanmakuLabel *label in _danmaku.subviews){if(label.tag!=candidate)continue;CALayer *presentation=label.layer.presentationLayer;CGRect frame=presentation?presentation.frame:label.frame;if(now-label.born<.15||CGRectGetMaxX(frame)>area-36){free=NO;break;}}if(free){lane=candidate;break;}}
   if(lane<0)continue;NSString *text=[row[@"text"]isKindOfClass:NSString.class]?row[@"text"]:@"";[_emitted addObject:key];if(!text.length)continue;

@@ -128,6 +128,7 @@ NSString *DGCurrentMusicID(void);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);
+NSString *DGCurrentWorkID(UIViewController *player);
 UIViewController *DGMakeProfile(DGBridge *bridge, NSString *sec, NSString *name, NSString *locate);
 UIViewController *DGMakeSearch(DGBridge *bridge);
 UIViewController *DGMakeMusic(DGBridge *bridge, NSDictionary *music);

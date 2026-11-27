@@ -13,7 +13,12 @@
  window.DGChat={async request(action,params={}){
   try{
    if(action==='list'){
-    const rows=conversations();const items=rows.map(element=>{const c=fiberValue(element,'conversation')||{};const name=element.querySelector('[class*="conversationConversationItemtitle"]')?.textContent?.trim()||element.innerText.split('\n')[0]||'';return {id:conversationID(element),name,avatar:element.querySelector('img')?.src||'',preview:element.querySelector('[class*="HinttextBox"],[class*="ConversationItemDescleft"]')?.textContent?.trim()||'',badge:element.querySelector('[class*="UnReadCount"],[class*="badge-count"]')?.textContent?.trim()||'',time:element.querySelector('[class*="timeStr"],[class*="TimeStr"]')?.textContent?.trim()||''};}).filter(row=>row.id&&row.name);return {items,ready:rows.length>0||!!document.querySelector('[class*="ConversationListwrapper"]')};
+    const rows=conversations();const items=rows.map(element=>{const c=fiberValue(element,'conversation')||{};const name=element.querySelector('[class*="conversationConversationItemtitle"]')?.textContent?.trim()||element.innerText.split('\n')[0]||'';
+     const badge=element.querySelector('[class*="UnReadCount"],[class*="UnreadCount"],[class*="unreadCount"],[class*="badge-count"],[class*="unreadDot"],[class*="UnReadDot"]'),text=badge?.textContent?.trim()||'';
+     const raw=c.unreadCount??c.unread_count??c.unReadCount??c.unreadMessageCount,unreadCount=raw!=null&&Number.isFinite(Number(raw))?Math.max(0,Number(raw)):parseInt(text,10)||0;
+     const rect=badge?.getBoundingClientRect(),visible=!!(badge&&rect.width>0&&rect.height>0&&getComputedStyle(badge).display!=='none'&&getComputedStyle(badge).visibility!=='hidden');
+     const unread=unreadCount>0||visible&&text!=='0'||c.hasUnread===true||c.has_unread===true;
+     return {id:conversationID(element),name,avatar:element.querySelector('img')?.src||'',preview:element.querySelector('[class*="HinttextBox"],[class*="ConversationItemDescleft"]')?.textContent?.trim()||'',badge:unread?(unreadCount>99?'99+':unreadCount>0?String(unreadCount):''):'',unreadCount,unread,time:element.querySelector('[class*="timeStr"],[class*="TimeStr"]')?.textContent?.trim()||''};}).filter(row=>row.id&&row.name);return {items,ready:rows.length>0||!!document.querySelector('[class*="ConversationListwrapper"]')};
    }
    if(action==='open'){const row=conversations().find(element=>conversationID(element)===params.id);if(!row)return {error:'会话暂未加载，请刷新会话列表'};invoke(row);window.__dgChatID=params.id;await delay(900);return {items:readMessages(params.uid||'')};}
    if(action==='messages'){if(window.__dgChatID!==params.id)return {error:'会话已变化，请重新打开'};return {items:readMessages(params.uid||'')};}

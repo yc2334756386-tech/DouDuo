@@ -157,9 +157,9 @@
       }
       if(operation==='userLocation'){if(ipCache.has(params.sec))return {location:ipCache.get(params.sec)};const data=await get('/aweme/v1/web/user/profile/other/',{sec_user_id:params.sec,publish_video_strategy_type:'2',personal_center_strategy:'1'});const profile=user(data.user||data.user_info);if(ipCache.size>150)ipCache.delete(ipCache.keys().next().value);const location=(profile.location||'').replace(/^IP属地[:：\s]*/,'');ipCache.set(params.sec,location);return {location};}
       if(operation==='detail'){const data=await get('/aweme/v1/web/aweme/detail/',{aweme_id:params.id});return {items:works([data.aweme_detail||data.aweme].filter(Boolean))};}
-      if(operation==='noticeCounts'){const data=await get('/aweme/v1/web/notice/count/',{is_new_notice:'1',need_social_count:'1'});return {items:(data.notice_count||data.notice_count_list||[]).map(value=>({group:Number(value.group??value.notice_group??0),count:Number(value.count||0)}))};}
+      if(operation==='noticeCounts'){const data=await get('/aweme/v1/web/notice/count/',{is_new_notice:'1',need_social_count:'1'});const list=data.notice_count||data.notice_count_list;if(!Array.isArray(list))throw new Error('平台未返回未读消息状态');return {items:list.map(value=>({group:Number(value.group??value.notice_group??0),count:Number(value.count||0)}))};}
       if(operation==='notices'){
-        const data=await get('/aweme/v1/web/notice/',{is_new_notice:'1',is_mark_read:'0',count:'20',notice_group:String(params.group||700),min_time:'0',max_time:cursor});
+        const data=await get('/aweme/v1/web/notice/',{is_new_notice:'1',is_mark_read:params.markRead?'1':'0',count:'20',notice_group:String(params.group||700),min_time:'0',max_time:cursor});
         const stable=value=>{const text=id(value);return /^\d+$/.test(text)&&text!=='0'?text:'';};
         const items=(data.notice_list_v2||data.notice_list||[]).map(notice=>{
           const type=Number(notice.type||0),general=notice.general_notice||{},thread=notice.comment||{},digg=notice.digg||{},follow=notice.follow||{},at=notice.at||{},interactive=notice.interactive_notice||{};
