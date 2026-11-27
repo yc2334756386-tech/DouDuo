@@ -296,7 +296,7 @@
   if(!self->_staticFeed&&!self->_profile&&[DGCurrentFeedScope()isEqualToString:@"anonymous"]&&self->_beforeProfileViews.size()<50)self->_beforeProfileViews.push_back(current);
   DGRecordViewed(current);DGWarmWorks(self->_feed.works,self->_current);[self warmAfterSettling];
  };cell.advanceAction=^BOOL{return [weakSelf advanceWork];};cell.commentsAction=^{[weakSelf showComments:workID];};cell.profileAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,workID)];};
-    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO})];};return cell;
+    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"contextWork":record})];};return cell;
 }
 - (void)activate {
  if(_relayout||!_foreground||_pagingMotion)return;

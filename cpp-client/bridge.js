@@ -76,9 +76,10 @@
     const uid=id(value.uid||value.id_str||value.id);
     return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:ipFrom(value)};
   };
+  const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.mid)||id(value?.music_id)||id(value?.id);
   const music=value=>{
     value=value||{};
-    return {id:id(value.id_str||value.id||value.mid),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),duration:Number(value.duration||0)};
+    return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),duration:Number(value.duration||0)};
   };
   const work=item=>{
     const isAd=!!(item.is_ads||item.is_ad||(item.raw_ad_data&&Object.keys(item.raw_ad_data).length));
@@ -99,7 +100,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),contentKey:typeof video.play_addr?.uri==='string'&&!/^(?:https?:)?\//i.test(video.play_addr.uri)?video.play_addr.uri:'',caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),contentKey:typeof video.play_addr?.uri==='string'&&!/^(?:https?:)?\//i.test(video.play_addr.uri)?video.play_addr.uri:'',caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:musicIdentifier(sound)||id(item.music_id_str)||id(item.music_id),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -108,9 +109,19 @@
     return {id:id(item.cid),text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),liked:!!item.user_digged,likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
   const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length||item.mediaSources?.urls.length||item.mediaSources?.candidates.length));
+  const musicWorks=(list,identifier,scoped=false)=>works(list).flatMap(item=>{
+    if(item.musicID)return item.musicID===identifier?[item]:[];
+    return scoped&&identifier?[Object.assign(item,{musicID:identifier})]:[];
+  });
+  const musicPage=(data,identifier)=>{
+    const payload=data.data&&typeof data.data==='object'&&!Array.isArray(data.data)?data.data:data;
+    const list=[payload.aweme_list,data.aweme_list,payload.awemeList,data.awemeList,Array.isArray(data.data)?data.data:null].find(Array.isArray);
+    if(!list)throw new Error('原声作品接口未返回作品列表');
+    return {items:musicWorks(list,String(identifier),true),cursor:id(payload.cursor??payload.max_cursor??data.cursor??data.max_cursor??0),more:!!Number(payload.has_more??data.has_more??0)};
+  };
   const page=(data,list,cursor,more)=>({items:works(list),cursor:id(cursor==null?data.cursor||data.max_cursor||0:cursor),more:more==null?!!data.has_more:!!more});
   const users=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(entry=>user(entry.user_info||entry.user||entry)).filter(value=>value.sec);
-  window.DouGlass={version:3,normalizeWorks:works,normalizeUsers:users,async request(operation,params={}){
+  window.DouGlass={version:3,normalizeWorks:works,normalizeMusicWorks:musicWorks,normalizeUsers:users,async request(operation,params={}){
     const cursor=String(params.cursor||'0');
     try {
       if(operation==='feed'){
@@ -176,9 +187,9 @@
       if(operation==='musicDetail'){
         const data=await get('/aweme/v1/web/music/detail/',{music_id:params.id,scene:'1'});return music(data.music_info||data.music||{});
       }
-      if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return page(data,data.aweme_list,data.cursor,data.has_more);}
+      if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return musicPage(data,params.id);}
       if(operation==='musicWorks'){
-        const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10',scene:'1'});if(!Array.isArray(data.aweme_list))throw new Error('原声作品接口没有返回作品列表');return page(data,data.aweme_list,data.cursor,data.has_more);
+        const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10',scene:'1'});return musicPage(data,params.id);
       }
       if(operation==='following'){
         const data=await get('/aweme/v1/web/user/following/list/',{sec_user_id:params.sec||'',user_id:params.uid||'',cursor,offset:cursor,count:'30',source_type:'1'});

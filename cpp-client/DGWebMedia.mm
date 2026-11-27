@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#import "DGMusicIndex.h"
 #include "MediaSources.hpp"
 
 namespace {
@@ -45,5 +46,5 @@ NSArray *DGNormalizeWebItems(id items) {
         result[@"variants"]=options;
         [results addObject:result];
     }
-    return results;
+    DGIndexMusicWorks(results);return results;
 }
