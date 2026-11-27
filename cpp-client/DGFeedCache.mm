@@ -31,6 +31,7 @@ BOOL LooksLikeVideo(NSURL *file){
 - (void)consume:(NSString *)identifier;
 - (NSURL *)urlFor:(NSString *)identifier;
 - (void)setIdle:(BOOL)idle;
+- (void)cancelPrefetch;
 @end
 @implementation DGUnwatchedCache {
  NSString *_scope,*_current,*_downloading;
@@ -137,6 +138,10 @@ BOOL LooksLikeVideo(NSURL *file){
  else if(_task&&idle&&_suspended){_suspended=NO;[_task resume];}
  if(idle)[self pump];
 }
+- (void)cancelPrefetch {
+ _idle=NO;
+ NSURLSessionDownloadTask *task=_task;_task=nil;_downloading=nil;_suspended=NO;[task cancel];
+}
 - (void)pump {
  if(!_idle||_task||_staging.count||!_folder||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
  unsigned long long total=0;for(NSNumber *size in _mediaSizes.allValues)total+=size.unsignedLongLongValue;
@@ -199,3 +204,5 @@ void DGCacheSelectWork(NSString *identifier){[Cache() select:identifier];}
 void DGCacheConsume(NSString *identifier){[Cache() consume:identifier];}
 NSURL *DGCacheLocalVideo(NSString *identifier){return [Cache() urlFor:identifier];}
 void DGCacheSetIdle(BOOL idle){[Cache() setIdle:idle];}
+
+void DGCacheCancelPrefetch(void){[Cache() cancelPrefetch];}

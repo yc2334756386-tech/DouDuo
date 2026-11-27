@@ -15,3 +15,5 @@ void DGCacheSelectWork(NSString *identifier);
 void DGCacheConsume(NSString *identifier);
 NSURL *DGCacheLocalVideo(NSString *identifier);
 void DGCacheSetIdle(BOOL idle);
+
+void DGCacheCancelPrefetch(void);

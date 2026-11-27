@@ -95,7 +95,8 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
      _meta.text=[parts componentsJoinedByString:@"   "];
     _reply.hidden=nested||comment.replies<=0;
     NSString *replyText=expanded?@"收起回复 ︿":[NSString stringWithFormat:@"展开 %@ 条回复 ﹀",Text(douglass::compact(comment.replies))];
-    if(loading&&expanded)replyText=@"正在读取回复… 轻点收起";
+    if(loading&&expanded)replyText=@"正在读取回复…";
+    _reply.enabled=!(loading&&expanded);
     [_reply setTitle:replyText forState:UIControlStateNormal];
 }
 - (void)renderEmoji {
@@ -292,8 +293,8 @@ namespace { struct DGReplyState {
     [UIView performWithoutAnimation:^{[self->_table reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];}];
 }
 - (void)toggleReplies:(NSString *)identifier {
-    DGReplyState &state=_replyStates[String(identifier)]; state.expanded=!state.expanded; [self reloadThread:identifier];
-    if(state.expanded&&!state.loaded&&!state.loading)[self loadReplies:identifier];
+    DGReplyState &state=_replyStates[String(identifier)]; state.expanded=!state.expanded;
+    if(state.expanded&&!state.loaded&&!state.loading)[self loadReplies:identifier];else [self reloadThread:identifier];
 }
 - (void)collapseReplies:(NSString *)identifier {
     auto found=_replyStates.find(String(identifier)); if(found==_replyStates.end())return; found->second.expanded=false; [self reloadThread:identifier];
@@ -314,7 +315,7 @@ namespace { struct DGReplyState {
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return(NSInteger)_comments.size();}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(section<0||(std::size_t)section>=_comments.size())return 0; auto found=_replyStates.find(_comments[section].id);
-    return found!=_replyStates.end()&&found->second.expanded?(NSInteger)found->second.items.size()+2:1;
+    return found!=_replyStates.end()&&found->second.expanded&&(!found->second.loading||found->second.loaded)?(NSInteger)found->second.items.size()+2:1;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     const Comment &parent=_comments[indexPath.section]; NSString *parentID=Text(parent.id);
@@ -327,7 +328,7 @@ namespace { struct DGReplyState {
     }
     const Comment &comment=indexPath.row==0?parent:state->items[indexPath.row-1];
     DGCommentCell *cell=[tableView dequeueReusableCellWithIdentifier:@"comment" forIndexPath:indexPath];
-    [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading];
+    [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading&&!state->loaded];
     cell.contentView.backgroundColor=[_highlightID isEqualToString:Text(comment.id)]?[UIColor.systemTealColor colorWithAlphaComponent:.16]:UIColor.clearColor;
     NSString *sec=Text(comment.authorID),*name=Text(comment.author);
     cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};

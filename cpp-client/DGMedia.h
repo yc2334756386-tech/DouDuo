@@ -23,6 +23,10 @@
 - (void)releaseUnusedResources;
 - (void)pagingInMotion:(BOOL)inMotion;
 - (BOOL)hasRenderedMedia;
+- (void)stagePreparedVideo;
+- (double)currentPlaybackPosition;
+- (BOOL)isPlaybackPaused;
+- (void)restorePlaybackPosition:(double)seconds paused:(BOOL)paused;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);

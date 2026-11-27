@@ -1,21 +1,116 @@
 #import "DGTimeline.h"
+#import <QuartzCore/QuartzCore.h>
+#import <AVFoundation/AVFoundation.h>
 #include <cmath>
 #include "Core.hpp"
-@interface DGTimeline()<UIGestureRecognizerDelegate>
+
+@interface DGTimelineClock:NSObject
+@property(nonatomic,weak) DGTimeline *timeline;
+- (void)step:(CADisplayLink *)link;
 @end
-@implementation DGTimeline{UIPanGestureRecognizer *_pan;BOOL _scrubbing;float _originalValue;}
-- (instancetype)initWithFrame:(CGRect)frame{if((self=[super initWithFrame:frame])){_maximumValue=1;self.backgroundColor=UIColor.clearColor;self.isAccessibilityElement=YES;self.accessibilityLabel=@"视频播放进度";self.accessibilityTraits=UIAccessibilityTraitAdjustable;_pan=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(pan:)];_pan.maximumNumberOfTouches=1;_pan.delegate=self;[self addGestureRecognizer:_pan];}return self;}
+@interface DGTimeline()<UIGestureRecognizerDelegate>
+- (void)updateFromPlayer;
+@end
+@implementation DGTimelineClock
+- (void)step:(CADisplayLink *)link {
+    DGTimeline *timeline=self.timeline;
+    if(timeline)[timeline updateFromPlayer];else [link invalidate];
+}
+@end
+
+@implementation DGTimeline {
+    UIPanGestureRecognizer *_pan;
+    CALayer *_track,*_progress,*_thumb;
+    CADisplayLink *_displayLink;
+    __weak AVPlayer *_player;
+    double _duration;
+    BOOL _scrubbing;
+    float _originalValue;
+}
+- (instancetype)initWithFrame:(CGRect)frame {
+    if((self=[super initWithFrame:frame])){
+        _maximumValue=1;self.backgroundColor=UIColor.clearColor;
+        self.isAccessibilityElement=YES;self.accessibilityLabel=@"视频播放进度";self.accessibilityTraits=UIAccessibilityTraitAdjustable;
+        _track=[CALayer layer];_track.cornerRadius=1.5;
+        _progress=[CALayer layer];_progress.cornerRadius=1.5;_progress.anchorPoint=CGPointMake(0,.5);
+        _thumb=[CALayer layer];_thumb.cornerRadius=3;_thumb.backgroundColor=UIColor.whiteColor.CGColor;
+        for(CALayer *layer in @[_track,_progress,_thumb])[self.layer addSublayer:layer];
+        [self updateColors];
+        _pan=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(pan:)];_pan.maximumNumberOfTouches=1;_pan.delegate=self;[self addGestureRecognizer:_pan];
+    }return self;
+}
 - (BOOL)scrubbing{return _scrubbing;}
-- (void)setValue:(float)value{_value=MIN(_maximumValue,MAX(_minimumValue,value));self.accessibilityValue=[NSString stringWithFormat:@"%.0f%%",100*(_value-_minimumValue)/MAX(.001,_maximumValue-_minimumValue)];[self setNeedsDisplay];}
-- (void)setMaximumTrackTintColor:(UIColor *)color{_maximumTrackTintColor=color;[self setNeedsDisplay];}
-- (void)setThumbImage:(UIImage *)image forState:(UIControlState)state{}
-- (void)tintColorDidChange{[super tintColorDidChange];[self setNeedsDisplay];}
+- (void)setValue:(float)value {
+    if(!std::isfinite(value))return;
+    float next=std::clamp(value,_minimumValue,_maximumValue);if(next==_value)return;_value=next;
+    [self layoutProgress];
+}
+- (NSString *)accessibilityValue{return [NSString stringWithFormat:@"%.0f%%",100*(_value-_minimumValue)/MAX(.001,_maximumValue-_minimumValue)];}
+- (void)setMaximumTrackTintColor:(UIColor *)color{_maximumTrackTintColor=color;[self updateColors];}
+- (void)tintColorDidChange{[super tintColorDidChange];[self updateColors];}
+- (void)updateColors {
+    [CATransaction begin];[CATransaction setDisableActions:YES];
+    _track.backgroundColor=(_maximumTrackTintColor?:[UIColor colorWithWhite:1 alpha:.2]).CGColor;
+    _progress.backgroundColor=(self.tintColor?:UIColor.whiteColor).CGColor;
+    [CATransaction commit];
+}
+- (void)layoutSubviews {[super layoutSubviews];[self layoutProgress];}
+- (void)layoutProgress {
+    CGFloat width=CGRectGetWidth(self.bounds),y=CGRectGetMidY(self.bounds);
+    CGFloat progress=width*(_value-_minimumValue)/MAX(.001,_maximumValue-_minimumValue);
+    CGFloat thumbWidth=MIN(25,width);
+    [CATransaction begin];[CATransaction setDisableActions:YES];
+    _track.frame=CGRectMake(0,y-1.5,width,3);
+    _progress.position=CGPointMake(0,y);_progress.bounds=CGRectMake(0,0,progress,3);
+    _thumb.bounds=CGRectMake(0,0,thumbWidth,6);_thumb.position=CGPointMake(std::clamp(progress,thumbWidth/2,width-thumbWidth/2),y);
+    [CATransaction commit];
+}
+- (void)followPlayer:(AVPlayer *)player duration:(double)duration {
+    if(!player||!std::isfinite(duration)||duration<=0||self.hidden||!self.window||_scrubbing){[self stopFollowing];return;}
+    _player=player;_duration=duration;[self updateFromPlayer];
+    if(_displayLink||player.timeControlStatus!=AVPlayerTimeControlStatusPlaying)return;
+    DGTimelineClock *clock=[DGTimelineClock new];clock.timeline=self;
+    _displayLink=[CADisplayLink displayLinkWithTarget:clock selector:@selector(step:)];
+    [_displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+}
+- (void)updateFromPlayer {
+    AVPlayer *player=_player;
+    if(!player||self.hidden||!self.window||_scrubbing){[self stopFollowing];return;}
+    double seconds=CMTimeGetSeconds(player.currentTime);
+    if(std::isfinite(seconds)&&_duration>0)self.value=seconds/_duration;
+    if(player.timeControlStatus!=AVPlayerTimeControlStatusPlaying)[self stopFollowing];
+}
+- (void)stopFollowing {[_displayLink invalidate];_displayLink=nil;_player=nil;}
+- (void)setHidden:(BOOL)hidden{[super setHidden:hidden];if(hidden)[self stopFollowing];}
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event{return CGRectContainsPoint(CGRectInset(self.bounds,-8,-14),point);}
-- (void)drawRect:(CGRect)rect{CGContextClearRect(UIGraphicsGetCurrentContext(),self.bounds);CGFloat width=self.bounds.size.width,y=self.bounds.size.height/2,ratio=(_value-_minimumValue)/MAX(.001,_maximumValue-_minimumValue),x=ratio*width;[(_maximumTrackTintColor?:[UIColor colorWithWhite:1 alpha:.2])setFill];[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0,y-1.5,width,3) cornerRadius:1.5]fill];[(self.tintColor?:UIColor.whiteColor)setFill];[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0,y-1.5,x,3) cornerRadius:1.5]fill];[UIColor.whiteColor setFill];[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(MAX(0,MIN(width-25,x-12.5)),y-3,25,6) cornerRadius:3]fill];}
 - (BOOL)gestureRecognizerShouldBegin:(UIPanGestureRecognizer *)gesture{CGPoint velocity=[gesture velocityInView:self];return fabs(velocity.x)>fabs(velocity.y);}
-- (void)didMoveToWindow{[super didMoveToWindow];for(UIView *view=self.superview;view;view=view.superview)if([view isKindOfClass:UIScrollView.class])[((UIScrollView *)view).panGestureRecognizer requireGestureRecognizerToFail:_pan];}
-- (void)update:(CGPoint)point{self.value=douglass::relativeProgress(_originalValue,point.x,self.bounds.size.width,_minimumValue,_maximumValue);if(self.trackingChanged)self.trackingChanged();}
-- (void)pan:(UIPanGestureRecognizer *)gesture{if(gesture.state==UIGestureRecognizerStateBegan){_scrubbing=YES;_originalValue=self.value;if(self.trackingBegan)self.trackingBegan();[self update:[gesture translationInView:self]];}else if(gesture.state==UIGestureRecognizerStateChanged)[self update:[gesture translationInView:self]];else if(gesture.state==UIGestureRecognizerStateEnded){[self update:[gesture translationInView:self]];if(self.trackingEnded)self.trackingEnded(NO);_scrubbing=NO;}else if(gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed){self.value=_originalValue;if(self.trackingEnded)self.trackingEnded(YES);_scrubbing=NO;}}
-- (void)accessibilityIncrement{_scrubbing=YES;if(self.trackingBegan)self.trackingBegan();self.value+=(_maximumValue-_minimumValue)*.05;if(self.trackingChanged)self.trackingChanged();if(self.trackingEnded)self.trackingEnded(NO);_scrubbing=NO;}
-- (void)accessibilityDecrement{_scrubbing=YES;if(self.trackingBegan)self.trackingBegan();self.value-=(_maximumValue-_minimumValue)*.05;if(self.trackingChanged)self.trackingChanged();if(self.trackingEnded)self.trackingEnded(NO);_scrubbing=NO;}
+- (void)didMoveToWindow{
+    [super didMoveToWindow];if(!self.window){[self stopFollowing];return;}
+    for(UIView *view=self.superview;view;view=view.superview)if([view isKindOfClass:UIScrollView.class])[((UIScrollView *)view).panGestureRecognizer requireGestureRecognizerToFail:_pan];
+}
+- (void)update:(CGPoint)point {
+    self.value=douglass::relativeProgress(_originalValue,point.x,self.bounds.size.width,_minimumValue,_maximumValue);
+    if(self.trackingChanged)self.trackingChanged();
+}
+- (void)pan:(UIPanGestureRecognizer *)gesture {
+    switch(gesture.state){
+        case UIGestureRecognizerStateBegan:
+            _scrubbing=YES;_originalValue=self.value;[self stopFollowing];if(self.trackingBegan)self.trackingBegan();
+            [self update:[gesture translationInView:self]];break;
+        case UIGestureRecognizerStateChanged:[self update:[gesture translationInView:self]];break;
+        case UIGestureRecognizerStateEnded:
+            [self update:[gesture translationInView:self]];if(self.trackingEnded)self.trackingEnded(NO);_scrubbing=NO;break;
+        case UIGestureRecognizerStateCancelled:case UIGestureRecognizerStateFailed:
+            if(!_scrubbing)break;self.value=_originalValue;if(self.trackingEnded)self.trackingEnded(YES);_scrubbing=NO;break;
+        default:break;
+    }
+}
+- (void)adjustAccessibility:(float)direction {
+    [self stopFollowing];_scrubbing=YES;if(self.trackingBegan)self.trackingBegan();
+    self.value+=direction*(_maximumValue-_minimumValue)*.05;if(self.trackingChanged)self.trackingChanged();
+    if(self.trackingEnded)self.trackingEnded(NO);_scrubbing=NO;
+}
+- (void)accessibilityIncrement{[self adjustAccessibility:1];}
+- (void)accessibilityDecrement{[self adjustAccessibility:-1];}
+- (void)dealloc{[_displayLink invalidate];}
 @end

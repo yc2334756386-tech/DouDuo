@@ -29,7 +29,7 @@ void Append(NSString *message) {
         [manager removeItemAtURL:File(5) error:nil];
         for(NSInteger i=4;i>=0;--i)if([manager fileExistsAtPath:File(i).path])[manager moveItemAtURL:File(i) toURL:File(i+1) error:nil];
     }
-    NSData *line=[[NSString stringWithFormat:@"%@ %@\n",[clock stringFromDate:NSDate.date],message] dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *line=[[NSString stringWithFormat:@"%@ pid=%d %@\n",[clock stringFromDate:NSDate.date],NSProcessInfo.processInfo.processIdentifier,message] dataUsingEncoding:NSUTF8StringEncoding];
     if(![manager fileExistsAtPath:current.path]){[line writeToURL:current options:NSDataWritingAtomic error:nil];return;}
     NSFileHandle *handle=[NSFileHandle fileHandleForWritingToURL:current error:nil];
     if(!handle)return;
