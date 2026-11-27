@@ -68,7 +68,7 @@ static NSHashTable<DGFeedCell *> *MediaCells() {
 - (void)resetPlaybackForWork:(NSString *)identifier;
 @end
 static NSMutableDictionary<NSString *,DGPrepared *> *Pool(){static NSMutableDictionary *pool;static dispatch_once_t once;dispatch_once(&once,^{pool=[NSMutableDictionary dictionary];});return pool;}
-static NSString *PlayerURL(const Work &work){NSString *identifier=Text(work.id);NSURL *file=DGPlaybackResumeLocalVideo(identifier)?:DGCacheLocalVideo(identifier);return file.absoluteString?:Text(work.play);}
+static NSString *PlayerURL(const Work &work){NSString *identifier=Text(work.id);NSURL *file=DGCacheLocalVideo(identifier)?:DGPlaybackResumeLocalVideo(identifier);return file.absoluteString?:Text(work.play);}
 static NSString *PoolKey(const Work &work){return [NSString stringWithFormat:@"%@|%@",Text(work.id),PlayerURL(work)];}
 static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=Pool()[key];if(!p){p=[[DGPrepared alloc]initWithURL:PlayerURL(w)];Pool()[key]=p;}if(Pool().count>3)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(![key isEqualToString:old]&&!v.leases){[v retire];[Pool() removeObjectForKey:old];if(Pool().count<=3)break;}}return p;}
 void DGWarmWorks(const std::vector<Work>&works,NSInteger index){if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;NSMutableSet *keys=[NSMutableSet set];for(NSInteger i=MAX(0,index-1);i<=MIN((NSInteger)works.size()-1,index+1);++i){const Work &w=works[i];if(w.photo()||w.play.empty())continue;[keys addObject:PoolKey(w)];DGPrepared *p=Obtain(w);if(i!=index)[p warm];}for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(![keys containsObject:key]&&!p.leases){[p retire];[Pool() removeObjectForKey:key];}}}
@@ -92,7 +92,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  UIVisualEffectView *_rail,*_moreGlass,*_photoGlass,*_speedGlass,*_previewGlass;UIButton *_avatarButton,*_likeButton,*_commentButton,*_collectButton,*_fillButton,*_moreButton,*_musicButton;UIImageView *_previewImage;
  AVPlayer *_player,*_musicPlayer;AVPlayerLayer *_playerLayer;DGPrepared *_prepared;AVPlayerItem *_observedItem;AVAssetImageGenerator *_generator;id _loopToken,_musicLoopToken,_clock,_stallToken,_accessToken,_failureToken;DGTimeline *_slider;
  NSMutableArray<UIScrollView*> *_locked;BOOL _active,_paused,_alternateUsed,_dragging,_seeking,_compact,_fill,_boosting,_busy,_danmakuLoading;double _rate,_holdY,_progressAt,_progress;NSInteger _recoveries,_photoIndex,_danmakuWindow,_lane;NSUInteger _generation,_previewGeneration;NSArray<NSDictionary*> *_danmakuItems;NSMutableSet<NSString*> *_emitted;
- AVPictureInPictureController *_pip;BOOL _backgroundMode,_cleanScreen,_foregroundRebind,_pagingMotion,_reportedView;double _lastPlaybackTime;CGFloat _mediaHeight;BOOL _watchdogScheduled,_watchdogExhausted;NSUInteger _watchdogToken,_spinnerToken,_restartToken;BOOL _spinnerPending,_receivedFirstFrame;double _firstFrameStarted;
+ AVPictureInPictureController *_pip;BOOL _backgroundMode,_appInactive,_cleanScreen,_foregroundRebind,_pagingMotion,_reportedView;double _lastPlaybackTime;CGFloat _mediaHeight;BOOL _watchdogScheduled,_watchdogExhausted;NSUInteger _watchdogToken,_spinnerToken,_restartToken;BOOL _spinnerPending,_receivedFirstFrame;double _firstFrameStarted;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
  if((self=[super initWithFrame:frame])){
@@ -142,7 +142,11 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   _cover.hidden=NO;_playerLayer.player=nil;
  }
 }
+- (void)suspendForegroundWork {
+ _appInactive=YES;[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
+}
 - (void)leaveBackground {
+ _appInactive=NO;
  if(!_backgroundMode)return;
  _backgroundMode=NO;_foregroundRebind=YES;
  _progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;
@@ -177,7 +181,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  if(_accessToken){[NSNotificationCenter.defaultCenter removeObserver:_accessToken];_accessToken=nil;}
  if(_failureToken){[NSNotificationCenter.defaultCenter removeObserver:_failureToken];_failureToken=nil;}if(_musicLoopToken){[NSNotificationCenter.defaultCenter removeObserver:_musicLoopToken];_musicLoopToken=nil;}if(_prepared){if(_prepared.leases)--_prepared.leases;if(!_prepared.leases)[_prepared.player pause];_prepared=nil;}else[_player pause];[_musicPlayer pause];_musicPlayer=nil;_player=nil;_playerLayer.player=nil;
 }
-- (void)prepareForReuse {[super prepareForReuse];_active=NO;++_generation;[self unlock];[self detach];_work=Work{};self.commentsAction=nil;self.profileAction=nil;self.musicAction=nil;self.moreAction=nil;self.actionMenuAction=nil;self.dismissCommentsAction=nil;self.advanceAction=nil;self.viewedAction=nil;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
+- (void)prepareForReuse {[super prepareForReuse];_active=NO;_appInactive=NO;++_generation;[self unlock];[self detach];_work=Work{};self.commentsAction=nil;self.profileAction=nil;self.musicAction=nil;self.moreAction=nil;self.actionMenuAction=nil;self.dismissCommentsAction=nil;self.advanceAction=nil;self.viewedAction=nil;self.checkpointAction=nil;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
 - (void)display:(const Work&)work {
  if(!_work.id.empty()&&work.id==_work.id){BOOL sourceChanged=work.play!=_work.play;double position=[self currentPlaybackPosition];_work=work;if(sourceChanged&&!work.photo()){_alternateUsed=NO;_recoveries=0;_watchdogExhausted=NO;[_frameCache removeAllObjects];[_cachedTimes removeAllObjects];[self attach:Obtain(work) position:position];if(_active)[self active:YES];}[self labels];return;}++_generation;[self unlock];[self detach];_work=work;_reportedView=NO;_lastPlaybackTime=0;_backgroundMode=NO;_paused=NO;_alternateUsed=NO;_watchdogExhausted=NO;_boosting=NO;_dragging=NO;_seeking=NO;_recoveries=0;_photoIndex=0;_busy=NO;_captionExpanded=NO;_previewBusy=NO;[_frameCache removeAllObjects];[_cachedTimes removeAllObjects];_pause.hidden=YES;_previewGlass.hidden=YES;_speedGlass.hidden=YES;_message.text=@"";_slider.value=0;_progress=-1;_progressAt=CACurrentMediaTime();_danmakuWindow=-1;_danmakuItems=@[];_danmakuLoading=NO;[_emitted removeAllObjects];[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];for(DGImage *i in _images)[i removeFromSuperview];[_images removeAllObjects];_cover.hidden=work.photo();[_cover remote:work.photo()?@"":Text(work.cover)];[_avatar remote:Text(work.avatar)];[_musicAvatar remote:Text(work.avatar)];NSMutableArray *photoURLs=[NSMutableArray array];for(const auto &url:work.images)[photoURLs addObject:Text(url)];[_photoNavigator images:photoURLs];_photos.contentOffset=CGPointZero;_photos.hidden=!work.photo();_photoGlass.hidden=!work.photo();[self settingsChanged];[self labels];
  if(work.photo()){for(const auto &url:work.images){DGImage *i=[DGImage new];i.contentMode=UIViewContentModeScaleAspectFit;[_photos addSubview:i];[_images addObject:i];}if(_active)[self attachPhotoSound:0];}
@@ -281,7 +285,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)cancelLoadingIndicator {++_spinnerToken;_spinnerPending=NO;[_loadingSpinner stopAnimating];}
 - (void)showLoadingIndicatorIfNeeded {
  if(_spinnerPending||_loadingSpinner.isAnimating)return;
- if(!_active||_paused||_backgroundMode||_pagingMotion||!_player||_playerLayer.readyForDisplay||_message.text.length)return;
+ if(!_active||_paused||_backgroundMode||_appInactive||_pagingMotion||!_player||_playerLayer.readyForDisplay||_message.text.length)return;
  _spinnerPending=YES;NSUInteger token=++_spinnerToken;__weak DGFeedCell *weak=self;
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,480*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
   DGFeedCell *self=weak;if(!self||token!=self->_spinnerToken)return;
@@ -298,7 +302,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)recover {
  if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak recover];});return;}
- if(!_active||_paused||_work.photo()||_backgroundMode||_pagingMotion)return;
+ if(!_active||_paused||_work.photo()||_backgroundMode||_appInactive||_pagingMotion)return;
  if(_recoveries>=2){DGDiagnostic(@"playback.exhausted",nil);_watchdogExhausted=YES;[_loadingSpinner stopAnimating];[self stopWatchdog];_message.text=@"视频暂未加载成功，点击画面重试";return;}
  ++_recoveries;double pos=[self currentPlaybackPosition];if(!_prepared.needsBeginning&&pos<.05)pos=MAX(0,_lastPlaybackTime);
  NSString *url=Text(_work.play);
@@ -313,7 +317,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)stopWatchdog {++_watchdogToken;_watchdogScheduled=NO;}
 - (void)queueWatchdogAfter:(NSTimeInterval)delay {
- if(_backgroundMode||_watchdogScheduled||_pagingMotion||!_active||_paused||_work.photo()||!_player||_watchdogExhausted)return;
+ if(_backgroundMode||_appInactive||_watchdogScheduled||_pagingMotion||!_active||_paused||_work.photo()||!_player||_watchdogExhausted)return;
  _watchdogScheduled=YES;NSUInteger token=++_watchdogToken,generation=_generation;__weak DGFeedCell *weak=self;
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
   DGFeedCell *s=weak;if(!s||token!=s->_watchdogToken||generation!=s->_generation)return;
@@ -341,12 +345,13 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  });
 }
 - (void)tick:(CMTime)time {
- if(!_player||_backgroundMode||_pagingMotion||_prepared.needsBeginning)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);
+ if(!_player||_backgroundMode||_appInactive||_pagingMotion||_prepared.needsBeginning)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);
  if(_active&&!_paused&&!_dragging&&!_seeking)[_slider followPlayer:_player duration:duration];
  _elapsed.text=TimeLabel(seconds);_totalTime.text=TimeLabel(duration);[self displayFirstFrame];
  if(std::isfinite(seconds)&&seconds>=0)_lastPlaybackTime=seconds;
  if(_active&&!_paused&&!_dragging&&!_backgroundMode&&std::isfinite(seconds)){
   if(!_reportedView&&seconds>.12&&_playerLayer.readyForDisplay&&self.viewedAction){_reportedView=YES;self.viewedAction();}
+  if(_reportedView&&self.checkpointAction)self.checkpointAction();
 
   if(std::fabs(seconds-_progress)>.08){_progress=seconds;_progressAt=CACurrentMediaTime();}
   [self updateDanmaku:seconds];

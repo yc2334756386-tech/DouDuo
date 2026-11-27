@@ -19,6 +19,11 @@ UIViewController *DGMakeFeedController(void);
     self.window.rootViewController = DGMakeFeedController();
     [self.window makeKeyAndVisible];DGRefreshRateApply();
 }
+- (void)sceneWillResignActive:(UIScene *)scene {DGDiagnostic(@"scene.inactive",nil);}
+- (void)sceneDidEnterBackground:(UIScene *)scene {DGDiagnostic(@"scene.background",nil);}
+- (void)sceneWillEnterForeground:(UIScene *)scene {DGDiagnostic(@"scene.entering_foreground",nil);}
+- (void)sceneDidBecomeActive:(UIScene *)scene {DGDiagnostic(@"scene.active",nil);}
+- (void)sceneDidDisconnect:(UIScene *)scene {DGDiagnostic(@"scene.disconnected",nil);}
 @end
 
 @interface DGApplication : UIResponder <UIApplicationDelegate>
@@ -45,6 +50,7 @@ UIViewController *DGMakeFeedController(void);
     configuration.delegateClass = DGScene.class;
     return configuration;
 }
+- (void)applicationWillTerminate:(UIApplication *)application {DGDiagnostic(@"app.terminate_callback",nil);}
 @end
 int main(int argc, char *argv[]) {
     @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(DGApplication.class)); }

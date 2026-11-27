@@ -9,6 +9,7 @@
 @property(nonatomic,copy) void (^dismissCommentsAction)(void);
 @property(nonatomic,copy) BOOL (^advanceAction)(void);
 @property(nonatomic,copy) void (^viewedAction)(void);
+@property(nonatomic,copy) void (^checkpointAction)(void);
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,weak) UIViewController *presenter;
 - (void)display:(const Work &)work;
@@ -19,6 +20,7 @@
 - (void)interactiveMediaHeight:(CGFloat)height;
 - (void)enterBackgroundKeepingPlayback:(BOOL)keep audioOnly:(BOOL)audioOnly;
 - (void)leaveBackground;
+- (void)suspendForegroundWork;
 - (NSString *)selectedImageURL;
 - (void)releaseUnusedResources;
 - (void)pagingInMotion:(BOOL)inMotion;
