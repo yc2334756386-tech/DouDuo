@@ -63,9 +63,6 @@
   const post=(path,params,body,options)=>request('POST',path,params||{},body==null?'':body,options);
   let emojiCatalog={},emojiLoading;
   const ipCache=new Map();let selfUID='';
-  const ownDanmakuKey=()=> 'douglass.ownDanmaku.v1.'+(selfUID||'anonymous');
-  const ownDanmaku=()=>{try{const value=JSON.parse(localStorage.getItem(ownDanmakuKey())||'[]');return Array.isArray(value)?value.filter(x=>x&&x.id&&x.work).slice(-600):[];}catch(_){return [];}};
-  const rememberDanmaku=(work,identifier,text,offset)=>{try{const all=ownDanmaku().filter(x=>x.id!==identifier);all.push({work:String(work),id:identifier,text,offset});localStorage.setItem(ownDanmakuKey(),JSON.stringify(all.slice(-600)));}catch(_){}};
   const ipFrom=value=>{
     value=value||{};const raw=value.ip_location||value.ip_label||'',object=raw&&typeof raw==='object'?raw:{};
     const clean=text=>typeof text==='string'&&!/^\d+$/.test(text)?text.replace(/^IP属地[:：\s]*/,'').trim():'';
@@ -217,10 +214,10 @@
       if(operation==='danmaku'){
         const duration=Math.max(15000,Number(params.duration||30000)),from=Math.max(0,Number(params.from||0)),to=Math.min(duration,Math.max(from+1,Number(params.to||from+30000)));
         const data=await get('/aweme/v1/web/danmaku/get_v2/',{app_name:'aweme',format:'json',group_id:params.id,item_id:params.id,start_time:String(from),end_time:String(to),duration:String(duration)});
-        await Promise.race([loadEmojis(),delay(500)]);const local=ownDanmaku().filter(x=>x.work===String(params.id)),ownIDs=new Set(local.map(x=>x.id));const items=(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>{const identifier=id(value.danmaku_id||value.id),person=value.user||value.user_info||{},uid=id(value.user_id||value.uid||person.uid);return {id:identifier,text:value.text,offset:Number(value.offset_time||0)/1000,isMine:Number(value.is_self??value.is_me??person.is_me)===1||!!(selfUID&&uid===selfUID)||ownIDs.has(identifier),emoticons:[...new Set(String(value.text).match(/\[[^\]\r\n]{1,14}\]/g)||[])].filter(name=>emojiCatalog[name]).map(name=>({name,url:emojiCatalog[name]}))};});const ids=new Set(items.map(x=>x.id));for(const item of local)if(item.offset*1000>=from&&item.offset*1000<to&&!ids.has(item.id))items.push({id:item.id,text:item.text,offset:item.offset,isMine:true,emoticons:[]});items.sort((a,b)=>a.offset-b.offset);return {items};
+        await Promise.race([loadEmojis(),delay(500)]);const items=(data.danmaku_list||[]).filter(value=>value&&value.text).map(value=>{const identifier=id(value.danmaku_id||value.id),person=value.user||value.user_info||{},uid=id(value.user_id||value.uid||person.uid);return {id:identifier,text:value.text,offset:Number(value.offset_time||0)/1000,isMine:Number(value.is_self??value.is_me??person.is_me)===1||!!(selfUID&&uid===selfUID),emoticons:[...new Set(String(value.text).match(/\[[^\]\r\n]{1,14}\]/g)||[])].filter(name=>emojiCatalog[name]).map(name=>({name,url:emojiCatalog[name]}))};});items.sort((a,b)=>a.offset-b.offset);return {items};
       }
       if(operation==='danmakuSend'){
-        await writeReady();const text=String(params.text||'').trim();if(!text)throw new Error('请输入弹幕内容');const data=await post('/aweme/v1/web/danmaku/post_v2/',{item_id:params.id,offset_time:String(Math.max(0,Math.round(Number(params.offset||0)*1000))),text,user_id:'',enter_from:'video_detail',previous_page:'video_detail'},'',{strict:true});const value=data.danmaku||data.data||{};const identifier=id(value.danmaku_id||data.danmaku_id);if(!identifier)throw new Error('平台未确认弹幕，先刷新查看，避免重复发送');rememberDanmaku(params.id,identifier,text,Math.max(0,Number(params.offset||0)));return {ok:true,id:identifier};
+        await writeReady();const text=String(params.text||'').trim();if(!text)throw new Error('请输入弹幕内容');const data=await post('/aweme/v1/web/danmaku/post_v2/',{item_id:params.id,offset_time:String(Math.max(0,Math.round(Number(params.offset||0)*1000))),text,user_id:'',enter_from:'video_detail',previous_page:'video_detail'},'',{strict:true});const value=data.danmaku||data.data||{};const identifier=id(value.danmaku_id||data.danmaku_id);if(!identifier)throw new Error('平台未确认弹幕，先刷新查看，避免重复发送');return {ok:true,id:identifier,uid:selfUID};
       }
       if(operation==='digg'||operation==='favorite'){
         await writeReady();const value=params.add===true||params.add===1||params.add==='1'?'1':'0';

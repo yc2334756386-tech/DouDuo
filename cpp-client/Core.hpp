@@ -35,4 +35,5 @@ private:
     std::unordered_set<std::string> ids_;
 };
 std::string compact(std::int64_t value);
+double relativeProgress(double initial,double displacement,double trackWidth,double minimum,double maximum) noexcept;
 }

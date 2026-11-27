@@ -9,8 +9,8 @@ The complete upstream license is included as DOUDUO-LICENSE.txt.
 This application is an independent third-party client and has no affiliation
 with Douyin. Content and service marks belong to their respective owners.
 Login takes place on the official website. Session data stays in the app's
-local WebKit website store. This version has no developer-operated backend,
-and follow/block changes are sent only when requested in the interface.
+local WebKit website store. This version has no developer-operated backend or analytics SDK.
+Likes, collections, follows and blocks are submitted on explicit user actions.
 Manual search-page importing reads real results loaded by the official page;
 the user controls pagination and completes any verification themselves.
 Comment sorting applies only to the comments already loaded in the client.

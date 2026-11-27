@@ -28,6 +28,7 @@ struct State {
  double energy[N]{},correction[N]{},target[N]{},current[N]{},frequency[N]{},q[N]{},effect[EffectCount]{};
  std::array<std::array<float,DelaySize>,2> delay{};
  unsigned revision=0,position=0;double envelope=0,limiter=1;bool spatial=false;
+ bool toneActive[6]{};
  std::shared_ptr<Metrics> metrics;
 };
 struct Channel {void *data=nullptr;unsigned stride=1,offset=0;size_t samples=0;};

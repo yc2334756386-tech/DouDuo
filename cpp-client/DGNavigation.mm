@@ -32,7 +32,6 @@
 @end
 static const void *DGPageKey=&DGPageKey;
 void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;}
-void DGInstallBackGesture(UIViewController *controller){}
 // Mask the effect view itself so UIKit can keep sampling the live backdrop.
 @interface DGNavigationFade:UIView
 @end
@@ -46,7 +45,7 @@ void DGInstallBackGesture(UIViewController *controller){}
  UIVisualEffectView *_topBlur;DGNavigationFade *_fade;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=NO;DGInstallBackGesture(self);
+ [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=NO;
  UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
  _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];

@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include "Core.hpp"
 #include <cstdio>
 #include <utility>
@@ -23,5 +25,12 @@ std::string compact(std::int64_t value) {
     std::snprintf(output, sizeof(output), "%.1f%s", value / (value >= 100000000 ? 100000000.0 : 10000.0),
                   value >= 100000000 ? "亿" : "万");
     return output;
+}
+}
+
+namespace douglass {
+double relativeProgress(double initial,double displacement,double trackWidth,double minimum,double maximum) noexcept {
+    if(!std::isfinite(displacement)||!std::isfinite(trackWidth)||trackWidth<=0||maximum<=minimum)return initial;
+    return std::clamp(initial+(maximum-minimum)*displacement/trackWidth,minimum,maximum);
 }
 }

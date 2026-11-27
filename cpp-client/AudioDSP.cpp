@@ -33,6 +33,7 @@ void Update(State &s){
  s.tone[3]=Peak(330,.8,-s.effect[Transparency]*.045-air,rate);
  s.tone[4]=Peak(2900,.85,s.effect[Clarity]*.055+air*2,rate);
  s.tone[5]=Peak(90,.8,air*1.8,rate);
+ for(int i=0;i<6;i++)s.toneActive[i]=fabs(s.tone[i].b0-1)>1e-8;
 }
 double Read(const Channel &c,size_t frame,bool floating,unsigned bits){size_t index=frame*c.stride+c.offset;if(index>=c.samples)return 0;if(floating&&bits==32)return static_cast<float *>(c.data)[index];if(floating&&bits==64)return static_cast<double *>(c.data)[index];if(bits==16)return static_cast<int16_t *>(c.data)[index]/32768.;return static_cast<int32_t *>(c.data)[index]/2147483648.;}
 void Write(const Channel &c,size_t frame,double value,bool floating,unsigned bits){size_t index=frame*c.stride+c.offset;if(index>=c.samples)return;if(floating&&bits==32)static_cast<float *>(c.data)[index]=value;else if(floating&&bits==64)static_cast<double *>(c.data)[index]=value;else if(bits==16)static_cast<int16_t *>(c.data)[index]=int16_t(value*32767);else static_cast<int32_t *>(c.data)[index]=int32_t(value*2147483647);}
@@ -44,13 +45,16 @@ void ProcessSamples(State &s,const Channel *channels,unsigned count,size_t frame
  if(adaptive){for(double energy:s.energy)mean+=10*log10(std::max(1e-9,energy));mean/=N;}
  for(int i=0;i<N;i++){double db=10*log10(std::max(1e-9,s.energy[i]));double correction=adaptive&&mean>-75?std::clamp((mean-db)*.16+styles[style][i],-4.5,4.5):0;s.correction[i]+=(correction-s.correction[i])*autoSmooth;s.current[i]+=(std::clamp(s.target[i]+s.correction[i],-18.,18.)-s.current[i])*smooth;s.bands[i]=Peak(s.frequency[i],s.q[i],s.current[i],rate);s.metrics->adjust[i].store(s.correction[i],std::memory_order_relaxed);}
  double wetMix=std::clamp(s.effect[Mix]/100,0.,1.),width=s.spatial?0:s.effect[Width]/100*.85,room=s.spatial?0:s.effect[Room]/100;
+ if(wetMix==0&&!analyze){s.metrics->frames.fetch_add(frames,std::memory_order_relaxed);return;}
+ bool bandActive[N]{};for(int i=0;i<N;i++)bandActive[i]=fabs(s.current[i])>.01;
  double dynamics=s.effect[Dynamics]/100,attack=exp(-1/(rate*.003)),release=exp(-1/(rate*.12)),limiterRelease=exp(-1/(rate*.065)),peak=0;
  unsigned delays[4]={unsigned(std::min(rate*.031,double(DelaySize-1))),unsigned(std::min(rate*.043,double(DelaySize-1))),unsigned(std::min(rate*.067,double(DelaySize-1))),unsigned(std::min(rate*.089,double(DelaySize-1)))};
  for(size_t frame=0;frame<frames;frame++){
   double dry[MaxChannels]{},wet[MaxChannels]{},samplePeak=0;
-  for(unsigned c=0;c<count;c++){double sample=Read(channels[c],frame,floating,bits);dry[c]=std::isfinite(sample)?sample:0;double out=dry[c];for(int i=0;i<N;i++)out=Run(s.bands[i],s.history[c][i],out);for(int i=0;i<6;i++)out=Run(s.tone[i],s.toneHistory[c][i],out);wet[c]=out;}
+  for(unsigned c=0;c<count;c++){double sample=Read(channels[c],frame,floating,bits);dry[c]=std::isfinite(sample)?sample:0;double out=dry[c];if(wetMix>0){for(int i=0;i<N;i++)if(bandActive[i])out=Run(s.bands[i],s.history[c][i],out);for(int i=0;i<6;i++)if(s.toneActive[i])out=Run(s.tone[i],s.toneHistory[c][i],out);}wet[c]=out;}
   if(analyze){double mono=count>1?(dry[0]+dry[1])*.5:dry[0];for(int i=0;i<N;i++){double value=Run(s.analysis[i],s.analysisHistory[i],mono);sums[i]+=value*value;}}
-  if(count==2){double mid=(wet[0]+wet[1])*.5,side=(wet[0]-wet[1])*.5*(1+width);wet[0]=mid+side;wet[1]=mid-side;
+  if(wetMix==0)continue;
+  if(count==2&&(width>0||room>0)){double mid=(wet[0]+wet[1])*.5,side=(wet[0]-wet[1])*.5*(1+width);wet[0]=mid+side;wet[1]=mid-side;
    if(room>0){unsigned p=s.position;double left=s.delay[0][(p-delays[0])&(DelaySize-1)]*.46+s.delay[1][(p-delays[2])&(DelaySize-1)]*.24,right=s.delay[1][(p-delays[1])&(DelaySize-1)]*.46+s.delay[0][(p-delays[3])&(DelaySize-1)]*.24;s.delay[0][p]=std::clamp(wet[0]+left*.2,-3.,3.);s.delay[1][p]=std::clamp(wet[1]+right*.2,-3.,3.);wet[0]+=left*room*.45;wet[1]+=right*room*.45;s.position=(p+1)&(DelaySize-1);}
   }
   for(unsigned c=0;c<count;c++)samplePeak=std::max(samplePeak,fabs(wet[c]));

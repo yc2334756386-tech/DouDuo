@@ -89,7 +89,6 @@ static inline AVURLAsset *Asset(NSString *url) {
 @end
 @interface DGNavigationController:UINavigationController
 @end
-void DGInstallBackGesture(UIViewController *controller);
 void DGConfigurePageTransition(UIViewController *controller);
 double DGHoldSpeed(void);
 void DGConfigureAudio(AVPlayerItem *item);
@@ -143,3 +142,6 @@ void DGFeedNowPlaying(AVPlayer *player,NSString *title,NSString *author,UIImage 
 void DGFeedNowPlayingClear(AVPlayer *player);
 
 void DGRefreshEmbeddedMessages(UIViewController *page);
+
+BOOL DGIsOwnDanmaku(NSString *identifier);
+void DGRememberOwnDanmaku(NSString *identifier,NSString *uid);
