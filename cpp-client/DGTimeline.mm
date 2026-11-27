@@ -83,7 +83,10 @@
 - (void)stopFollowing {[_displayLink invalidate];_displayLink=nil;_player=nil;}
 - (void)setHidden:(BOOL)hidden{[super setHidden:hidden];if(hidden)[self stopFollowing];}
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event{return CGRectContainsPoint(CGRectInset(self.bounds,-8,-14),point);}
-- (BOOL)gestureRecognizerShouldBegin:(UIPanGestureRecognizer *)gesture{CGPoint velocity=[gesture velocityInView:self];return fabs(velocity.x)>fabs(velocity.y);}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{
+    if(gesture!=_pan)return [super gestureRecognizerShouldBegin:gesture];
+    CGPoint velocity=[_pan velocityInView:self];return fabs(velocity.x)>fabs(velocity.y);
+}
 - (void)didMoveToWindow{
     [super didMoveToWindow];if(!self.window){[self stopFollowing];return;}
     for(UIView *view=self.superview;view;view=view.superview)if([view isKindOfClass:UIScrollView.class])[((UIScrollView *)view).panGestureRecognizer requireGestureRecognizerToFail:_pan];

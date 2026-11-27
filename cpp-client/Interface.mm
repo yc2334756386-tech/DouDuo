@@ -5,6 +5,7 @@
 #import "DGPlaybackResume.h"
 #import "DGComments.h"
 #import "DGAnimation.h"
+#import "DGNavigationResume.h"
 @interface DGSwipeClock:NSObject
 @property(nonatomic,copy) void (^sample)(CADisplayLink *);
 - (void)tick:(CADisplayLink *)link;
@@ -12,9 +13,10 @@
 @implementation DGSwipeClock
 - (void)tick:(CADisplayLink *)link{if(self.sample)self.sample(link);else [link invalidate];}
 @end
-@interface DGFeed : UIViewController <UICollectionViewDataSource,UICollectionViewDelegateFlowLayout,UIGestureRecognizerDelegate>
+@interface DGFeed : UIViewController <UICollectionViewDataSource,UICollectionViewDelegateFlowLayout,UIGestureRecognizerDelegate,DGPageResume>
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge;
 - (void)prepareNoticeFocus:(NSString *)comment parent:(NSString *)parent;
+- (void)prepareResumeState:(NSDictionary *)state;
 @end
 @implementation DGFeed {
     douglass::Feed _feed;
@@ -96,7 +98,7 @@
 - (void)dealloc{[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return _showingMessages?UIStatusBarStyleDefault:UIStatusBarStyleLightContent;}
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
-- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];if(_noticeComment.length&&_current<(NSInteger)_feed.works.size()&&!_comments)[self showComments:Text(_feed.works[_current].id)];}
+- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];if(_ownsBridge&&DGRestoreNavigationResume(self,_bridge))return;DGSaveNavigationResume(self.view.window);if(_noticeComment.length&&_current<(NSInteger)_feed.works.size()&&!_comments)[self showComments:Text(_feed.works[_current].id)];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;[self finishPaging];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
@@ -152,6 +154,19 @@
  if(DGPlaybackResumeSave(_records[_current],_operation,[cell currentPlaybackPosition],[cell isPlaybackPaused])){
   _checkpointWork=Text(work.id);_checkpointScope=DGCurrentFeedScope();_checkpointSavedAt=CACurrentMediaTime();
  }
+}
+- (NSDictionary *)dgResumeState {
+ if(!_staticFeed||!_records.count)return nil;
+ NSInteger selected=MAX(0,MIN((NSInteger)_records.count-1,_positioned?_current:_selected));
+ NSUInteger start=selected>30?selected-30:0,count=MIN((NSUInteger)61,_records.count-start);
+ DGFeedCell *cell=(DGFeedCell *)[_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:selected inSection:0]];
+ double seconds=cell?[cell currentPlaybackPosition]:_restoredPosition;
+ NSString *identifier=Text(String(_records[selected][@"id"]));
+ return @{@"kind":@"player",@"records":[_records subarrayWithRange:NSMakeRange(start,count)],@"selected":@(selected-start),@"workID":identifier,@"position":@(std::isfinite(seconds)?seconds:0),@"paused":@(cell?[cell isPlaybackPaused]:_restoredPaused),@"comment":_noticeComment?:@"",@"parent":_noticeParent?:@""};
+}
+- (void)prepareResumeState:(NSDictionary *)state {
+ _restoredWork=Text(String(state[@"workID"]));double seconds=[state[@"position"]doubleValue];_restoredPosition=std::isfinite(seconds)?MAX(0.,seconds):0;
+ _restoredPaused=[state[@"paused"]boolValue];_noticeComment=Text(String(state[@"comment"]));_noticeParent=Text(String(state[@"parent"]));
 }
 - (void)willResignActive {
  _inactive=YES;++_warmGeneration;
@@ -465,10 +480,16 @@
     [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
 - (void)openLogin{if(self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];DGLogin *login=[DGLogin new];__weak DGFeed *weakSelf=self;login.finished=^{[weakSelf sessionChanged:YES];};UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:login];DGConfigurePageTransition(nav);[self presentViewController:nav animated:YES completion:nil];}
-- (void)sessionChanged:(BOOL)reload{_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
+- (void)sessionChanged:(BOOL)reload{DGClearNavigationResume();_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
 @end
 UIViewController *DGMakeFeedController(void){return [DGFeed new];}
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works,NSInteger selected,DGBridge *bridge){return [[DGFeed alloc] initWithRecords:works selected:selected bridge:bridge];}
+UIViewController *DGMakeResumedWorkPlayer(DGBridge *bridge,NSDictionary *state){
+ NSMutableArray *records=[NSMutableArray array];NSString *identifier=Text(String(state[@"workID"]));NSInteger selected=NSNotFound;
+ for(id value in Array(state[@"records"])){if(![value isKindOfClass:NSDictionary.class]||!ReadWork(value).playable())continue;if([Text(String(value[@"id"]))isEqualToString:identifier])selected=records.count;[records addObject:value];if(records.count==61)break;}
+ if(!records.count||selected==NSNotFound)return nil;
+ DGFeed *view=[[DGFeed alloc]initWithRecords:records selected:selected bridge:bridge];[view prepareResumeState:state];return view;
+}
 
 
 UIViewController *DGMakeNoticePlayer(NSArray<NSDictionary *> *works,DGBridge *bridge,NSString *commentID,NSString *parentID){DGFeed *player=[[DGFeed alloc]initWithRecords:works selected:0 bridge:bridge];[player prepareNoticeFocus:commentID parent:parentID];return player;}

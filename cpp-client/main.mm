@@ -5,6 +5,7 @@
 #import "DGFeedCache.h"
 #import "DGDiagnostics.h"
 #import "DGAppearance.h"
+#import "DGNavigationResume.h"
 #include <cmath>
 UIViewController *DGMakeFeedController(void);
 
@@ -19,7 +20,7 @@ UIViewController *DGMakeFeedController(void);
     self.window.rootViewController = DGMakeFeedController();
     [self.window makeKeyAndVisible];DGRefreshRateApply();
 }
-- (void)sceneWillResignActive:(UIScene *)scene {DGDiagnostic(@"scene.inactive",nil);}
+- (void)sceneWillResignActive:(UIScene *)scene {DGSaveNavigationResume(self.window);DGDiagnostic(@"scene.inactive",nil);}
 - (void)sceneDidEnterBackground:(UIScene *)scene {DGDiagnostic(@"scene.background",nil);}
 - (void)sceneWillEnterForeground:(UIScene *)scene {DGDiagnostic(@"scene.entering_foreground",nil);}
 - (void)sceneDidBecomeActive:(UIScene *)scene {DGDiagnostic(@"scene.active",nil);}

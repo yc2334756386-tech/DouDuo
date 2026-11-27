@@ -2,6 +2,7 @@
 #import "DGSearchAssist.h"
 #import "DGMusicIndex.h"
 #import "DGDiagnostics.h"
+#import "DGNavigationResume.h"
 
 UIViewController *DGMakeFollowing(DGBridge *, NSString *, NSString *);
 
@@ -104,13 +105,14 @@ static NSString *DGCount(id value) { return Text(douglass::compact(Number(value)
 
 
 typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExploreMusic,DGExploreFollowing};
-@interface DGExplore : UIViewController <UITableViewDataSource,UITableViewDelegate,UISearchBarDelegate>
+@interface DGExplore : UIViewController <UITableViewDataSource,UITableViewDelegate,UISearchBarDelegate,DGPageResume>
 - (instancetype)initWithBridge:(DGBridge *)bridge mode:(DGExploreMode)mode;
 @property(nonatomic,copy) NSString *sec;
 @property(nonatomic,copy) NSString *uid;
 @property(nonatomic,copy) NSString *displayName;
 @property(nonatomic,copy) NSString *locate;
 @property(nonatomic,strong) NSDictionary *music;
+@property(nonatomic,strong) NSDictionary *resumeData;
 @end
 @implementation DGExplore {
     DGBridge *_bridge;DGExploreMode _mode;
@@ -125,14 +127,14 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     BOOL _profileSearchOpen,_locateKeywordResult;NSArray<NSDictionary *> *_filteredWorks;__weak UIViewController *_zoomPlayer;
     NSMutableArray<NSDictionary *> *_records;NSMutableSet<NSString *> *_ids;
     NSDictionary *_person;NSString *_cursor,*_query;BOOL _own,_loading,_more,_failed,_locateFound,_profileLoading;
-    NSString *_lastQueueID;BOOL _lastQueuePlaying;NSUInteger _generation,_seekPages;NSInteger _selectedTab;AVPlayer *_audio;id _audioEnd;
+    NSString *_lastQueueID;BOOL _lastQueuePlaying,_restoreListPosition;NSUInteger _generation,_seekPages;NSInteger _selectedTab;AVPlayer *_audio;id _audioEnd;
 }
 - (instancetype)initWithBridge:(DGBridge *)bridge mode:(DGExploreMode)mode {
     if((self=[super init])){_bridge=bridge;_mode=mode;_records=[NSMutableArray array];_ids=[NSMutableSet set];_cursor=@"0";_more=YES;_query=@"";}return self;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;
-    _own=_mode==DGExploreProfile&&!self.sec.length;
+    _own=_mode==DGExploreProfile&&(self.resumeData?[self.resumeData[@"own"]boolValue]:!self.sec.length);
     self.title=_mode==DGExploreSearch?@"搜索":_mode==DGExploreMusic?@"原声":_mode==DGExploreFollowing?@"关注列表":_own?@"我的":self.displayName;
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     if(_mode==DGExploreProfile){
@@ -154,11 +156,45 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(_mode==DGExploreProfile&&self.locate.length){_locateGlass=Glass(23);[self.view addSubview:_locateGlass];_locateButton=[UIButton buttonWithType:UIButtonTypeSystem];[_locateButton setTitle:@"定位刚刚看过" forState:UIControlStateNormal];[_locateButton setImage:[UIImage systemImageNamed:@"scope"] forState:UIControlStateNormal];_locateButton.tintColor=UIColor.labelColor;_locateButton.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];[_locateButton addTarget:self action:@selector(beginLocate) forControlEvents:UIControlEventTouchUpInside];[_locateGlass.contentView addSubview:_locateButton];_table.contentInset=UIEdgeInsetsMake(0,0,76,0);}
     if(_mode==DGExploreSearch){_assist=[[DGSearchAssist alloc]initWithBridge:_bridge];[self.view addSubview:_assist];__weak DGExplore *weak=self;_assist.selected=^(NSString *word){[weak submitSearch:word];};_assist.fill=^(NSString *word){DGExplore *self=weak;if(!self)return;self->_search.text=word;[self->_search becomeFirstResponder];[self->_assist keyword:word];};[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];}
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateMusicPlayback) name:@"DGMusicStateChanged" object:nil];
-    if(_mode==DGExploreProfile)[self loadProfile];
+    if(self.resumeData){[self applyResumeData];}
+    else if(_mode==DGExploreProfile)[self loadProfile];
     else if(_mode==DGExploreSearch){_more=NO;_empty.text=@"搜索视频与图文作品";[_footer setTitle:@"输入关键词并搜索" forState:UIControlStateNormal];}
     else if(_mode==DGExploreFollowing&&!self.sec.length)[self loadFollowingIdentity];
     else if(_mode==DGExploreMusic){[self seedKnownMusicWorks];[self updateMusicHeader];[self loadMusicDetail];[self loadPage];}
     else [self loadPage];
+}
+- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];DGSaveNavigationResume(self.view.window);}
+- (NSDictionary *)dgResumeState {
+ if(!_table)return self.resumeData;
+ BOOL single=[self peopleRows]||[self musicRows];NSUInteger scale=single?1:3;
+ NSIndexPath *first=[[_table.indexPathsForVisibleRows sortedArrayUsingSelector:@selector(compare:)]firstObject];
+ NSArray *listed=[self listed];NSUInteger anchor=first?MIN((NSUInteger)first.row*scale,listed.count):0;
+ NSDictionary *anchorRecord=anchor<listed.count?listed[anchor]:nil;
+ NSString *anchorID=DGValue(anchorRecord[single&&[self peopleRows]?@"sec":@"id"]);
+ NSUInteger location=anchorRecord?[_records indexOfObject:anchorRecord]:0;if(location==NSNotFound)location=0;
+ NSUInteger start=location>90?((location-90)/3)*3:0,count=MIN((NSUInteger)180,_records.count-start);
+ NSArray *records=[_records subarrayWithRange:NSMakeRange(start,count)];
+ CGFloat inset=first?CGRectGetMinY([_table rectForRowAtIndexPath:first])-_table.contentOffset.y:0;
+ return @{@"kind":@"explore",@"mode":@(_mode),@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"name":self.displayName?:@"",@"locate":self.locate?:@"",@"music":self.music?:@{},@"person":_person?:@{},@"own":@(_own),@"tab":@(_selectedTab),@"searchKind":@(_searchKind),@"query":_query?:@"",@"draft":_search.text?:@"",@"libraryQuery":_libraryQuery?:@"",@"profileSearch":@(_profileSearchOpen),@"webImport":@(_webImportMode),@"records":records,@"cursor":_cursor?:@"0",@"more":@(_more&&start+count==_records.count),@"offset":@(_table.contentOffset.y),@"anchorID":anchorID,@"anchorInset":@(inset)};
+}
+- (void)applyResumeData {
+ NSDictionary *state=self.resumeData;
+ _selectedTab=MAX(0,MIN(_own?3:1,Number(state[@"tab"])));_tabs.selectedSegmentIndex=_selectedTab;
+ _searchKind=MAX(0,MIN(1,Number(state[@"searchKind"])));_searchTabs.selectedSegmentIndex=_searchKind;
+ _query=DGValue(state[@"query"]);_search.text=DGValue(state[@"draft"]);_libraryQuery=DGValue(state[@"libraryQuery"]);_librarySearch.text=_libraryQuery;
+ _profileSearchOpen=[state[@"profileSearch"]boolValue];_webImportMode=[state[@"webImport"]boolValue];_cursor=DGValue(state[@"cursor"]);if(!_cursor.length)_cursor=@"0";_more=[state[@"more"]boolValue];
+ for(id value in Array(state[@"records"])){
+  if(![value isKindOfClass:NSDictionary.class])continue;NSDictionary *record=value;NSString *identifier=DGValue(record[[self peopleRows]?@"sec":@"id"]);
+  if(!identifier.length||[_ids containsObject:identifier])continue;
+  if(![self peopleRows]&&![self musicRows]&&!ReadWork(record).playable())continue;
+  [_records addObject:record];[_ids addObject:identifier];if(_records.count==180)break;
+ }
+ if(_mode==DGExploreProfile&&[state[@"person"]isKindOfClass:NSDictionary.class]&&[state[@"person"]count]){_person=state[@"person"];[self showProfile:_person];}
+ if(_mode==DGExploreMusic)[self updateMusicHeader];
+ _assist.hidden=YES;_searchHint.text=@"已恢复上次的关键词和结果，可继续搜索或网页翻页。";
+ _empty.text=_records.count?@"":@"已恢复上次页面，可下拉刷新";[_footer setTitle:_more?@"继续加载":@"已恢复上次列表，可下拉刷新" forState:UIControlStateNormal];_footer.enabled=_more;
+ _restoreListPosition=YES;[_table reloadData];[self.view setNeedsLayout];
+ if(_mode==DGExploreProfile&&!_person)[self loadProfile];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -217,7 +253,15 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     }
     [self layoutHeader];_table.tableHeaderView=_header;
 }
-- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_locateGlass){CGFloat width=self.view.bounds.size.width;_locateGlass.frame=CGRectMake(MAX(16,width-188),self.view.bounds.size.height-self.view.safeAreaInsets.bottom-60,172,44);_locateButton.frame=_locateGlass.bounds;}if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height-self.view.safeAreaInsets.bottom;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}}
+- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_locateGlass){CGFloat width=self.view.bounds.size.width;_locateGlass.frame=CGRectMake(MAX(16,width-188),self.view.bounds.size.height-self.view.safeAreaInsets.bottom-60,172,44);_locateButton.frame=_locateGlass.bounds;}if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height-self.view.safeAreaInsets.bottom;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}
+ if(_restoreListPosition&&_table.bounds.size.width>0){
+  _restoreListPosition=NO;[_table layoutIfNeeded];CGFloat offset=[self.resumeData[@"offset"]doubleValue];NSString *anchor=DGValue(self.resumeData[@"anchorID"]);NSArray *records=[self listed];
+  BOOL people=[self peopleRows];NSUInteger found=[records indexOfObjectPassingTest:^BOOL(NSDictionary *record,NSUInteger i,BOOL *stop){return anchor.length&&[DGValue(record[people?@"sec":@"id"])isEqualToString:anchor];}];
+  if(found!=NSNotFound){NSUInteger row=([self peopleRows]||[self musicRows])?found:found/3;offset=CGRectGetMinY([_table rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]])-[self.resumeData[@"anchorInset"]doubleValue];}
+  CGFloat minimum=-_table.adjustedContentInset.top,maximum=MAX(minimum,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);
+  if(std::isfinite(offset))[_table setContentOffset:CGPointMake(0,MAX(minimum,MIN(maximum,offset))) animated:NO];
+ }
+}
 - (void)keyboardChanged:(NSNotification *)note{CGRect frame=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboardTop=CGRectGetMinY(frame)>=self.view.bounds.size.height?0:MAX(0,CGRectGetMinY(frame));[self.view setNeedsLayout];[UIView animateWithDuration:.25 animations:^{[self.view layoutIfNeeded];}];}
 - (void)layoutHeader {
     BOOL library=[self showsLibrarySearch];_librarySearch.hidden=!library;CGFloat width=self.view.bounds.size.width,height=_mode==DGExploreProfile?(library?326:268):_mode==DGExploreSearch?148:_mode==DGExploreMusic?250:108;
@@ -232,6 +276,14 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(_mode==DGExploreMusic)_webSearch.frame=CGRectMake(18,202,width-36,36);
     _librarySearch.frame=CGRectMake(10,270,width-20,50);
 }
+- (void)showProfile:(NSDictionary *)result {
+ self.sec=DGValue(result[@"sec"]);self.uid=DGValue(result[@"uid"]);self.displayName=DGValue(result[@"nickname"]);
+ self.title=_own?@"我的":self.displayName;_name.text=self.displayName;[_avatar remote:DGValue(result[@"avatar"])];
+ NSString *signature=DGValue(result[@"signature"]);_signature.text=signature.length?signature:@"这个人还没有填写简介";
+ _stats.text=[NSString stringWithFormat:@"%@ 获赞 · %@ 粉丝",DGCount(result[@"likes"]),DGCount(result[@"followers"])];
+ [_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];[self updateRelationship];
+ NSString *location=DGValue(result[@"location"]);_context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
+}
 - (void)loadProfile {
     if(_profileLoading)return;_profileLoading=YES;__weak DGExplore *weakSelf=self;
     [_bridge request:_own?@"profile":@"userProfile" parameters:@{@"sec":self.sec?:@""} completion:^(NSDictionary *result,NSString *error){
@@ -240,14 +292,8 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
             NSString *reason=error?:@"登录已失效，请返回首页重新登录";self->_signature.text=reason;self->_empty.text=reason;self->_failed=YES;
             [self->_footer setTitle:@"重新读取个人资料" forState:UIControlStateNormal];self->_footer.enabled=YES;return;
         }
-        self->_person=result;self.sec=DGValue(result[@"sec"]);self.uid=DGValue(result[@"uid"]);self.displayName=DGValue(result[@"nickname"]);
-        self.title=self->_own?@"我的":self.displayName;self->_name.text=self.displayName;[self->_avatar remote:DGValue(result[@"avatar"])];
-        NSString *signature=DGValue(result[@"signature"]);self->_signature.text=signature.length?signature:@"这个人还没有填写简介";
-        self->_stats.text=[NSString stringWithFormat:@"%@ 获赞 · %@ 粉丝",DGCount(result[@"likes"]),DGCount(result[@"followers"])];
-        [self->_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];
-        [self updateRelationship];
-        NSString *location=DGValue(result[@"location"]);self->_context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
-        [self resetList];
+        self->_person=result;[self showProfile:result];
+        if(!self.resumeData||!self->_records.count)[self resetList];
     }];
 }
 - (void)loadFollowingIdentity {
@@ -340,6 +386,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(_mode==DGExploreSearch&&(!_query.length||_webImportMode)){[_refresh endRefreshing];if(_webImportMode)DGToast(self,@"可使用右上角网页按钮继续翻页；重新搜索可重置结果");return;}[self resetList];
 }
 - (void)resetList {
+    self.resumeData=nil;_restoreListPosition=NO;
     _refreshingMusicID=NO;++_generation;_loading=NO;_more=YES;_failed=NO;_webImportMode=NO;_cursor=@"0";_seekPages=0;_locateFound=NO;_searchHint.text=@"结果只有一页时，可在官网手动翻页，再把已加载结果追加回这里。";[_records removeAllObjects];_filteredWorks=nil;[_ids removeAllObjects];[_table reloadData];if(_mode==DGExploreMusic)[self seedKnownMusicWorks];[self loadPage];
 }
 - (NSString *)operation {
@@ -488,7 +535,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{if(![self peopleRows]&&![self musicRows])return;NSDictionary *record=_records[indexPath.row];if([self peopleRows])[self.navigationController pushViewController:DGMakeProfile(_bridge,DGValue(record[@"sec"]),DGValue(record[@"nickname"]),@"") animated:YES];else{if(!DGValue(record[@"url"]).length){DGToast(self,@"平台未提供该曲目的播放地址");return;}if(DGMusicMatches(DGValue(record[@"id"]))&&DGMusicPlayer().rate>0)DGMusicPause();else{DGMusicSetOwner(self);DGMusicPlayQueue(_records.copy,indexPath.row,_bridge,_cursor,_more);}[_table reloadData];}}
 - (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)path{if([self musicRows]&&path.row<(NSInteger)[self listed].count)[self.navigationController pushViewController:DGMakeMusic(_bridge,_records[path.row]) animated:YES];}
-- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath{if(_mode==DGExploreMusic&&[_cursor hasPrefix:@"search:"])return;NSInteger scale=[self peopleRows]||[self musicRows]?1:3;if(!_failed&&_more&&!_loading&&(indexPath.row+4)*scale>=(NSInteger)[self listed].count)[self loadPage];}
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath{if(_restoreListPosition||(_mode==DGExploreMusic&&[_cursor hasPrefix:@"search:"]))return;NSInteger scale=[self peopleRows]||[self musicRows]?1:3;if(!_failed&&_more&&!_loading&&(indexPath.row+4)*scale>=(NSInteger)[self listed].count)[self loadPage];}
 
 @end
 
@@ -496,4 +543,8 @@ UIViewController *DGMakeProfile(DGBridge *bridge,NSString *sec,NSString *name,NS
 UIViewController *DGMakeSearch(DGBridge *bridge){return [[DGExplore alloc] initWithBridge:bridge mode:DGExploreSearch];}
 UIViewController *DGMakeMusic(DGBridge *bridge,NSDictionary *music){DGExplore *view=[[DGExplore alloc] initWithBridge:bridge mode:DGExploreMusic];view.music=music?:@{};return view;}
 UIViewController *DGMakeFollowing(DGBridge *bridge,NSString *sec,NSString *uid){DGExplore *view=[[DGExplore alloc] initWithBridge:bridge mode:DGExploreFollowing];view.sec=sec?:@"";view.uid=uid?:@"";return view;}
+UIViewController *DGMakeResumedExplore(DGBridge *bridge,NSDictionary *state){
+ NSInteger mode=Number(state[@"mode"]);if(mode<DGExploreProfile||mode>DGExploreFollowing)return nil;
+ DGExplore *view=[[DGExplore alloc]initWithBridge:bridge mode:(DGExploreMode)mode];view.sec=DGValue(state[@"sec"]);view.uid=DGValue(state[@"uid"]);view.displayName=DGValue(state[@"name"]);view.locate=DGValue(state[@"locate"]);view.music=[state[@"music"]isKindOfClass:NSDictionary.class]?state[@"music"]:@{};view.resumeData=state;return view;
+}
 
