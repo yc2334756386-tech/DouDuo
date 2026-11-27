@@ -14,14 +14,12 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 @property(nonatomic,copy) void (^openImageAction)(NSString *,UIImageView *);
 @property(nonatomic,copy) void (^saveImageAction)(NSString *);
 @property(nonatomic,copy) void (^copyAction)(NSString *);
-@property(nonatomic,copy) void (^likeAction)(void);
-@property(nonatomic,copy) void (^composeAction)(void);
 - (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading;
 @end
 @implementation DGCommentCell {
     DGImage *_avatar;
     UILabel *_name,*_body,*_meta;
-    UIButton *_reply,*_like,*_compose;
+    UIButton *_reply;
     UIStackView *_stack,*_media;
     NSLayoutConstraint *_leading,*_avatarWidth,*_avatarHeight;
     NSString *_plainText;
@@ -44,8 +42,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _reply.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
         _reply.tintColor=[UIColor colorWithRed:.70 green:.91 blue:.94 alpha:1];
         [_reply addTarget:self action:@selector(replies) forControlEvents:UIControlEventTouchUpInside];
-        _like=[UIButton buttonWithType:UIButtonTypeSystem];_like.titleLabel.font=[UIFont systemFontOfSize:12];[_like addTarget:self action:@selector(likeComment) forControlEvents:UIControlEventTouchUpInside];_compose=[UIButton buttonWithType:UIButtonTypeSystem];[_compose setTitle:@"回复" forState:UIControlStateNormal];_compose.titleLabel.font=[UIFont systemFontOfSize:12];[_compose addTarget:self action:@selector(compose) forControlEvents:UIControlEventTouchUpInside];UIStackView *actions=[[UIStackView alloc]initWithArrangedSubviews:@[_like,_compose]];actions.axis=UILayoutConstraintAxisHorizontal;actions.spacing=24;actions.alignment=UIStackViewAlignmentLeading;
-        _stack=[[UIStackView alloc] initWithArrangedSubviews:@[_name,_body,_media,_meta,actions,_reply]];
+        _stack=[[UIStackView alloc] initWithArrangedSubviews:@[_name,_body,_media,_meta,_reply]];
         _stack.axis=UILayoutConstraintAxisVertical; _stack.spacing=7;
         _avatar.translatesAutoresizingMaskIntoConstraints=NO; _stack.translatesAutoresizingMaskIntoConstraints=NO;
         [self.contentView addSubview:_avatar]; [self.contentView addSubview:_stack];
@@ -91,12 +88,11 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     if(!comment.sticker.empty() && std::find(comment.images.begin(),comment.images.end(),comment.sticker)==comment.images.end())
         [self addImage:Text(comment.sticker) sticker:YES nested:nested];
     _media.hidden=_media.arrangedSubviews.count==0;
-    NSDateFormatter *format=[NSDateFormatter new]; format.dateFormat=@"MM-dd";
+    NSDateFormatter *format=[NSDateFormatter new]; format.dateFormat=@"MM-dd HH:mm";
     NSString *date=comment.timestamp>0?[format stringFromDate:[NSDate dateWithTimeIntervalSince1970:comment.timestamp]]:@"";
     NSMutableArray *parts=[NSMutableArray array]; if(date.length)[parts addObject:date];
     NSString *location=Text(comment.location); if(location.length)[parts addObject:location];
      _meta.text=[parts componentsJoinedByString:@"   "];
-    [_like setTitle:[NSString stringWithFormat:@"%@ %@",comment.liked?@"♥":@"♡",Text(douglass::compact(comment.likes))] forState:UIControlStateNormal];_like.tintColor=comment.liked?UIColor.systemPinkColor:UIColor.secondaryLabelColor;_compose.hidden=![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.comments.write"];
     _reply.hidden=nested||comment.replies<=0;
     NSString *replyText=expanded?@"收起回复 ︿":[NSString stringWithFormat:@"展开 %@ 条回复 ﹀",Text(douglass::compact(comment.replies))];
     if(loading&&expanded)replyText=@"正在读取回复… 轻点收起";
@@ -108,8 +104,6 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 }
 - (void)profile { if(self.profileAction)self.profileAction(); }
 - (void)replies { if(self.replyAction)self.replyAction(); }
-- (void)likeComment{if(self.likeAction)self.likeAction();}
-- (void)compose{if(self.composeAction)self.composeAction();}
 - (void)openImage:(UITapGestureRecognizer *)gesture {
     DGCommentImage *image=(DGCommentImage *)gesture.view; if(self.openImageAction)self.openImageAction(image.sourceURL,image);
 }
@@ -123,7 +117,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     if(self.copyAction)self.copyAction(_plainText);
 }
 - (void)prepareForReuse {
-    [super prepareForReuse];self.copyAction=nil;self.likeAction=nil;self.composeAction=nil; self.replyAction=nil; self.profileAction=nil; self.openImageAction=nil; self.saveImageAction=nil; [self clearMedia];
+    [super prepareForReuse];self.copyAction=nil;self.replyAction=nil; self.profileAction=nil; self.openImageAction=nil; self.saveImageAction=nil; [self clearMedia];
 }
 @end
 
@@ -184,7 +178,6 @@ namespace { struct DGReplyState {
     UIButton *_close,*_footer;
     UITableView *_table;
     BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
-    UIButton *_composer;NSMutableSet *_likeBusy;
     std::vector<Comment> _comments;
     std::unordered_set<std::string> _ids;
     std::unordered_map<std::string,DGReplyState> _replyStates;
@@ -222,7 +215,6 @@ namespace { struct DGReplyState {
     [_footer addTarget:self action:@selector(loadMore) forControlEvents:UIControlEventTouchUpInside]; _table.tableFooterView=_footer;
     _empty=Label(14,UIFontWeightRegular); _empty.textColor=[UIColor colorWithWhite:1 alpha:.6]; _empty.textAlignment=NSTextAlignmentCenter; _empty.numberOfLines=0;
     _table.backgroundView=_empty; [self loadMore];
-    _likeBusy=[NSMutableSet set];_composer=[UIButton buttonWithType:UIButtonTypeSystem];[_composer setTitle:@"说点什么…  图片／表情／语音输入" forState:UIControlStateNormal];_composer.titleLabel.font=[UIFont systemFontOfSize:13];[_composer addTarget:self action:@selector(composeRoot) forControlEvents:UIControlEventTouchUpInside];[_glass.contentView addSubview:_composer];[self updateComposer];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateComposer) name:@"DouGlassSettingsChanged" object:nil];
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _backdrop.frame=b;_backdropBlur.frame=b;_backdropShade.frame=b;_glass.frame=b;
@@ -230,15 +222,11 @@ namespace { struct DGReplyState {
     _handleHit.frame=CGRectMake((width-140)/2,0,140,26);
     _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
     CGFloat header=_parent.length?77:111;_sort.frame=CGRectMake(18,68,130,30);_sortHint.frame=CGRectMake(160,73,MAX(0,width-178),20);
-    CGFloat composer=_composer.hidden?0:50;_separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5); _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header-composer));_composer.frame=CGRectMake(16,b.size.height-composer,width-32,composer);
+    _separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5);
+    _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
-- (void)updateComposer{_composer.hidden=![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.comments.write"];[_table reloadData];[self.view setNeedsLayout];}
-- (void)composeRoot{[self composeParent:@"" reply:@"" name:@""];}
-- (void)composeParent:(NSString *)parent reply:(NSString *)reply name:(NSString *)name{if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.comments.write"])return;__weak DGComments *weak=self;UIViewController *composer=DGMakeCommentComposer(_bridge,_workID,parent,reply,name,^(NSDictionary *record){DGComments *self=weak;if(!self)return;Comment comment=ReadComment(record);if(parent.length){DGReplyState &state=self->_replyStates[String(parent)];state.expanded=true;state.loaded=true;if(state.ids.insert(comment.id).second)state.items.insert(state.items.begin(),comment);[self reloadThread:parent];}else if(self->_ids.insert(comment.id).second){self->_comments.insert(self->_comments.begin(),comment);[self->_table reloadData];[self->_table setContentOffset:CGPointZero animated:NO];}});[self presentViewController:composer animated:YES completion:nil];}
-- (Comment *)findComment:(NSString *)identifier{std::string key=String(identifier);for(Comment &comment:_comments)if(comment.id==key)return &comment;for(auto &entry:_replyStates)for(Comment &comment:entry.second.items)if(comment.id==key)return &comment;return nullptr;}
-- (void)likeComment:(NSString *)identifier{if([_likeBusy containsObject:identifier])return;Comment *comment=[self findComment:identifier];if(!comment)return;BOOL old=comment->liked;long long count=comment->likes;comment->liked=!old;comment->likes=MAX(0,count+(old?-1:1));[_likeBusy addObject:identifier];DGHaptic();[_table reloadData];__weak DGComments *weak=self;[_bridge request:@"commentLike" parameters:@{@"id":_workID,@"cid":identifier,@"add":@(!old)} completion:^(NSDictionary *result,NSString *error){DGComments *self=weak;if(!self)return;[self->_likeBusy removeObject:identifier];if(error){Comment *comment=[self findComment:identifier];if(comment){comment->liked=old;comment->likes=count;}DGToast(self,error);}else DGHaptic();[self->_table reloadData];}];}
 - (BOOL)gestureRecognizerShouldBegin:(UIPanGestureRecognizer *)gesture{CGPoint velocity=[gesture velocityInView:self.view];return velocity.y>0&&velocity.y>fabs(velocity.x)&&self.view.superview.layer.animationKeys.count==0;}
 - (void)dragHandle:(UIPanGestureRecognizer *)gesture{CGFloat y=MAX(0,[gesture translationInView:self.view.superview.superview].y);if(gesture.state==UIGestureRecognizerStateChanged&&self.dragAction)self.dragAction(y,0);if(gesture.state==UIGestureRecognizerStateEnded&&self.dragAction)self.dragAction(y,(y>70||[gesture velocityInView:self.view].y>650)?1:2);if((gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)&&self.dragAction)self.dragAction(y,2);}
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
@@ -316,7 +304,7 @@ namespace { struct DGReplyState {
     cell.replyAction=^{[weakSelf toggleReplies:parentID];};
     cell.openImageAction=^(NSString *url,UIImageView *source){DGComments *self=weakSelf;if(self)DGShowImage(self,url,source);};
     cell.saveImageAction=^(NSString *url){DGComments *self=weakSelf;if(self)DGConfirmImageSave(self,url);};
-    NSString *identifier=Text(comment.id),*replyTo=indexPath.row>0?identifier:@"";cell.copyAction=^(NSString *text){DGComments *self=weakSelf;if(self)DGConfirmTextCopy(self,text,@"复制这条评论？",@"评论已复制");};cell.likeAction=^{[weakSelf likeComment:identifier];};cell.composeAction=^{[weakSelf composeParent:parentID reply:replyTo name:name];};
+    cell.copyAction=^(NSString *text){DGComments *self=weakSelf;if(self)DGConfirmTextCopy(self,text,@"复制这条评论？",@"评论已复制");};
     return cell;
 }
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {

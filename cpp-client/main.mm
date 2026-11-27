@@ -2,6 +2,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreText/CoreText.h>
 #import "DGAnimation.h"
+#include <cmath>
 UIViewController *DGMakeFeedController(void);
 
 @interface DGScene : UIResponder <UIWindowSceneDelegate>
@@ -20,7 +21,17 @@ UIViewController *DGMakeFeedController(void);
 @end
 @implementation DGApplication
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    [NSURLCache setSharedURLCache:[[NSURLCache alloc] initWithMemoryCapacity:32*1024*1024 diskCapacity:256*1024*1024 diskPath:@"douglass-images"]];
+    NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
+    if(![prefs boolForKey:@"douglass.migration.v07refit"]){
+        NSArray *oldPoints=[prefs arrayForKey:@"douglass.animation.points"];
+        if(!oldPoints||[oldPoints isEqualToArray:@[@.25,@.1,@.25,@1]])[prefs setObject:@[@.16,@1,@.3,@1] forKey:@"douglass.animation.points"];
+        double speed=[prefs doubleForKey:@"douglass.animation.speed"];
+        if(![prefs objectForKey:@"douglass.animation.speed"]||fabs(speed-1)<.001||fabs(speed-.9)<.001)[prefs setDouble:.8 forKey:@"douglass.animation.speed"];
+        if([prefs boolForKey:@"douglass.airpods.enhance"]||[prefs boolForKey:@"douglass.eq.adaptive"])[prefs setBool:YES forKey:@"douglass.eq.enabled"];
+        [prefs removeObjectForKey:@"douglass.comments.write"];
+        [prefs setBool:YES forKey:@"douglass.migration.v07refit"];
+    }
+    [NSURLCache setSharedURLCache:[[NSURLCache alloc] initWithMemoryCapacity:12*1024*1024 diskCapacity:256*1024*1024 diskPath:@"douglass-images"]];
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
     [[AVAudioSession sharedInstance] setActive:YES error:nil];
     NSURL *fontDirectory=[[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"Fonts"];for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:fontDirectory includingPropertiesForKeys:nil options:0 error:nil])CTFontManagerRegisterFontsForURL((__bridge CFURLRef)file,kCTFontManagerScopeProcess,NULL);return YES;

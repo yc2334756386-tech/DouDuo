@@ -85,6 +85,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 @property(nonatomic) BOOL colorAdjusted;
 @property(nonatomic) NSUInteger maximumPixelSize;
 - (void)remote:(NSString *)url;
++ (void)purgeCache;
 @end
 @interface DGNavigationController:UINavigationController
 @end
@@ -107,8 +108,6 @@ void DGConfirmCopy(UIViewController *host, NSString *text);
 void DGConfirmTextCopy(UIViewController *host, NSString *text, NSString *title, NSString *success);
 void DGConfirmImageSave(UIViewController *host, NSString *url);
 void DGConfirmAvatarSave(UIViewController *host, NSString *url);
-void DGUploadCommentImage(DGBridge *bridge,NSData *data,DGResult completion);
-UIViewController *DGMakeCommentComposer(DGBridge *bridge,NSString *work,NSString *parent,NSString *replyTo,NSString *name,void (^sent)(NSDictionary *item));
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeMusicWebPage(NSString *identifier, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
@@ -136,3 +135,11 @@ UIViewController *DGMakeSearch(DGBridge *bridge);
 UIViewController *DGMakeMusic(DGBridge *bridge, NSDictionary *music);
 UIViewController *DGMakeMessages(DGBridge *bridge);
 UIViewController *DGMakeNotices(DGBridge *bridge);
+
+UIViewController *DGMakeEmbeddedMessages(DGBridge *bridge,void (^navigate)(UIViewController *));
+UIViewController *DGMakeNoticesGroup(DGBridge *bridge,NSInteger group);
+
+void DGFeedNowPlaying(AVPlayer *player,NSString *title,NSString *author,UIImage *cover);
+void DGFeedNowPlayingClear(AVPlayer *player);
+
+void DGRefreshEmbeddedMessages(UIViewController *page);

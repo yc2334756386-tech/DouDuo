@@ -32,20 +32,7 @@
 @end
 static const void *DGPageKey=&DGPageKey;
 void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;}
-@interface DGBackGesture:NSObject<UIGestureRecognizerDelegate>
-@property(nonatomic,weak) UIViewController *controller;
-@end
-@implementation DGBackGesture
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{UIViewController *host=self.controller;if([host isKindOfClass:UINavigationController.class])return host.presentingViewController&&((UINavigationController *)host).viewControllers.count<=1;return host.presentingViewController!=nil;}
-- (void)swipe:(UIScreenEdgePanGestureRecognizer *)gesture{
- UIViewController *host=self.controller;CGFloat progress=MIN(1,MAX(0,[gesture translationInView:host.view].x/MAX(1,host.view.bounds.size.width)));DGPageTransition *transition=objc_getAssociatedObject(host,DGPageKey);
- if(gesture.state==UIGestureRecognizerStateBegan&&transition){transition.interaction=[UIPercentDrivenInteractiveTransition new];transition.interaction.completionCurve=UIViewAnimationCurveEaseOut;[host dismissViewControllerAnimated:YES completion:nil];}
- if(gesture.state==UIGestureRecognizerStateChanged)[transition.interaction updateInteractiveTransition:progress];
- if(gesture.state==UIGestureRecognizerStateEnded){BOOL finish=progress>.28||[gesture velocityInView:host.view].x>650;if(transition){if(finish)[transition.interaction finishInteractiveTransition];else [transition.interaction cancelInteractiveTransition];transition.interaction=nil;}else if(finish)[host dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
- if(gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed){[transition.interaction cancelInteractiveTransition];transition.interaction=nil;}
-}
-@end
-void DGInstallBackGesture(UIViewController *controller){if(objc_getAssociatedObject(controller,@selector(DGInstallBackGestureMarker)))return;DGBackGesture *target=[DGBackGesture new];target.controller=controller;UIScreenEdgePanGestureRecognizer *pan=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:target action:@selector(swipe:)];pan.edges=UIRectEdgeLeft;pan.delegate=target;[controller.view addGestureRecognizer:pan];objc_setAssociatedObject(controller,@selector(DGInstallBackGestureMarker),target,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
+void DGInstallBackGesture(UIViewController *controller){}
 // Mask the effect view itself so UIKit can keep sampling the live backdrop.
 @interface DGNavigationFade:UIView
 @end
@@ -59,7 +46,7 @@ void DGInstallBackGesture(UIViewController *controller){if(objc_getAssociatedObj
  UIVisualEffectView *_topBlur;DGNavigationFade *_fade;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=YES;DGInstallBackGesture(self);
+ [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=NO;DGInstallBackGesture(self);
  UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
  _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];

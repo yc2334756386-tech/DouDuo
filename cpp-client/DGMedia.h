@@ -17,6 +17,9 @@
 - (void)interactiveMediaHeight:(CGFloat)height;
 - (void)backgroundAudio:(BOOL)enabled;
 - (NSString *)selectedImageURL;
+- (void)releaseUnusedResources;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);
+
+void DGTrimPlayers(void);
