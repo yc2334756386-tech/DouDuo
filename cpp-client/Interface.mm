@@ -3,6 +3,7 @@
 #import "DGComments.h"
 #import "DGAnimation.h"
 #import "DGAudio.h"
+#import "DGColor.h"
 @interface DGFeed : UIViewController <UICollectionViewDataSource,UICollectionViewDelegateFlowLayout>
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge;
 @end
@@ -121,9 +122,9 @@
   BOOL keep=ownsPlayback&&(audio||pip)&&[_collection indexPathForCell:cell].item==_current;
   [cell enterBackgroundKeepingPlayback:keep audioOnly:audio&&!pip];
  }
- DGTrimPlayers();[DGImage purgeCache];
+ DGTrimPlayers();[DGImage purgeCache];DGTrimColorCaches();
 }
-- (void)trimPlayback{for(DGFeedCell *cell in _collection.visibleCells)[cell releaseUnusedResources];DGTrimPlayers();[DGImage purgeCache];}
+- (void)trimPlayback{for(DGFeedCell *cell in _collection.visibleCells)[cell releaseUnusedResources];DGTrimPlayers();[DGImage purgeCache];DGTrimColorCaches();}
 - (void)didReceiveMemoryWarning{[super didReceiveMemoryWarning];[self trimPlayback];}
 - (void)foreground {
  _foreground=YES;DGSetAudioRuntimeForeground(YES);DGRefreshRateApply();

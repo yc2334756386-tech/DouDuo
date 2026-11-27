@@ -61,18 +61,26 @@ void DGSaveAudioDirect(UIViewController *host,NSString *url,NSString *name) {
     if(!url.length){DGToast(host,@"平台未提供可保存的原声地址");return;}
     DGHaptic();
     DGToast(host,@"正在下载原声…");
-    DGDownload(url,^(NSData *data,NSURLResponse *response,NSError *error){
-        if(error || !data.length){DGToast(host,@"原声下载失败");return;}
+    NSURL *address=[NSURL URLWithString:url];if(!address){DGToast(host,@"原声地址无效");return;}
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:address cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:90];
+    [request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+    __weak UIViewController *owner=host;
+    [[NSURLSession.sharedSession downloadTaskWithRequest:request completionHandler:^(NSURL *download,NSURLResponse *response,NSError *error){
+        if(error||!download||([response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode>=400)){DGToast(owner,@"原声下载失败");return;}
         NSString *extension=[response.MIMEType containsString:@"mpeg"]?@"mp3":@"m4a";
         NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"原声-%@.%@",NSUUID.UUID.UUIDString,extension]]];
-        [data writeToURL:file atomically:YES];DGHaptic();
+        if(![NSFileManager.defaultManager moveItemAtURL:download toURL:file error:nil]){DGToast(owner,@"保存原声文件失败");return;}
         dispatch_async(dispatch_get_main_queue(),^{
+            UIViewController *host=owner;
+            if(!host.viewIfLoaded.window||host.presentedViewController||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){[NSFileManager.defaultManager removeItemAtURL:file error:nil];return;}
+            DGHaptic();
             UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
             share.completionWithItemsHandler=^(UIActivityType activity,BOOL completed,NSArray *items,NSError *failure){[NSFileManager.defaultManager removeItemAtURL:file error:nil];};
             share.popoverPresentationController.sourceView=host.view;share.popoverPresentationController.sourceRect=CGRectMake(host.view.bounds.size.width/2,host.view.bounds.size.height/2,1,1);
             [host presentViewController:share animated:YES completion:nil];
         });
-    });
+    }]resume];
 }
 void DGSaveAudio(UIViewController *host,NSString *url,NSString *name){
     if(!host||host.presentedViewController)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"下载原声？" message:name.length?name:@"下载后可保存到文件或分享" preferredStyle:UIAlertControllerStyleAlert];

@@ -18,7 +18,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 + (void)purgeCache{[DGImage.cache removeAllObjects];}
 - (void)remote:(NSString *)url {
     if ([_source isEqualToString:url]) return;
-    NSUInteger load=++_loadGeneration;[_task cancel]; _source = url.copy;self.image = nil;
+    NSUInteger load=++_loadGeneration;[_task cancel];_task=nil; _source = url.copy;self.image = nil;
     if (!url.length) return;
     NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
@@ -59,7 +59,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         CFRelease(source);
         if (!image) return;
         [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
-        dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && load==self->_loadGeneration && [self->_source isEqualToString:url]) self.image = image; });
+        dispatch_async(dispatch_get_main_queue(), ^{ DGImage *self = weakSelf; if (self && load==self->_loadGeneration && [self->_source isEqualToString:url]){self->_task=nil;self.image=image;} });
     }];
     [_task resume];
 }

@@ -4,3 +4,5 @@ void DGColorReload(void);
 void DGColorConfigure(AVPlayerItem *item);
 UIImage *DGColorImage(UIImage *image);
 UIViewController *DGMakeColorSettings(NSString *previewURL);
+
+void DGTrimColorCaches(void);
