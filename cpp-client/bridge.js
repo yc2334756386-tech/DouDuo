@@ -4,7 +4,7 @@
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const id = value => value == null || typeof value === 'number' && !Number.isSafeInteger(value) ? '' : String(value);
   const parse = text => {
-    try { return JSON.parse(String(text).replace(/("(?:aweme_id|cid|id|uid|mid|music_id|user_id|reply_id|reply_to_reply_id|danmaku_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g,'$1"$2"')); }
+    try { return JSON.parse(String(text).replace(/("(?:aweme_id|cid|parent_id|item_id|id|uid|mid|music_id|user_id|reply_id|reply_to_reply_id|danmaku_id)"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g,'$1"$2"')); }
     catch (_) { return null; }
   };
   const first = value => {
@@ -99,7 +99,7 @@
     const regionCountry=String(item.region||'').toUpperCase();
     const mappedCity=['','CN','HK','MO','TW'].includes(regionCountry)&&(window.DGPublicationRegions||{})[regionCode]||'';
     const city=typeof item.city_name==='string'?item.city_name:typeof item.city==='string'&&!/^\d+$/.test(item.city)?item.city:mappedCity;
-    return {id:id(item.aweme_id),caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
+    return {id:id(item.aweme_id),contentKey:typeof video.play_addr?.uri==='string'&&!/^(?:https?:)?\//i.test(video.play_addr.uri)?video.play_addr.uri:'',caption:item.desc||'',author:author.nickname||'抖音用户',authorID:author.sec_uid||'',authorUID:id(author.uid),avatar:first(author.avatar_thumb),cover:(item.__ownList?first(video.cover)||first(video.origin_cover):first(video.origin_cover)||first(video.cover))||images[0]||'',mediaSources,pinned:item.is_top===true||Number(item.is_top)===1||item.is_pinned===true,images,music:first(sound.play_url),musicID:id(sound.id_str||sound.id||sound.mid),musicTitle:sound.title||'原声',musicAuthor:sound.author||sound.owner_nickname||'',musicCollected:!!(sound.is_collected||sound.collect_stat===1),duration:Number(video.duration||0)/1000,publishedAt:Number(item.create_time||0),comments:Number(stats.comment_count||0),likes:Number(stats.digg_count||0),collects:Number(stats.collect_count||0),liked:!!item.user_digged,collected:!!(item.is_collect||item.is_collected||item.collect_stat===1),isAd,isLive:item.aweme_type===101,location:ip||city,locationKind:ip?'IP属地':city?'发布地':''};
   };
   const comment=item=>{
     const sticker=item.sticker||{};
@@ -144,7 +144,19 @@
       if(operation==='noticeCounts'){const data=await get('/aweme/v1/web/notice/count/',{is_new_notice:'1',need_social_count:'1'});return {items:(data.notice_count||data.notice_count_list||[]).map(value=>({group:Number(value.group??value.notice_group??0),count:Number(value.count||0)}))};}
       if(operation==='notices'){
         const data=await get('/aweme/v1/web/notice/',{is_new_notice:'1',is_mark_read:'0',count:'20',notice_group:String(params.group||700),min_time:'0',max_time:cursor});
-        const items=(data.notice_list_v2||data.notice_list||[]).map(notice=>{const type=Number(notice.type||0),general=notice.general_notice||{},comment=(notice.comment||{}).comment||{},digg=notice.digg||{},follow=notice.follow||{},at=notice.at||{},interactive=notice.interactive_notice||{};const person=comment.user||(digg.from_user||[])[0]||follow.from_user||at.user_info||(interactive.from_user||[])[0]||{};const author=user(person);const work=(notice.comment||{}).aweme||digg.aweme||at.aweme||interactive.aweme||{};const action=type===31?'评论或回复了你':type===41?'赞了你的作品':type===45?'提到了你':type===33?'关注了你':type===98?'请求关注你':general.title||interactive.title||'互动消息';return {id:id(notice.nid_str||notice.nid)||String(type)+'-'+String(notice.create_time||0),name:author.nickname||general.sender_name||'抖音通知',avatar:author.avatar,authorID:author.sec,action,detail:comment.text||at.content||digg.content||interactive.content||general.content||'',workID:id(work.aweme_id||comment.aweme_id||notice.aweme_id),time:Number(notice.create_time||0)};});
+        const stable=value=>{const text=id(value);return /^\d+$/.test(text)&&text!=='0'?text:'';};
+        const items=(data.notice_list_v2||data.notice_list||[]).map(notice=>{
+          const type=Number(notice.type||0),general=notice.general_notice||{},thread=notice.comment||{},digg=notice.digg||{},follow=notice.follow||{},at=notice.at||{},interactive=notice.interactive_notice||{};
+          const comment=thread.comment||digg.comment||{};
+          const person=comment.user||(digg.from_user||[])[0]||follow.from_user||at.user_info||(interactive.from_user||[])[0]||{};
+          const author=user(person),work=thread.aweme||digg.aweme||at.aweme||interactive.aweme||{};
+          const schema=String(at.schema_url||thread.schema_url||digg.schema_url||general.schema_url||'');
+          const workID=stable(work.aweme_id)||stable(comment.aweme_id)||stable(notice.aweme_id)||stable(schema.match(/(?:aweme_id|item_id)=(\d+)/)?.[1])||stable(schema.match(/\/(?:video|note)\/(\d+)/)?.[1]);
+          const commentID=stable(comment.cid)||(type===45&&Number(at.sub_type)===2?stable(schema.match(/(?:cid|comment_id)=(\d+)/)?.[1]):'');
+          const parentID=[comment.reply_id,thread.level1_comment?.cid,thread.parent_id].map(stable).find(value=>value&&value!==workID&&value!==commentID)||'';
+          const action=type===31?(parentID?'回复了你的评论':'评论了你'):type===41?(commentID?'赞了你的评论':'赞了你的作品'):type===45?'提到了你':type===33?'关注了你':type===98?'请求关注你':general.title||interactive.title||'互动消息';
+          return {id:id(notice.nid_str||notice.nid)||String(type)+'-'+String(notice.create_time||0),type,name:author.nickname||general.sender_name||'抖音通知',avatar:author.avatar,authorID:author.sec,action,detail:comment.text||at.content||digg.content||interactive.content||general.content||'',workID,commentID,parentID,time:Number(notice.create_time||0)};
+        });
         return {items,cursor:String(data.max_time||0),more:!!data.has_more};
       }
       if(operation==='works'||operation==='likes'){

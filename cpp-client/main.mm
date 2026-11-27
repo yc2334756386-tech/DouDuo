@@ -2,6 +2,9 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreText/CoreText.h>
 #import "DGAnimation.h"
+#import "DGFeedCache.h"
+#import "DGDiagnostics.h"
+#import "DGAppearance.h"
 #include <cmath>
 UIViewController *DGMakeFeedController(void);
 
@@ -12,6 +15,7 @@ UIViewController *DGMakeFeedController(void);
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     if (![scene isKindOfClass:UIWindowScene.class]) return;
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+    self.window.overrideUserInterfaceStyle=DGPreferredStyle();
     self.window.rootViewController = DGMakeFeedController();
     [self.window makeKeyAndVisible];DGRefreshRateApply();
 }
@@ -27,10 +31,10 @@ UIViewController *DGMakeFeedController(void);
         if(!oldPoints||[oldPoints isEqualToArray:@[@.25,@.1,@.25,@1]])[prefs setObject:@[@.16,@1,@.3,@1] forKey:@"douglass.animation.points"];
         double speed=[prefs doubleForKey:@"douglass.animation.speed"];
         if(![prefs objectForKey:@"douglass.animation.speed"]||fabs(speed-1)<.001||fabs(speed-.9)<.001)[prefs setDouble:.8 forKey:@"douglass.animation.speed"];
-        if([prefs boolForKey:@"douglass.airpods.enhance"]||[prefs boolForKey:@"douglass.eq.adaptive"])[prefs setBool:YES forKey:@"douglass.eq.enabled"];
         [prefs removeObjectForKey:@"douglass.comments.write"];
         [prefs setBool:YES forKey:@"douglass.migration.v07refit"];
     }
+    DGDiagnosticStart();DGRestoreFeedScope();
     [NSURLCache setSharedURLCache:[[NSURLCache alloc] initWithMemoryCapacity:12*1024*1024 diskCapacity:256*1024*1024 diskPath:@"douglass-images"]];
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
     [[AVAudioSession sharedInstance] setActive:YES error:nil];

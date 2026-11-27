@@ -1,6 +1,5 @@
 #import "DGCommon.h"
 #import <MediaPlayer/MediaPlayer.h>
-#import "DGAudio.h"
 @interface DGMusicSession:NSObject
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) NSDictionary *music;
@@ -36,7 +35,7 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
  NSString *url=Text(String(music[@"url"]));if(!url.length)return;
  [[AVAudioSession sharedInstance]setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:nil];[[AVAudioSession sharedInstance]setActive:YES error:nil];
  BOOL same=[Text(String(self.music[@"id"]))isEqualToString:Text(String(music[@"id"]))]&&[Text(String(self.music[@"url"]))isEqualToString:url];
- if(!same||!_player){if(_clock&&_player)[_player removeTimeObserver:_clock];if(_endToken)[NSNotificationCenter.defaultCenter removeObserver:_endToken];[_player pause];_music=music.copy;_artwork=nil;_player=[AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:Asset(url)]];DGConfigureAudio(_player.currentItem);__weak DGMusicSession *weak=self;
+ if(!same||!_player){if(_clock&&_player)[_player removeTimeObserver:_clock];if(_endToken)[NSNotificationCenter.defaultCenter removeObserver:_endToken];[_player pause];_music=music.copy;_artwork=nil;_player=[AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:Asset(url)]];__weak DGMusicSession *weak=self;
   _clock=[_player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(1,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime time){[weak publish];}];
   _endToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_player.currentItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){DGMusicSession *s=weak;if(s.queue.count)[s advance:1];else{[s.player seekToTime:kCMTimeZero];[s pause];}}];
   NSString *cover=Text(String(music[@"cover"]));NSURL *address=[NSURL URLWithString:cover];if(address){NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:address];[request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];NSString *identifier=Text(String(music[@"id"]));[[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){UIImage *image=data?[UIImage imageWithData:data]:nil;if(!image)return;dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;if([Text(String(s.music[@"id"]))isEqualToString:identifier]){s.artwork=image;[s publish];}});}]resume];}
@@ -56,7 +55,7 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
 
 
 - (void)publish{
- if(!_player)return;DGRepairPlayerAudio(_player);double elapsed=CMTimeGetSeconds(_player.currentTime),duration=CMTimeGetSeconds(_player.currentItem.duration);if(!std::isfinite(duration)||duration<=0)duration=[_music[@"duration"]doubleValue];
+ if(!_player)return;double elapsed=CMTimeGetSeconds(_player.currentTime),duration=CMTimeGetSeconds(_player.currentItem.duration);if(!std::isfinite(duration)||duration<=0)duration=[_music[@"duration"]doubleValue];
  NSMutableDictionary *info=[@{MPMediaItemPropertyTitle:Text(String(_music[@"title"])).length?Text(String(_music[@"title"])):@"作品原声",MPMediaItemPropertyArtist:Text(String(_music[@"author"])),MPNowPlayingInfoPropertyPlaybackRate:@(_player.rate),MPNowPlayingInfoPropertyDefaultPlaybackRate:@1,MPNowPlayingInfoPropertyElapsedPlaybackTime:@(std::isfinite(elapsed)?MAX(0,elapsed):0),MPNowPlayingInfoPropertyMediaType:@(MPNowPlayingInfoMediaTypeAudio)}mutableCopy];
  if(duration>0&&std::isfinite(duration))info[MPMediaItemPropertyPlaybackDuration]=@(duration);if(_artwork){UIImage *image=_artwork;info[MPMediaItemPropertyArtwork]=[[MPMediaItemArtwork alloc]initWithBoundsSize:image.size requestHandler:^UIImage *(CGSize size){return image;}];}
  if(self.queue.count){info[MPNowPlayingInfoPropertyPlaybackQueueIndex]=@(self.queueIndex);info[MPNowPlayingInfoPropertyPlaybackQueueCount]=@(self.queue.count);}MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=info;[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicStateChanged" object:nil];

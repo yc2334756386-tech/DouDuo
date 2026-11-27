@@ -32,11 +32,11 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _avatar.backgroundColor=[UIColor colorWithWhite:1 alpha:.08]; _avatar.userInteractionEnabled=YES;
         [_avatar addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
         _avatar.isAccessibilityElement=YES; _avatar.accessibilityTraits=UIAccessibilityTraitButton;
-        _name=Label(12,UIFontWeightSemibold); _name.textColor=[UIColor colorWithWhite:1 alpha:.66];
+        _name=Label(12,UIFontWeightSemibold); _name.textColor=UIColor.secondaryLabelColor;
         _name.userInteractionEnabled=YES; [_name addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
         _body=Label(15,UIFontWeightRegular); _body.numberOfLines=0; _body.userInteractionEnabled=YES;
         [_body addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(copyText:)]];
-        _meta=Label(11,UIFontWeightRegular); _meta.textColor=[UIColor colorWithWhite:1 alpha:.43];
+        _meta=Label(11,UIFontWeightRegular); _meta.textColor=UIColor.secondaryLabelColor;
         _media=[UIStackView new]; _media.axis=UILayoutConstraintAxisVertical; _media.alignment=UIStackViewAlignmentLeading; _media.spacing=8;
         _reply=[UIButton buttonWithType:UIButtonTypeSystem]; _reply.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
         _reply.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -136,7 +136,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _load.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; _load.tintColor=[UIColor colorWithRed:.70 green:.91 blue:.94 alpha:1];
         [_load addTarget:self action:@selector(load) forControlEvents:UIControlEventTouchUpInside];
         _collapse=[UIButton buttonWithType:UIButtonTypeSystem]; [_collapse setTitle:@"收起 ︿" forState:UIControlStateNormal];
-        _collapse.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; _collapse.tintColor=[UIColor colorWithWhite:1 alpha:.56];
+        _collapse.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; _collapse.tintColor=UIColor.secondaryLabelColor;
         [_collapse addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
         _load.translatesAutoresizingMaskIntoConstraints=NO; _collapse.translatesAutoresizingMaskIntoConstraints=NO;
         [self.contentView addSubview:_load]; [self.contentView addSubview:_collapse];
@@ -171,7 +171,8 @@ namespace { struct DGReplyState {
 @implementation DGComments {
     DGBridge *_bridge;
     DGImage *_backdrop;UIVisualEffectView *_backdropBlur;UIView *_backdropShade;
-    NSString *_workID,*_parent,*_cursor;
+    NSString *_workID,*_parent,*_cursor,*_focusID,*_focusParent,*_highlightID;
+    NSUInteger _focusPages;
     UIVisualEffectView *_glass,*_closeGlass;
     UIView *_handle,*_separator,*_handleHit;
     UILabel *_titleLabel,*_modeLabel,*_empty,*_sortHint;UISegmentedControl *_sort;
@@ -186,14 +187,14 @@ namespace { struct DGReplyState {
     if((self=[super init])) { _bridge=bridge; _workID=work.copy; _parent=parent.copy; _cursor=@"0"; _more=YES; } return self;
 }
 - (void)viewDidLoad {
-    [super viewDidLoad]; self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
+    [super viewDidLoad];
     _backdrop=[DGImage new];_backdrop.contentMode=UIViewContentModeScaleAspectFill;_backdrop.clipsToBounds=YES;[_backdrop remote:self.coverURL?:@""];[self.view addSubview:_backdrop];
-    _backdropBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];[self.view addSubview:_backdropBlur];_backdropShade=[UIView new];_backdropShade.backgroundColor=[UIColor colorWithWhite:0 alpha:.28];[self.view addSubview:_backdropShade];
+    _backdropBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];[self.view addSubview:_backdropBlur];_backdropShade=[UIView new];_backdropShade.backgroundColor=[UIColor.systemBackgroundColor colorWithAlphaComponent:.28];[self.view addSubview:_backdropShade];
     self.view.backgroundColor=UIColor.clearColor; self.view.clipsToBounds=YES;
     self.view.layer.cornerRadius=30; self.view.layer.cornerCurve=kCACornerCurveContinuous;
     self.view.layer.borderWidth=.5; self.view.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;
     _glass=Glass(30); [self.view addSubview:_glass];
-    _handle=[UIView new]; _handle.backgroundColor=[UIColor colorWithWhite:1 alpha:.42]; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
+    _handle=[UIView new]; _handle.backgroundColor=UIColor.tertiaryLabelColor; _handle.layer.cornerRadius=2.5; [_glass.contentView addSubview:_handle];
     _handleHit=[UIView new];[_glass.contentView addSubview:_handleHit];UIPanGestureRecognizer *drag=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(dragHandle:)];drag.delegate=self;[_handleHit addGestureRecognizer:drag];_handleHit.isAccessibilityElement=YES;_handleHit.accessibilityLabel=@"向下拖动关闭评论";
     _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
     _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"";_modeLabel.hidden=YES; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
@@ -211,9 +212,9 @@ namespace { struct DGReplyState {
     [_table registerClass:DGCommentCell.class forCellReuseIdentifier:@"comment"]; [_table registerClass:DGReplyFooterCell.class forCellReuseIdentifier:@"reply-footer"];
     [_glass.contentView addSubview:_table];
     _footer=[UIButton buttonWithType:UIButtonTypeSystem]; _footer.frame=CGRectMake(0,0,320,58);
-    _footer.tintColor=[UIColor colorWithWhite:1 alpha:.48]; _footer.titleLabel.font=[UIFont systemFontOfSize:12];
+    _footer.tintColor=UIColor.secondaryLabelColor; _footer.titleLabel.font=[UIFont systemFontOfSize:12];
     [_footer addTarget:self action:@selector(loadMore) forControlEvents:UIControlEventTouchUpInside]; _table.tableFooterView=_footer;
-    _empty=Label(14,UIFontWeightRegular); _empty.textColor=[UIColor colorWithWhite:1 alpha:.6]; _empty.textAlignment=NSTextAlignmentCenter; _empty.numberOfLines=0;
+    _empty=Label(14,UIFontWeightRegular); _empty.textColor=UIColor.secondaryLabelColor; _empty.textAlignment=NSTextAlignmentCenter; _empty.numberOfLines=0;
     _table.backgroundView=_empty; [self loadMore];
 }
 - (void)viewDidLayoutSubviews {
@@ -236,6 +237,33 @@ namespace { struct DGReplyState {
     std::stable_sort(_comments.begin(),_comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});
 }
 - (void)sortChanged{[self sortLoaded];[_table reloadData];[_table setContentOffset:CGPointZero animated:NO];_savedOffset=CGPointZero;}
+- (void)focusComment:(NSString *)identifier parent:(NSString *)parent {
+ _focusID=identifier.copy;_focusParent=parent.copy;_focusPages=0;
+ if(self.isViewLoaded)[self advanceFocus];
+}
+- (void)finishFocus:(NSIndexPath *)path {
+ if(!path){_focusID=nil;_focusParent=nil;DGToast(self,@"作品已打开，暂未定位到这条评论");return;}
+ _highlightID=_focusID;_focusID=nil;_focusParent=nil;
+ [_table reloadData];[_table layoutIfNeeded];
+ if(path.section<[_table numberOfSections]&&path.row<[_table numberOfRowsInSection:path.section])[_table scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+}
+- (void)advanceFocus {
+ if(!_focusID.length||_loading)return;
+ NSInteger section=[self indexOfComment:_focusID];
+ if(section!=NSNotFound){[self finishFocus:[NSIndexPath indexPathForRow:0 inSection:section]];return;}
+ if(_focusParent.length){
+  section=[self indexOfComment:_focusParent];
+  if(section!=NSNotFound){
+   DGReplyState &state=_replyStates[String(_focusParent)];state.expanded=true;
+   for(NSUInteger i=0;i<state.items.size();i++)if(state.items[i].id==String(_focusID)){[self finishFocus:[NSIndexPath indexPathForRow:i+1 inSection:section]];return;}
+   if(state.loading)return;
+   if(state.more&&!state.failed&&_focusPages<16){++_focusPages;[self loadReplies:_focusParent];return;}
+   [self finishFocus:nil];return;
+  }
+ }
+ if(_more&&!_failed&&_focusPages<16){++_focusPages;[self loadMore];return;}
+ [self finishFocus:nil];
+}
 - (void)loadMore {
     if(_loading||!_more)return; _loading=YES; _failed=NO;
     [_footer setTitle:@"正在读取评论…" forState:UIControlStateNormal]; _footer.enabled=NO;
@@ -244,7 +272,7 @@ namespace { struct DGReplyState {
     [_bridge request:_parent.length?@"replies":@"comments" parameters:@{@"id":_workID,@"parent":_parent?:@"",@"cursor":_cursor} completion:^(NSDictionary *result,NSString *error) {
         DGComments *self=weakSelf; if(!self)return; self->_loading=NO;
         if(error) { self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
-            [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES; return; }
+            [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES;[self advanceFocus];return; }
         NSIndexPath *anchor=self->_table.indexPathsForVisibleRows.firstObject;NSString *anchorID=anchor&&anchor.section<(NSInteger)self->_comments.size()?Text(self->_comments[anchor.section].id):@"";CGFloat anchorOffset=anchor?self->_table.contentOffset.y-CGRectGetMinY([self->_table rectForRowAtIndexPath:anchor]):0;
         for(id value in Array(result[@"items"])) { if(![value isKindOfClass:NSDictionary.class])continue;
             Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)self->_comments.emplace_back(std::move(comment)); }
@@ -253,6 +281,7 @@ namespace { struct DGReplyState {
         long long total=Number(result[@"total"]); self->_titleLabel.text=total>0?[NSString stringWithFormat:@"评论 %@",Text(douglass::compact(total))]:(self->_parent.length?@"回复":@"评论");
         [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more;[self sortLoaded]; [self->_table reloadData];[self->_table layoutIfNeeded];
         NSInteger section=[self indexOfComment:anchorID];if(section!=NSNotFound&&anchor.row<[self->_table numberOfRowsInSection:section]){NSIndexPath *path=[NSIndexPath indexPathForRow:anchor.row inSection:section];CGFloat y=CGRectGetMinY([self->_table rectForRowAtIndexPath:path])+anchorOffset;[self->_table setContentOffset:CGPointMake(0,y) animated:NO];if(self->_remembered)self->_savedOffset=self->_table.contentOffset;}
+        [self advanceFocus];
     }];
 }
 - (NSInteger)indexOfComment:(NSString *)identifier {
@@ -275,11 +304,11 @@ namespace { struct DGReplyState {
     __weak DGComments *weakSelf=self;
     [_bridge request:@"replies" parameters:@{@"id":_workID,@"parent":identifier,@"cursor":cursor} completion:^(NSDictionary *result,NSString *error) {
         DGComments *self=weakSelf; if(!self)return; DGReplyState &state=self->_replyStates[key]; state.loading=false;
-        if(error) {state.failed=true;[self reloadThread:identifier];DGToast(self,error);return;}
+        if(error) {state.failed=true;[self reloadThread:identifier];DGToast(self,error);[self advanceFocus];return;}
         state.loaded=true;
         for(id value in Array(result[@"items"])) {if(![value isKindOfClass:NSDictionary.class])continue;
             Comment reply=ReadComment(value); if(!reply.id.empty()&&state.ids.insert(reply.id).second)state.items.emplace_back(std::move(reply));}
-        state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];
+        state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];[self advanceFocus];
     }];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return(NSInteger)_comments.size();}
@@ -299,6 +328,7 @@ namespace { struct DGReplyState {
     const Comment &comment=indexPath.row==0?parent:state->items[indexPath.row-1];
     DGCommentCell *cell=[tableView dequeueReusableCellWithIdentifier:@"comment" forIndexPath:indexPath];
     [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading];
+    cell.contentView.backgroundColor=[_highlightID isEqualToString:Text(comment.id)]?[UIColor.systemTealColor colorWithAlphaComponent:.16]:UIColor.clearColor;
     NSString *sec=Text(comment.authorID),*name=Text(comment.author);
     cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};
     cell.replyAction=^{[weakSelf toggleReplies:parentID];};

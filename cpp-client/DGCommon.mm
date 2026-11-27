@@ -1,15 +1,10 @@
 #import "DGCommon.h"
-#import "DGColor.h"
 void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInterval last=0;CFTimeInterval now=CACurrentMediaTime();if(now-last<.08)return;last=now;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];});}
 @implementation DGImage {
     NSURLSessionDataTask *_task;
     NSString *_source;
-    UIImage *_original;NSUInteger _colorGeneration,_loadGeneration;
+    NSUInteger _loadGeneration;
 }
-- (void)setColorAdjusted:(BOOL)value{if(_colorAdjusted==value)return;_colorAdjusted=value;[NSNotificationCenter.defaultCenter removeObserver:self name:@"DGColorChanged" object:nil];if(value)[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(colorChanged) name:@"DGColorChanged" object:nil];[self colorChanged];}
-- (void)setImage:(UIImage *)image{_original=image;[super setImage:image];if(_colorAdjusted)[self colorChanged];}
-- (void)colorChanged{NSUInteger generation=++_colorGeneration;UIImage *original=_original;if(!_colorAdjusted||!original){[super setImage:original];return;}__weak DGImage *weak=self;dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{UIImage *result=DGColorImage(original);dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weak;if(self&&generation==self->_colorGeneration)[self setRenderedImage:result];});});}
-- (void)setRenderedImage:(UIImage *)image{[super setImage:image];}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
     dispatch_once(&once, ^{ cache = [NSCache new]; cache.totalCostLimit = 16 * 1024 * 1024; });

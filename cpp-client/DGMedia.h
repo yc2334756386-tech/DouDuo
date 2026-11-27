@@ -8,6 +8,7 @@
 @property(nonatomic,copy) void (^actionMenuAction)(CGPoint point);
 @property(nonatomic,copy) void (^dismissCommentsAction)(void);
 @property(nonatomic,copy) BOOL (^advanceAction)(void);
+@property(nonatomic,copy) void (^viewedAction)(void);
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,weak) UIViewController *presenter;
 - (void)display:(const Work &)work;
@@ -20,6 +21,7 @@
 - (void)leaveBackground;
 - (NSString *)selectedImageURL;
 - (void)releaseUnusedResources;
+- (void)pagingInMotion:(BOOL)inMotion;
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);

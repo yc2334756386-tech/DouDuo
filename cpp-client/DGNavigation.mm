@@ -48,7 +48,7 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
  [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=NO;
  UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
- _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];
+ _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];
 }
 - (void)viewDidLayoutSubviews{
  [super viewDidLayoutSubviews];CGRect bar=[self.navigationBar convertRect:self.navigationBar.bounds toView:self.view];CGFloat height=MAX(1,CGRectGetMaxY(bar)+64);_topBlur.hidden=self.navigationBarHidden;CGRect frame=CGRectMake(0,0,self.view.bounds.size.width,height);

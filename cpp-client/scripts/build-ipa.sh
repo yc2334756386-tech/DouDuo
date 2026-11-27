@@ -32,7 +32,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "${OBJECTS[@]}" "$CLIENT"/*.mm \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
-  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework MediaToolbox -framework CoreText -framework UniformTypeIdentifiers -lz \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework CoreText -framework UniformTypeIdentifiers -lz \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"
@@ -52,7 +52,7 @@ info={
   'CFBundleInfoDictionaryVersion':'6.0',
   'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.11.0',
+  'CFBundleShortVersionString':'0.12.0',
   'UIBackgroundModes':['audio'],
   'NSPhotoLibraryAddUsageDescription':'保存你选择的视频、图集和评论图片到相册',
   'CFBundleVersion':sys.argv[3],
@@ -67,7 +67,6 @@ info={
     'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Default','UISceneDelegateClassName':'DGScene'}]}},
   'UISupportedInterfaceOrientations':['UIInterfaceOrientationPortrait','UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'],
   'UISupportedInterfaceOrientations~ipad':['UIInterfaceOrientationPortrait','UIInterfaceOrientationPortraitUpsideDown','UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'],
-  'UIUserInterfaceStyle':'Dark',
   'ITSAppUsesNonExemptEncryption':False,
   'NSAppTransportSecurity':{'NSAllowsArbitraryLoadsForMedia':True,'NSAllowsArbitraryLoadsInWebContent':True},
 }
@@ -77,6 +76,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.11.0-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.11.0-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.11.0-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.12.0-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.12.0-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.12.0-unsigned.ipa"

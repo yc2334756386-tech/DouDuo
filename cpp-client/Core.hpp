@@ -7,7 +7,7 @@
 
 namespace douglass {
 struct Work {
-    std::string id, caption, author, avatar, cover, play, alternate, music;
+    std::string id, contentKey, caption, author, avatar, cover, play, alternate, music;
     std::string authorID, authorUID, musicID, musicTitle, musicAuthor, location, locationKind;
     std::vector<std::string> images;
     std::int64_t comments = 0, likes = 0, collects = 0, publishedAt = 0;

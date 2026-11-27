@@ -22,7 +22,7 @@ static inline long long Number(id value) { return [value respondsToSelector:@sel
 static inline NSArray *Array(id value) { return [value isKindOfClass:NSArray.class] ? value : @[]; }
 static inline Work ReadWork(NSDictionary *value) {
     Work work;
-    work.id = String(value[@"id"]); work.caption = String(value[@"caption"]);
+    work.id = String(value[@"id"]); work.contentKey=String(value[@"contentKey"]); work.caption = String(value[@"caption"]);
     work.author = String(value[@"author"]); work.avatar = String(value[@"avatar"]);
     work.cover = String(value[@"cover"]); work.play = String(value[@"play"]);
     work.alternate = String(value[@"alternate"]); work.music = String(value[@"music"]);
@@ -54,13 +54,13 @@ static inline Comment ReadComment(NSDictionary *value) {
 static inline UILabel *Label(CGFloat size, UIFontWeight weight) {
     UILabel *label = [UILabel new];
     label.font = [UIFont systemFontOfSize:size weight:weight];
-    label.textColor = UIColor.whiteColor;
+    label.textColor = UIColor.labelColor;
     return label;
 }
 static inline UIButton *Symbol(NSString *name, id target, SEL action) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setImage:[UIImage systemImageNamed:name withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:21 weight:UIImageSymbolWeightMedium]] forState:UIControlStateNormal];
-    button.tintColor = UIColor.whiteColor;
+    button.tintColor = UIColor.labelColor;
     [button addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -70,19 +70,19 @@ static inline UIVisualEffectView *Glass(CGFloat radius) {
         UIGlassEffect *glass = [UIGlassEffect effectWithStyle:UIGlassEffectStyleRegular];
         glass.interactive = YES;
         effect = glass;
-    } else effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    } else effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
     UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
     view.layer.cornerRadius = radius;
     view.clipsToBounds = YES;
     return view;
 }
 static inline AVURLAsset *Asset(NSString *url) {
-    return [AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:@{@"AVURLAssetHTTPHeaderFieldsKey":@{@"User-Agent":DGUserAgent(),@"Referer":@"https://www.douyin.com/"}}];
+    NSURL *address=[NSURL URLWithString:url];if(address.fileURL)return [AVURLAsset URLAssetWithURL:address options:nil];
+    return [AVURLAsset URLAssetWithURL:address options:@{@"AVURLAssetHTTPHeaderFieldsKey":@{@"User-Agent":DGUserAgent(),@"Referer":@"https://www.douyin.com/"}}];
 }
 
 
 @interface DGImage : UIImageView
-@property(nonatomic) BOOL colorAdjusted;
 @property(nonatomic) NSUInteger maximumPixelSize;
 - (void)remote:(NSString *)url;
 + (void)purgeCache;
@@ -91,8 +91,6 @@ static inline AVURLAsset *Asset(NSString *url) {
 @end
 void DGConfigurePageTransition(UIViewController *controller);
 double DGHoldSpeed(void);
-void DGConfigureAudio(AVPlayerItem *item);
-void DGRefreshAudioPreferences(void);
 NSAttributedString *DGRichText(NSString *plain, NSArray *emoticons, UIFont *font, UIColor *color);
 void DGShowFullCaption(UIViewController *host, NSString *text);
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge *bridge, NSString *cursor, BOOL more);
@@ -117,7 +115,6 @@ void DGOptimisticAction(DGBridge *bridge, UIViewController *presenter, NSDiction
 void DGResetInteractions(void);
 void DGResetMusicPages(void);
 BOOL DGContentAllowed(const Work &work);
-void DGMarkSeen(NSString *identifier);
 void DGSeenScope(NSString *uid);
 void DGMusicPlay(NSDictionary *music);
 void DGMusicPause(void);
@@ -146,3 +143,5 @@ void DGRefreshEmbeddedMessages(UIViewController *page);
 void DGSetEmbeddedMessagesVisible(UIViewController *page,BOOL visible);
 
 NSArray *DGNormalizeWebItems(id items);
+
+UIViewController *DGMakeNoticePlayer(NSArray<NSDictionary *> *works,DGBridge *bridge,NSString *commentID,NSString *parentID);

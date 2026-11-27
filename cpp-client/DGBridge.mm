@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#import "DGDiagnostics.h"
 #import "DGSession.h"
 #import "DGVerification.h"
 void DGReadMusicPage(DGBridge *,NSString *,NSString *,DGResult);
@@ -98,7 +99,7 @@ NSString *DGUserAgent(void) {
     [self webView:webView didFailNavigation:navigation withError:error];
 }
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
-    _ready=NO;
+    _ready=NO;DGDiagnostic(@"webkit.process_terminated",nil);
     if(UIApplication.sharedApplication.applicationState==UIApplicationStateActive)[self reload];
     else _webReloadPending=YES;
 }
@@ -114,7 +115,7 @@ NSString *DGUserAgent(void) {
     NSUInteger generation = _generation;
     __block DGResult pending=[completion copy];
     void (^deliver)(NSDictionary *, NSString *) = ^(NSDictionary *result, NSString *error) {
-        DGResult callback=pending;pending=nil;if(callback)callback(result,error);
+        DGResult callback=pending;pending=nil;if(callback){if(error)DGDiagnostic(@"bridge.request_error",operation);callback(result,error);}
     };
     // Includes queueing and JS execution. A stuck page may not strand a screen forever.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ([operation isEqualToString:@"musicWorks"]?55:32) * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
