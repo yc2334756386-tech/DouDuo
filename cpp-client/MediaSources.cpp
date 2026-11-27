@@ -11,12 +11,11 @@ PlaybackSource choose(const std::vector<std::string> &preferred,const std::vecto
     const auto direct=std::find_if(preferred.begin(),preferred.end(),[](const std::string &url){return webURL(url)&&!redirected(url);});
     auto preferredRedirect=std::find_if(preferred.begin(),preferred.end(),redirected);
     auto otherRedirect=std::find_if(alternates.begin(),alternates.end(),redirected);
-    if(direct!=preferred.end())selected.primary=*direct;
-    else if(preferredRedirect!=preferred.end())selected.primary=*preferredRedirect;
-    else if(auto other=std::find_if(alternates.begin(),alternates.end(),[](const std::string &url){return webURL(url)&&!redirected(url);});other!=alternates.end())selected.primary=*other;
+    if(preferredRedirect!=preferred.end())selected.primary=*preferredRedirect;
     else if(otherRedirect!=alternates.end())selected.primary=*otherRedirect;
-    if(preferredRedirect!=preferred.end()&&*preferredRedirect!=selected.primary)selected.alternate=*preferredRedirect;
-    else if(otherRedirect!=alternates.end()&&*otherRedirect!=selected.primary)selected.alternate=*otherRedirect;
+    else if(direct!=preferred.end())selected.primary=*direct;
+    else if(auto other=std::find_if(alternates.begin(),alternates.end(),webURL);other!=alternates.end())selected.primary=*other;
+    if(direct!=preferred.end()&&*direct!=selected.primary)selected.alternate=*direct;
     else {
         auto distinct=[&](const std::string &url){return webURL(url)&&url!=selected.primary;};
         if(auto next=std::find_if(preferred.begin(),preferred.end(),distinct);next!=preferred.end())selected.alternate=*next;

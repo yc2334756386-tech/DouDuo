@@ -29,7 +29,7 @@ static inline Work ReadWork(NSDictionary *value) {
     BOOL quality=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.quality"],smooth=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.highFPS"];
     NSDictionary *variants=[value[@"variants"]isKindOfClass:NSDictionary.class]?value[@"variants"]:@{};id selected=variants[quality&&smooth?@"qualityFPS":quality?@"quality":smooth?@"smooth":@""];
     if([selected isKindOfClass:NSDictionary.class]&&String(selected[@"play"]).size()){work.play=String(selected[@"play"]);work.alternate=String(selected[@"alternate"]);}
-    if(work.play.find("/aweme/v1/play/")!=std::string::npos&&(work.alternate.starts_with("https://")||work.alternate.starts_with("http://"))&&work.alternate.find("/aweme/v1/play/")==std::string::npos)std::swap(work.play,work.alternate);
+    if(work.play.find("/aweme/v1/play/")==std::string::npos&&(work.alternate.starts_with("https://")||work.alternate.starts_with("http://"))&&work.alternate.find("/aweme/v1/play/")!=std::string::npos)std::swap(work.play,work.alternate);
     work.comments = Number(value[@"comments"]); work.likes = Number(value[@"likes"]);
     work.duration = [value[@"duration"] doubleValue];
 work.authorID=String(value[@"authorID"]);work.authorUID=String(value[@"authorUID"]);

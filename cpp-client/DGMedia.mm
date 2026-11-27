@@ -36,6 +36,7 @@ static void DGSetLayerPlaybackRate(CALayer *layer,double rate){
  CFTimeInterval parent=layer.superlayer?[layer.superlayer convertTime:now fromLayer:nil]:now;
  layer.speed=rate;layer.timeOffset=local;layer.beginTime=parent;
 }
+static BOOL DGPrewarmAllowed=NO;
 @interface DGPrepared:NSObject
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) AVPlayerItem *item;
@@ -43,29 +44,36 @@ static void DGSetLayerPlaybackRate(CALayer *layer,double rate){
 @property(nonatomic) BOOL warming, warmed, needsBeginning;
 @property(nonatomic) BOOL retired;
 @property(nonatomic) NSUInteger warmAttempts;
+@property(nonatomic) NSUInteger warmGeneration;
+@property(nonatomic) BOOL prewarmRequested;
 @property(nonatomic) CFTimeInterval createdAt;
 @property(nonatomic,copy) NSString *sourceKind;
 - (instancetype)initWithURL:(NSString *)url;
 - (void)warm;
+- (void)requestWarm;
+- (void)suspendWarm;
 - (void)retire;
 @end
 @implementation DGPrepared
 - (instancetype)initWithURL:(NSString *)url {
  if((self=[super init])){
   _createdAt=CACurrentMediaTime();NSURL *address=[NSURL URLWithString:url];_sourceKind=address.fileURL?@"local":([address.path containsString:@"/aweme/v1/play/"]?@"redirect":@"direct");
-  _item=[AVPlayerItem playerItemWithAsset:Asset(url)];_item.preferredForwardBufferDuration=1;_item.audioTimePitchAlgorithm=AVAudioTimePitchAlgorithmTimeDomain;
+  _item=[AVPlayerItem playerItemWithAsset:Asset(url)];_item.preferredForwardBufferDuration=4;_item.audioTimePitchAlgorithm=AVAudioTimePitchAlgorithmTimeDomain;
   _player=[AVPlayer playerWithPlayerItem:_item];_player.automaticallyWaitsToMinimizeStalling=NO;
   [_player addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];[_item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];
  }return self;
 }
 - (void)warm {
     if(!NSThread.isMainThread){__weak DGPrepared *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak warm];});return;}
-    if(_retired||_needsBeginning||_player.rate!=0||_warming||_warmed||_warmAttempts>=2||_item.status!=AVPlayerItemStatusReadyToPlay||_player.status!=AVPlayerStatusReadyToPlay)return;
+    if(!_prewarmRequested||!DGPrewarmAllowed||_leases||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||_retired||_needsBeginning||_player.rate!=0||_warming||_warmed||_warmAttempts>=2||_item.status!=AVPlayerItemStatusReadyToPlay||_player.status!=AVPlayerStatusReadyToPlay)return;
     _warming=YES;++_warmAttempts;__weak DGPrepared *weak=self;CFTimeInterval started=CACurrentMediaTime();
-    [_player prerollAtRate:1 completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{DGPrepared *s=weak;if(!s)return;s.warming=NO;s.warmed=ok&&!s.retired;if(DGDiagnosticEnabled())DGDiagnostic(@"playback.preroll",[NSString stringWithFormat:@"ms=%.0f result=%d",(CACurrentMediaTime()-started)*1000,s.warmed]);});}];
+    NSUInteger generation=++_warmGeneration;
+    [_player prerollAtRate:1 completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{DGPrepared *s=weak;if(!s||generation!=s.warmGeneration)return;s.warming=NO;s.warmed=ok&&!s.retired;if(DGDiagnosticEnabled())DGDiagnostic(@"playback.preroll",[NSString stringWithFormat:@"ms=%.0f result=%d",(CACurrentMediaTime()-started)*1000,s.warmed]);});}];
 }
+- (void)requestWarm{_prewarmRequested=YES;[self warm];}
+- (void)suspendWarm{_prewarmRequested=NO;++_warmGeneration;BOOL warming=_warming;_warming=NO;_warmAttempts=0;if(warming)[_player cancelPendingPrerolls];}
 - (void)retire {
-    _retired=YES;[_player cancelPendingPrerolls];_warming=NO;
+    _retired=YES;[self suspendWarm];
     if(!_leases){[_player pause];[_player replaceCurrentItemWithPlayerItem:nil];}
 }
 - (void)observeValueForKeyPath:(NSString *)key ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -85,16 +93,18 @@ static NSHashTable<DGFeedCell *> *MediaCells() {
 - (void)resetPlaybackForWork:(NSString *)identifier;
 @end
 static NSMutableDictionary<NSString *,DGPrepared *> *Pool(){static NSMutableDictionary *pool;static dispatch_once_t once;dispatch_once(&once,^{pool=[NSMutableDictionary dictionary];});return pool;}
+void DGSuspendPrerolls(void){DGPrewarmAllowed=NO;for(DGPrepared *prepared in Pool().allValues)[prepared suspendWarm];}
 static NSString *PlayerURL(const Work &work){NSString *identifier=Text(work.id);NSURL *file=DGCacheLocalVideo(identifier)?:DGPlaybackResumeLocalVideo(identifier);return file.absoluteString?:Text(work.play);}
 static NSString *PoolKey(const Work &work){return [NSString stringWithFormat:@"%@|%@",Text(work.id),PlayerURL(work)];}
 static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=Pool()[key];if(!p){p=[[DGPrepared alloc]initWithURL:PlayerURL(w)];Pool()[key]=p;}if(Pool().count>3)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(![key isEqualToString:old]&&!v.leases){[v retire];[Pool() removeObjectForKey:old];if(Pool().count<=3)break;}}return p;}
 void DGWarmWorks(const std::vector<Work>&works,NSInteger index){
  if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||index<0||index>=(NSInteger)works.size())return;
+ DGPrewarmAllowed=YES;
  NSMutableSet *keys=[NSMutableSet set];
  // Retain the previous prepared item without starting another download behind the user.
  for(NSInteger i=MAX(0,index-1);i<=MIN((NSInteger)works.size()-1,index+1);++i){NSString *prefix=[Text(works[i].id) stringByAppendingString:@"|"];for(NSString *key in Pool())if([key hasPrefix:prefix])[keys addObject:key];}
  NSInteger next=index+1;
- if(next<(NSInteger)works.size()&&!works[next].photo()&&!works[next].play.empty()){[keys addObject:PoolKey(works[next])];[Obtain(works[next]) warm];}
+ if(next<(NSInteger)works.size()&&!works[next].photo()&&!works[next].play.empty()){[keys addObject:PoolKey(works[next])];[Obtain(works[next]) requestWarm];}
  for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(![keys containsObject:key]&&!p.leases){[p retire];[Pool() removeObjectForKey:key];}}
 }
 void DGResetWorkPlayback(NSString *identifier) {
@@ -104,8 +114,8 @@ void DGResetWorkPlayback(NSString *identifier) {
  for(DGFeedCell *cell in MediaCells().allObjects)[cell resetPlaybackForWork:identifier];
 }
 BOOL DGAutomaticPiPAvailable(){return [NSUserDefaults.standardUserDefaults boolForKey:@"douglass.pip"]&&[AVPictureInPictureController isPictureInPictureSupported];}
-void DGTrimPlayers(){for(DGFeedCell *cell in MediaCells().allObjects)[cell discardInactiveMedia];for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(!p.leases){[p retire];[Pool() removeObjectForKey:key];}}}
-void DGClearPlayers(){for(DGPrepared *p in Pool().allValues)[p retire];[Pool() removeAllObjects];}
+void DGTrimPlayers(){DGSuspendPrerolls();for(DGFeedCell *cell in MediaCells().allObjects)[cell discardInactiveMedia];for(NSString *key in Pool().allKeys){DGPrepared *p=Pool()[key];if(!p.leases){[p retire];[Pool() removeObjectForKey:key];}}}
+void DGClearPlayers(){DGSuspendPrerolls();for(DGPrepared *p in Pool().allValues)[p retire];[Pool() removeAllObjects];}
 static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value=0;return [NSString stringWithFormat:@"%02ld:%02ld",(long)value/60,(long)value%60];}
 @interface DGFeedCell()<UIScrollViewDelegate,UIGestureRecognizerDelegate,AVPictureInPictureControllerDelegate>
 @end
@@ -236,17 +246,18 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  _author.text=[@"@" stringByAppendingString:Text(_work.author)];_caption.text=Text(_work.caption);NSMutableArray *meta=[NSMutableArray array];if(_work.publishedAt>0){NSDateFormatter *f=[NSDateFormatter new];f.dateFormat=@"yyyy-MM-dd HH:mm";[meta addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:_work.publishedAt]]];}if(_work.location.empty()||(_work.locationKind!="ip"&&_work.locationKind!="IP属地"))[meta addObject:@"IP属地：未提供"];if(!_work.location.empty())[meta addObject:[NSString stringWithFormat:@"%@%@",(_work.locationKind=="ip"||_work.locationKind=="IP属地")?@"IP属地 ":@"作品发布地 ",Text(_work.location)]];_metadata.text=[meta componentsJoinedByString:@" · "];NSString *music=_work.musicTitle.empty()?@"作品原声":Text(_work.musicTitle),*by=_work.musicAuthor.empty()?Text(_work.author):Text(_work.musicAuthor);[_musicButton setTitle:[NSString stringWithFormat:@"♫ %@ · %@",music,by] forState:UIControlStateNormal];_likeCount.text=Text(douglass::compact(_work.likes));_commentCount.text=Text(douglass::compact(_work.comments));_collectCount.text=Text(douglass::compact(_work.collects));[_likeButton setImage:[UIImage systemImageNamed:_work.liked?@"heart.fill":@"heart" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:21 weight:UIImageSymbolWeightMedium]] forState:UIControlStateNormal];_likeButton.tintColor=_work.liked?[UIColor colorWithRed:1 green:.25 blue:.38 alpha:1]:UIColor.whiteColor;[_collectButton setImage:[UIImage systemImageNamed:_work.collected?@"star.fill":@"star" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:21 weight:UIImageSymbolWeightMedium]] forState:UIControlStateNormal];_collectButton.tintColor=_work.collected?[UIColor colorWithRed:1 green:.83 blue:.32 alpha:1]:UIColor.whiteColor;
 }
 - (void)attach:(DGPrepared*)prepared position:(double)position {
- [self detach];if(!prepared)return;_prepared=prepared;++prepared.leases;_player=prepared.player;_slider.userInteractionEnabled=!prepared.needsBeginning;_receivedFirstFrame=NO;_cover.hidden=NO;_playerLayer.player=_player;[self configurePiP];_observedItem=prepared.item;if(_active&&!_backgroundMode&&!_pagingMotion)[_ambient item:_observedItem imageView:nil];[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;_progress=-1;__weak DGFeedCell *weak=self;
+ [prepared suspendWarm];[self detach];if(!prepared)return;_prepared=prepared;++prepared.leases;_player=prepared.player;_slider.userInteractionEnabled=!prepared.needsBeginning;_receivedFirstFrame=NO;_cover.hidden=NO;_playerLayer.player=_player;[self configurePiP];_observedItem=prepared.item;if(_active&&!_backgroundMode&&!_pagingMotion)[_ambient item:_observedItem imageView:nil];[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;_progress=-1;__weak DGFeedCell *weak=self;
  if(DGDiagnosticEnabled())DGDiagnostic(@"playback.attach",[NSString stringWithFormat:@"active=%d during_swipe=%d preroll=%d source=%@ item_status=%ld prepared_age_ms=%.0f",_active,_pagingMotion,_prepared.warmed,_prepared.sourceKind,(long)_observedItem.status,(CACurrentMediaTime()-_prepared.createdAt)*1000]);
  NSNotificationCenter *notifications=NSNotificationCenter.defaultCenter;
  _stallToken=[notifications addObserverForName:AVPlayerItemPlaybackStalledNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
-  DGFeedCell *cell=weak;if(!cell||cell->_observedItem!=event.object||!cell->_active||!DGDiagnosticEnabled())return;
-  DGDiagnostic(@"playback.stalled",[NSString stringWithFormat:@"position=%.2f",[cell currentPlaybackPosition]]);
+  DGFeedCell *cell=weak;if(!cell||cell->_observedItem!=event.object||!cell->_active)return;
+  DGSuspendPrerolls();DGCacheSetIdle(NO);
+  DGDiagnostic(@"playback.stalled",[NSString stringWithFormat:@"position=%.2f source=%@ first_frame=%d empty=%d keepup=%d waiting=%@",[cell currentPlaybackPosition],cell->_prepared.sourceKind,cell->_receivedFirstFrame,cell->_observedItem.playbackBufferEmpty,cell->_observedItem.playbackLikelyToKeepUp,cell->_player.reasonForWaitingToPlay?:@"none"]);
  }];
  _accessToken=[notifications addObserverForName:AVPlayerItemNewAccessLogEntryNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
   DGFeedCell *cell=weak;AVPlayerItem *item=event.object;if(!cell||cell->_observedItem!=item||!DGDiagnosticEnabled())return;
   AVPlayerItemAccessLogEvent *stats=item.accessLog.events.lastObject;if(!stats)return;
-  DGDiagnostic(@"playback.access",[NSString stringWithFormat:@"startup_ms=%.0f stalls=%ld dropped=%ld observed_kbps=%.0f",stats.startupTime*1000,(long)stats.numberOfStalls,(long)stats.numberOfDroppedVideoFrames,stats.observedBitrate/1000]);
+  DGDiagnostic(@"playback.access",[NSString stringWithFormat:@"startup_ms=%.0f stalls=%ld dropped=%ld observed_kbps=%.0f transferred_bytes=%lld transfer_s=%.2f requests=%ld",stats.startupTime*1000,(long)stats.numberOfStalls,(long)stats.numberOfDroppedVideoFrames,stats.observedBitrate/1000,stats.numberOfBytesTransferred,stats.transferDuration,(long)stats.numberOfMediaRequests]);
  }];
  _failureToken=[notifications addObserverForName:AVPlayerItemFailedToPlayToEndTimeNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
   DGFeedCell *cell=weak;if(!cell||cell->_observedItem!=event.object||!DGDiagnosticEnabled())return;
@@ -316,7 +327,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  if(!_player||_prepared.needsBeginning||_playerLayer.player!=_player||!_playerLayer.readyForDisplay)return;
  _cover.hidden=YES;if(_spinnerPending||_loadingSpinner.isAnimating)[self cancelLoadingIndicator];
  if(_active&&!_receivedFirstFrame){
-  _receivedFirstFrame=YES;_observedItem.preferredForwardBufferDuration=_boosting?8:4;
+  _receivedFirstFrame=YES;
   double seconds=CMTimeGetSeconds(_player.currentTime),ahead=0;for(NSValue *value in _observedItem.loadedTimeRanges){CMTimeRange range=value.CMTimeRangeValue;double start=CMTimeGetSeconds(range.start),end=CMTimeGetSeconds(CMTimeRangeGetEnd(range));if(std::isfinite(seconds)&&start<=seconds+.1&&end>seconds)ahead=MAX(ahead,end-seconds);}
   DGDiagnostic(@"playback.first_frame",[NSString stringWithFormat:@"ms=%.0f preroll=%d source=%@ buffered_s=%.2f",(CACurrentMediaTime()-_firstFrameStarted)*1000,_prepared.warmed,_prepared.sourceKind,ahead]);
  }
@@ -450,7 +461,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  CGPoint point=[g locationInView:self.contentView];BOOL edge=point.x<56||point.x>self.contentView.bounds.size.width-80;
  if(g.state==UIGestureRecognizerStateBegan){if(edge&&!_work.photo()&&_player){if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];}_boosting=YES;_boostRate=1.5;_holdY=point.y;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"1.5× · 上滑换档，松手恢复";_player.currentItem.preferredForwardBufferDuration=8;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_boostRate;}else if(self.actionMenuAction)self.actionMenuAction(point);}
  else if(g.state==UIGestureRecognizerStateChanged&&_boosting){double upward=MAX(0.,_holdY-point.y),speed=upward<28?1.5:upward<64?2.:DGHoldSpeed();if(fabs(speed-_boostRate)>.01){_boostRate=speed;DGHaptic();_speedText.text=[NSString stringWithFormat:@"%.1f× · 上滑换档，松手恢复",speed];if(_active&&!_paused&&!_prepared.needsBeginning&&!_seeking)_player.rate=speed;}}
- else if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){[self unlock];_boosting=NO;_speedGlass.hidden=YES;_player.currentItem.preferredForwardBufferDuration=_receivedFirstFrame?4:1;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_rate;}
+ else if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){[self unlock];_boosting=NO;_speedGlass.hidden=YES;_player.currentItem.preferredForwardBufferDuration=4;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_rate;}
  [self syncDanmakuPlayback];
 }
 - (void)expandCaption{CGFloat width=MAX(80,MIN(self.contentView.bounds.size.width-103,680));CGFloat full=[Text(_work.caption)boundingRectWithSize:CGSizeMake(width,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:_caption.font} context:nil].size.height;if(!_captionExpanded&&full>self.contentView.bounds.size.height*.45){DGShowFullCaption(self.presenter,Text(_work.caption));return;}_captionExpanded=!_captionExpanded;[self setNeedsLayout];DGAnimate(.2,^{[self layoutIfNeeded];},nil);}

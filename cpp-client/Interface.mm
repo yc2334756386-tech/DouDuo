@@ -178,7 +178,7 @@
  _restoredPaused=[state[@"paused"]boolValue];_noticeComment=Text(String(state[@"comment"]));_noticeParent=Text(String(state[@"parent"]));
 }
 - (void)willResignActive {
- _inactive=YES;++_warmGeneration;
+ _inactive=YES;++_warmGeneration;DGSuspendPrerolls();
  if(_ownsBridge){DGDiagnosticMemory(@"app.inactive");[self savePlaybackCheckpoint];DGCacheCancelPrefetch();DGRefreshRateSuspend();DGFlushSeen();}
  for(DGFeedCell *cell in _collection.visibleCells)[cell suspendForegroundWork];
 }
@@ -194,7 +194,7 @@
 }
 - (void)background {
  if(!_foreground)return;
- _foreground=NO;_inactive=YES;++_warmGeneration;
+ _foreground=NO;_inactive=YES;++_warmGeneration;DGSuspendPrerolls();
  if(_ownsBridge){if(CACurrentMediaTime()-_checkpointSavedAt>.25)[self savePlaybackCheckpoint];DGCacheCancelPrefetch();DGFlushSeen();DGDiagnosticMemory(@"app.background");}
  [self finishPaging];DGRefreshRateSuspend();
  BOOL ownsPlayback=_visible&&!_showingMessages&&self.view.window&&(!self.presentedViewController||DGOptionsKeepsPlayback(self.presentedViewController))&&!DGMusicPlayer();
@@ -384,7 +384,7 @@
 }
 - (void)beginPaging {
  if(_pagingMotion)return;
- _pagingMotion=YES;++_warmGeneration;
+ _pagingMotion=YES;++_warmGeneration;DGSuspendPrerolls();
  if(DGDiagnosticEnabled()){
   _pagingStarted=CACurrentMediaTime();_pagingPrevious=_pagingStarted;_pagingRelease=0;_pagingMaxGap=0;_pagingSamples=0;_pagingLongFrames=0;_pagingStartIndex=_current;
   DGSwipeClock *clock=[DGSwipeClock new];__weak DGFeed *weak=self;
