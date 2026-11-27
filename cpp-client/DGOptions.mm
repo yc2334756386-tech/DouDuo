@@ -57,7 +57,7 @@ static NSDictionary *Action(NSString *title,NSString *action,NSString *detail){r
  @[Switch(@"后台音频播放",@"douglass.backgroundAudio",@"退到后台沿当前位置继续播放",NO),Switch(@"画中画",@"douglass.pip",@"支持设备上允许退到后台自动开启",NO),Action(@"立即开启画中画",@"pip",@"当前视频就绪后可开启"),Switch(@"自动上滑",@"douglass.autoScroll",@"视频播完后播放下一条，评论打开时循环当前视频",NO),Range(@"长按加速倍速",@"douglass.holdSpeed",1.5,3,2,.1,@"左右边缘长按，松手恢复正常播放")],
  @[Action(@"全局动画曲线与速率",@"animation",@"拖动控制点或填写贝塞尔曲线数值"),Switch(@"强制 120Hz",@"douglass.force120",@"关闭使用系统默认 ProMotion 策略；实际刷新率由设备及系统决定",NO)],
  @[Segments(@"外观",@"douglass.appearance",@[@"深色",@"浅色",@"自动"],0,@"自动跟随手机的深色模式")],
- @[Switch(@"启用日志",@"douglass.diagnostics",@"持续记录本应用的运行与内存诊断",NO),Action(@"导出日志",@"logsExport",@"通过系统分享面板保存到文件"),Action(@"清空日志目录",@"logsClear",@"")],
+ @[Switch(@"启用日志",@"douglass.diagnostics",@"持续记录本应用的运行与内存诊断",NO),Action(@"查看日志",@"logsView",@"在应用内查看最近记录"),Action(@"导出日志",@"logsExport",@"通过系统分享面板保存到文件"),Action(@"清空日志目录",@"logsClear",@"")],
  @[Action(@"登录 / 安全验证",@"login",@""),Action(@"退出当前账号",@"logout",@"")]
  ];return _rows;}
 - (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat h=self.view.bounds.size.height,panel=self.actions?MIN(h*.68,460):h*.82;_glass.bounds=CGRectMake(0,0,self.view.bounds.size.width,panel);_glass.center=CGPointMake(self.view.bounds.size.width/2,h-panel/2);_title.frame=CGRectMake(24,18,self.view.bounds.size.width-92,34);_close.frame=CGRectMake(self.view.bounds.size.width-62,12,44,44);_table.frame=CGRectMake(0,60,self.view.bounds.size.width,panel-60);_table.contentInset=UIEdgeInsetsMake(0,0,self.view.safeAreaInsets.bottom,0);}
@@ -98,6 +98,7 @@ static NSDictionary *Action(NSString *title,NSString *action,NSString *detail){r
   chooser.popoverPresentationController.sourceView=tableView;chooser.popoverPresentationController.sourceRect=[tableView rectForRowAtIndexPath:path];[self presentViewController:chooser animated:YES completion:nil];return;
  }
 
+ if([action isEqualToString:@"logsView"]){[self finish:^(UIViewController *host){DGDiagnosticShow(host);}];return;}
  if([action isEqualToString:@"logsExport"]){[self finish:^(UIViewController *host){DGDiagnosticExport(host);}];return;}
  if([action isEqualToString:@"logsClear"]){DGDiagnosticClear(self);return;}
  if([action isEqualToString:@"rgb"])[self rgb];

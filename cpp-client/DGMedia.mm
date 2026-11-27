@@ -47,8 +47,8 @@ static void DGFreezeLayer(CALayer *layer,BOOL freeze){
 - (void)warm {
     if(!NSThread.isMainThread){__weak DGPrepared *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak warm];});return;}
     if(_retired||_player.rate!=0||_warming||_warmed||_warmAttempts>=2||_item.status!=AVPlayerItemStatusReadyToPlay||_player.status!=AVPlayerStatusReadyToPlay)return;
-    _warming=YES;++_warmAttempts;__weak DGPrepared *weak=self;
-    [_player prerollAtRate:1 completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{DGPrepared *s=weak;if(!s)return;s.warming=NO;s.warmed=ok&&!s.retired;});}];
+    _warming=YES;++_warmAttempts;__weak DGPrepared *weak=self;CFTimeInterval started=CACurrentMediaTime();
+    [_player prerollAtRate:1 completionHandler:^(BOOL ok){dispatch_async(dispatch_get_main_queue(),^{DGPrepared *s=weak;if(!s)return;s.warming=NO;s.warmed=ok&&!s.retired;if(DGDiagnosticEnabled())DGDiagnostic(@"playback.preroll",[NSString stringWithFormat:@"ms=%.0f result=%d",(CACurrentMediaTime()-started)*1000,s.warmed]);});}];
 }
 - (void)retire {
     _retired=YES;[_player cancelPendingPrerolls];_warming=NO;
@@ -83,7 +83,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  DGPhotoNavigator *_photoNavigator;Work _work;DGImage *_cover,*_avatar,*_musicAvatar;UIScrollView *_photos;NSMutableArray<DGImage*> *_images;
  UIView *_shade,*_danmaku;CAGradientLayer *_gradient;UILabel *_author,*_caption,*_metadata,*_photoCount,*_likeCount,*_commentCount,*_collectCount,*_pause,*_message,*_speedText,*_previewTime;
  UIVisualEffectView *_rail,*_moreGlass,*_photoGlass,*_speedGlass,*_previewGlass;UIButton *_avatarButton,*_likeButton,*_commentButton,*_collectButton,*_fillButton,*_moreButton,*_musicButton;UIImageView *_previewImage;
- AVPlayer *_player,*_musicPlayer;AVPlayerLayer *_playerLayer;DGPrepared *_prepared;AVPlayerItem *_observedItem;AVAssetImageGenerator *_generator;id _loopToken,_musicLoopToken,_clock;DGTimeline *_slider;
+ AVPlayer *_player,*_musicPlayer;AVPlayerLayer *_playerLayer;DGPrepared *_prepared;AVPlayerItem *_observedItem;AVAssetImageGenerator *_generator;id _loopToken,_musicLoopToken,_clock,_stallToken,_accessToken,_failureToken;DGTimeline *_slider;
  NSMutableArray<UIScrollView*> *_locked;BOOL _active,_paused,_alternateUsed,_dragging,_seeking,_compact,_fill,_boosting,_busy,_danmakuLoading;double _rate,_holdY,_progressAt,_progress;NSInteger _recoveries,_photoIndex,_danmakuWindow,_lane;NSUInteger _generation,_previewGeneration;NSArray<NSDictionary*> *_danmakuItems;NSMutableSet<NSString*> *_emitted;
  AVPictureInPictureController *_pip;BOOL _backgroundMode,_cleanScreen,_foregroundRebind,_pagingMotion,_reportedView;double _lastPlaybackTime;CGFloat _mediaHeight;BOOL _watchdogScheduled,_watchdogExhausted;NSUInteger _watchdogToken,_spinnerToken;BOOL _spinnerPending,_receivedFirstFrame;double _firstFrameStarted;
 }
@@ -164,7 +164,10 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  [_slider stopFollowing];[self cancelLoadingIndicator];
  [self endScrubOutput];
  [self stopWatchdog];[_pip stopPictureInPicture];_pip.delegate=nil;_pip=nil;[_ambient active:NO];[_ambient item:nil imageView:nil];_previewBusy=NO;
- ++_previewGeneration;[_generator cancelAllCGImageGeneration];_generator=nil;if(_observedItem){[_observedItem removeObserver:self forKeyPath:@"status"];_observedItem=nil;}if(_clock&&_player){[_player removeTimeObserver:_clock];_clock=nil;}if(_loopToken){[NSNotificationCenter.defaultCenter removeObserver:_loopToken];_loopToken=nil;}if(_musicLoopToken){[NSNotificationCenter.defaultCenter removeObserver:_musicLoopToken];_musicLoopToken=nil;}if(_prepared){if(_prepared.leases)--_prepared.leases;if(!_prepared.leases)[_prepared.player pause];_prepared=nil;}else[_player pause];[_musicPlayer pause];_musicPlayer=nil;_player=nil;_playerLayer.player=nil;
+ ++_previewGeneration;[_generator cancelAllCGImageGeneration];_generator=nil;if(_observedItem){[_observedItem removeObserver:self forKeyPath:@"status"];_observedItem=nil;}if(_clock&&_player){[_player removeTimeObserver:_clock];_clock=nil;}if(_loopToken){[NSNotificationCenter.defaultCenter removeObserver:_loopToken];_loopToken=nil;}
+ if(_stallToken){[NSNotificationCenter.defaultCenter removeObserver:_stallToken];_stallToken=nil;}
+ if(_accessToken){[NSNotificationCenter.defaultCenter removeObserver:_accessToken];_accessToken=nil;}
+ if(_failureToken){[NSNotificationCenter.defaultCenter removeObserver:_failureToken];_failureToken=nil;}if(_musicLoopToken){[NSNotificationCenter.defaultCenter removeObserver:_musicLoopToken];_musicLoopToken=nil;}if(_prepared){if(_prepared.leases)--_prepared.leases;if(!_prepared.leases)[_prepared.player pause];_prepared=nil;}else[_player pause];[_musicPlayer pause];_musicPlayer=nil;_player=nil;_playerLayer.player=nil;
 }
 - (void)prepareForReuse {[super prepareForReuse];_active=NO;++_generation;[self unlock];[self detach];_work=Work{};self.commentsAction=nil;self.profileAction=nil;self.musicAction=nil;self.moreAction=nil;self.actionMenuAction=nil;self.dismissCommentsAction=nil;self.advanceAction=nil;self.viewedAction=nil;[_danmaku.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];}
 - (void)display:(const Work&)work {
@@ -188,6 +191,22 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)attach:(DGPrepared*)prepared position:(double)position {
  [self detach];if(!prepared)return;_prepared=prepared;++prepared.leases;_player=prepared.player;_receivedFirstFrame=NO;_cover.hidden=NO;_playerLayer.player=_player;[self configurePiP];_observedItem=prepared.item;if(_active&&!_backgroundMode&&!_pagingMotion)[_ambient item:_observedItem imageView:nil];[_observedItem addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;_progress=-1;__weak DGFeedCell *weak=self;
+ if(DGDiagnosticEnabled())DGDiagnostic(@"playback.attach",[NSString stringWithFormat:@"active=%d during_swipe=%d preroll=%d",_active,_pagingMotion,_prepared.warmed]);
+ NSNotificationCenter *notifications=NSNotificationCenter.defaultCenter;
+ _stallToken=[notifications addObserverForName:AVPlayerItemPlaybackStalledNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
+  DGFeedCell *cell=weak;if(!cell||cell->_observedItem!=event.object||!cell->_active||!DGDiagnosticEnabled())return;
+  DGDiagnostic(@"playback.stalled",[NSString stringWithFormat:@"position=%.2f",[cell currentPlaybackPosition]]);
+ }];
+ _accessToken=[notifications addObserverForName:AVPlayerItemNewAccessLogEntryNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
+  DGFeedCell *cell=weak;AVPlayerItem *item=event.object;if(!cell||cell->_observedItem!=item||!DGDiagnosticEnabled())return;
+  AVPlayerItemAccessLogEvent *stats=item.accessLog.events.lastObject;if(!stats)return;
+  DGDiagnostic(@"playback.access",[NSString stringWithFormat:@"startup_ms=%.0f stalls=%ld dropped=%ld observed_kbps=%.0f",stats.startupTime*1000,(long)stats.numberOfStalls,(long)stats.numberOfDroppedVideoFrames,stats.observedBitrate/1000]);
+ }];
+ _failureToken=[notifications addObserverForName:AVPlayerItemFailedToPlayToEndTimeNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event){
+  DGFeedCell *cell=weak;if(!cell||cell->_observedItem!=event.object||!DGDiagnosticEnabled())return;
+  NSError *error=event.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+  DGDiagnostic(@"playback.failed",[NSString stringWithFormat:@"code=%ld",(long)error.code]);
+ }];
  _loopToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_observedItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){DGFeedCell *s=weak;if(!s)return;if(s->_active&&!s->_paused&&UIApplication.sharedApplication.applicationState==UIApplicationStateActive&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.autoScroll"]&&!s->_compact&&s.advanceAction&&s.advanceAction())return;[s->_emitted removeAllObjects];s->_progressAt=CACurrentMediaTime();[s->_player seekToTime:kCMTimeZero completionHandler:^(BOOL ok){if(s->_active&&!s->_paused)[s->_player playImmediatelyAtRate:s->_rate];}];}];_clock=[_player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(.25,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime t){[weak tick:t];}];if(position>.1)[_player seekToTime:CMTimeMakeWithSeconds(position,600) toleranceBefore:CMTimeMakeWithSeconds(.2,600) toleranceAfter:CMTimeMakeWithSeconds(.2,600)];if(_active&&!_paused&&!_backgroundMode){[_player cancelPendingPrerolls];[_player playImmediatelyAtRate:_rate];[self queueWatchdogAfter:3];}
 }
 - (void)observeValueForKeyPath:(NSString*)key ofObject:(id)object change:(NSDictionary*)change context:(void*)context {
@@ -203,7 +222,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 
 - (void)displayFirstFrame {
  if(!_player||_playerLayer.player!=_player||!_playerLayer.readyForDisplay)return;
- _cover.hidden=YES;[self cancelLoadingIndicator];
+ _cover.hidden=YES;if(_spinnerPending||_loadingSpinner.isAnimating)[self cancelLoadingIndicator];
  if(_active&&!_receivedFirstFrame){
   _receivedFirstFrame=YES;
   DGDiagnostic(@"playback.first_frame",[NSString stringWithFormat:@"ms=%.0f preroll=%d",(CACurrentMediaTime()-_firstFrameStarted)*1000,_prepared.warmed]);
@@ -223,8 +242,8 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)stagePreparedVideo {
  if(_active||_player||_work.photo()||_work.play.empty()||_backgroundMode)return;
  DGPrepared *prepared=Pool()[PoolKey(_work)];
- if(!prepared||prepared.leases||prepared.retired)return;
- // Binding an existing player is cheap. Leave its preroll running until it becomes the current item.
+ if(!prepared||prepared.leases||prepared.retired||!prepared.warmed)return;
+ // Attach only a prepared source during the transition.
  [self attach:prepared position:0];
 }
 - (void)recover {
@@ -293,7 +312,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;
- if(inMotion){[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];[_ambient item:nil imageView:nil];}
+ if(inMotion){[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
 }
 - (void)active:(BOOL)value {
  if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak active:value];});return;}

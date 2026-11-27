@@ -12,6 +12,11 @@ NSString *SafeKey(NSString *key){
 }
 NSURL *Root(){return [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"Unwatched" isDirectory:YES];}
 dispatch_queue_t Disk(){static dispatch_queue_t queue;static dispatch_once_t once;dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.feed-cache",DISPATCH_QUEUE_SERIAL);});return queue;}
+dispatch_queue_t Transfers(){
+ static dispatch_queue_t queue;static dispatch_once_t once;
+ dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.feed-cache-transfers",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_UTILITY,0));});
+ return queue;
+}
 void Remove(NSURL *file){if(file)dispatch_async(Disk(),^{[NSFileManager.defaultManager removeItemAtURL:file error:nil];});}
 BOOL LooksLikeVideo(NSURL *file){
  NSFileHandle *handle=[NSFileHandle fileHandleForReadingFromURL:file error:nil];if(!handle)return NO;
@@ -134,13 +139,14 @@ BOOL LooksLikeVideo(NSURL *file){
 }
 - (void)setIdle:(BOOL)idle {
  _idle=idle;
- if(_task&&!idle&&!_suspended){_suspended=YES;[_task suspend];}
- else if(_task&&idle&&_suspended){_suspended=NO;[_task resume];}
+ NSURLSessionDownloadTask *task=_task;
+ if(task&&!idle&&!_suspended){_suspended=YES;dispatch_async(Transfers(),^{[task suspend];});}
+ else if(task&&idle&&_suspended){_suspended=NO;dispatch_async(Transfers(),^{[task resume];});}
  if(idle)[self pump];
 }
 - (void)cancelPrefetch {
  _idle=NO;
- NSURLSessionDownloadTask *task=_task;_task=nil;_downloading=nil;_suspended=NO;[task cancel];
+ NSURLSessionDownloadTask *task=_task;_task=nil;_downloading=nil;_suspended=NO;dispatch_async(Transfers(),^{[task cancel];});
 }
 - (void)pump {
  if(!_idle||_task||_staging.count||!_folder||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;

@@ -5,6 +5,13 @@
 #import "DGPlaybackResume.h"
 #import "DGComments.h"
 #import "DGAnimation.h"
+@interface DGSwipeClock:NSObject
+@property(nonatomic,copy) void (^sample)(CADisplayLink *);
+- (void)tick:(CADisplayLink *)link;
+@end
+@implementation DGSwipeClock
+- (void)tick:(CADisplayLink *)link{if(self.sample)self.sample(link);else [link invalidate];}
+@end
 @interface DGFeed : UIViewController <UICollectionViewDataSource,UICollectionViewDelegateFlowLayout,UIGestureRecognizerDelegate>
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge;
 - (void)prepareNoticeFocus:(NSString *)comment parent:(NSString *)parent;
@@ -32,6 +39,11 @@
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation,_warmGeneration,_feedRequest,_refreshFeedback;
     BOOL _pagingMotion,_cachedBootstrap,_manualRecommendationRefresh;
+    NSHashTable<DGFeedCell *> *_departingCells;
+    CADisplayLink *_pagingClock;
+    CFTimeInterval _pagingStarted,_pagingPrevious,_pagingMaxGap,_pagingRelease;
+    NSInteger _pagingStartIndex;
+    NSUInteger _pagingSamples,_pagingLongFrames;
     NSString *_noticeComment,*_noticeParent,*_restoredWork;
     double _restoredPosition;BOOL _restoredPaused;
     std::vector<Work> _beforeProfileViews;
@@ -46,7 +58,7 @@
     [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;_foreground=YES;_refreshIndex=1;_locationRequested=[NSMutableSet set];
     UICollectionViewFlowLayout *layout=[UICollectionViewFlowLayout new];layout.minimumLineSpacing=0;layout.minimumInteritemSpacing=0;
     _collection=[[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:layout];_collection.backgroundColor=UIColor.blackColor;_collection.pagingEnabled=YES;_collection.showsVerticalScrollIndicator=NO;_collection.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_collection.dataSource=self;_collection.delegate=self;_collection.alwaysBounceVertical=YES;
-    [_collection registerClass:DGFeedCell.class forCellWithReuseIdentifier:@"work"];[self.view addSubview:_collection];
+    _departingCells=[NSHashTable weakObjectsHashTable];[_collection registerClass:DGFeedCell.class forCellWithReuseIdentifier:@"work"];[self.view addSubview:_collection];
     if(!_staticFeed){_pull=[UIRefreshControl new];_pull.tintColor=UIColor.whiteColor;[_pull addTarget:self action:@selector(refreshFeed) forControlEvents:UIControlEventValueChanged];_collection.refreshControl=_pull;}
     if(_ownsBridge){_bridge=[DGBridge new];[_bridge mount:self.view];}
     _bar=Glass(27);_bar.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self.view addSubview:_bar];_settings=Symbol(@"gearshape",self,@selector(settings));
@@ -80,11 +92,11 @@
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(workStateChanged:) name:@"DouGlassWorkStateChanged" object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playbackPreferencesChanged) name:@"DGPlaybackQualityChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(filtersChanged) name:@"DGFiltersChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(accountChanged) name:@"DGAccountChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGMusicStateChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(verificationCompleted:) name:@"DGVerificationCompleted" object:nil];if(_staticFeed)[self updateEmpty:nil];else{[self restoreInterruptedPlayback];[self startWithCachedRecommendation];[self loadFeed:YES];[self loadProfile];}
 }
-- (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)dealloc{[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return _showingMessages?UIStatusBarStyleDefault:UIStatusBarStyleLightContent;}
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];if(_noticeComment.length&&_current<(NSInteger)_feed.works.size()&&!_comments)[self showComments:Text(_feed.works[_current].id)];}
-- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
+- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;[self finishPaging];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];CGSize size=self.view.bounds.size;CGFloat top=self.view.safeAreaInsets.top;
  if(!CGSizeEqualToSize(_collection.bounds.size,size)){_relayout=YES;_collection.frame=self.view.bounds;[_collection.collectionViewLayout invalidateLayout];[_collection layoutIfNeeded];[_collection setContentOffset:CGPointMake(0,MAX(0,_current)*size.height) animated:NO];_relayout=NO;}
@@ -150,7 +162,7 @@
 - (void)background {
  if(!_foreground)return;
  _foreground=NO;++_warmGeneration;if(_ownsBridge){DGCacheCancelPrefetch();DGFlushSeen();DGDiagnosticMemory(@"app.background");}
- DGRefreshRateSuspend();
+ [self finishPaging];DGRefreshRateSuspend();
  BOOL ownsPlayback=_visible&&!_showingMessages&&self.view.window&&(!self.presentedViewController||DGOptionsKeepsPlayback(self.presentedViewController))&&!DGMusicPlayer();
  BOOL audio=DGBackgroundAudioEnabled(),pip=DGAutomaticPiPAvailable();
  for(DGFeedCell *cell in _collection.visibleCells){
@@ -268,7 +280,7 @@
   if(uid.length||[old isEqualToString:@"anonymous"])DGSeenScope(uid);
   if(uid.length){for(const Work &viewed:self->_beforeProfileViews)DGRecordViewed(viewed);self->_beforeProfileViews.clear();}
   if(![old isEqualToString:DGCurrentFeedScope()]){
-   if(![old isEqualToString:@"anonymous"]){[self resetChannel];}
+   if(![old isEqualToString:@"anonymous"]){DGPlaybackResumeSelectWork(nil);[self resetChannel];}
    else if([self->_operation isEqualToString:@"feed"]){DGCacheIngest(self->_records);[self filtersChanged];}
   }
   [self activate];NSString *avatar=Text(String(result[@"avatar"]));self->_accountImage.hidden=![result[@"loggedIn"] boolValue]||!avatar.length;[self->_accountImage remote:avatar];[self->_account setImage:self->_accountImage.hidden?[UIImage systemImageNamed:@"person.crop.circle"]:nil forState:UIControlStateNormal];
@@ -306,11 +318,39 @@
 }
 - (void)beginPaging {
  if(_pagingMotion)return;
- _pagingMotion=YES;++_warmGeneration;DGCacheSetIdle(NO);
+ _pagingMotion=YES;++_warmGeneration;
+ if(DGDiagnosticEnabled()){
+  _pagingStarted=CACurrentMediaTime();_pagingPrevious=_pagingStarted;_pagingRelease=0;_pagingMaxGap=0;_pagingSamples=0;_pagingLongFrames=0;_pagingStartIndex=_current;
+  DGSwipeClock *clock=[DGSwipeClock new];__weak DGFeed *weak=self;
+  clock.sample=^(CADisplayLink *link){DGFeed *self=weak;if(self)[self samplePagingFrame:link];else [link invalidate];};
+  _pagingClock=[CADisplayLink displayLinkWithTarget:clock selector:@selector(tick:)];
+  [_pagingClock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+  DGDiagnostic(@"swipe.begin",[NSString stringWithFormat:@"page=%ld",(long)_current]);
+ }
+ DGCacheSetIdle(NO);
  for(DGFeedCell *cell in _collection.visibleCells)[cell pagingInMotion:YES];
 }
+- (void)samplePagingFrame:(CADisplayLink *)link {
+ if(!_pagingMotion||!DGDiagnosticEnabled()){[_pagingClock invalidate];_pagingClock=nil;return;}
+ CFTimeInterval gap=link.timestamp-_pagingPrevious;
+ if(gap>0){
+  ++_pagingSamples;_pagingMaxGap=MAX(_pagingMaxGap,gap);
+  CFTimeInterval nominal=link.targetTimestamp-link.timestamp;
+  if(nominal>0&&gap>nominal*1.65)++_pagingLongFrames;
+ }
+ _pagingPrevious=link.timestamp;
+}
 - (void)finishPaging {
- _pagingMotion=NO;for(DGFeedCell *cell in _collection.visibleCells)[cell pagingInMotion:NO];
+ if(_pagingMotion&&_pagingStarted>0){
+  CFTimeInterval end=CACurrentMediaTime();CGFloat height=_collection.bounds.size.height;
+  NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
+  DGDiagnostic(@"swipe.settled",[NSString stringWithFormat:@"from=%ld to=%ld total_ms=%.0f coast_ms=%.0f frames=%lu long_gaps=%lu max_gap_ms=%.1f",(long)_pagingStartIndex,(long)target,(end-_pagingStarted)*1000,_pagingRelease>0?(end-_pagingRelease)*1000:0,(unsigned long)_pagingSamples,(unsigned long)_pagingLongFrames,_pagingMaxGap*1000]);
+ }
+ _pagingStarted=0;[_pagingClock invalidate];_pagingClock=nil;_pagingMotion=NO;
+ NSArray *visible=_collection.visibleCells;
+ for(DGFeedCell *cell in _departingCells.allObjects)if(![visible containsObject:cell])[cell active:NO];
+ [_departingCells removeAllObjects];
+ for(DGFeedCell *cell in visible)[cell pagingInMotion:NO];
  if(_foreground){void (^apply)(void)=_deferredFeedUpdate;_deferredFeedUpdate=nil;if(apply)dispatch_async(dispatch_get_main_queue(),apply);}
 }
 - (BOOL)advanceWork {
@@ -320,7 +360,10 @@
 }
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{[self beginPaging];}
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate{if(!decelerate){[self finishPaging];[self activate];}}
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+ if(_pagingStarted>0){_pagingRelease=CACurrentMediaTime();DGDiagnostic(@"swipe.release",[NSString stringWithFormat:@"decelerates=%d",decelerate]);}
+ if(!decelerate){[self finishPaging];[self activate];}
+}
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
 - (void)warmAfterSettling {
  NSUInteger request=++_warmGeneration,generation=_generation;__weak DGFeed *weak=self;
@@ -343,7 +386,7 @@
  if(_foreground)[(DGFeedCell *)cell stagePreparedVideo];
  if(path.item==_current&&!_pagingMotion){__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak activate];});}
 }
-- (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{[(DGFeedCell *)cell active:NO];}
+- (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{if(_pagingMotion)[_departingCells addObject:(DGFeedCell *)cell];else [(DGFeedCell *)cell active:NO];}
 - (void)showComments:(NSString *)workID {
  if(_commentTransition)return;_closingComments=NO;if(_comments){[self closeComments];return;}_commentTransition=YES;
  _comments=[_retainedCommentWorkID isEqualToString:workID]?_retainedComments:nil;if(!_comments)_comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];_retainedComments=_comments;_retainedCommentWorkID=workID.copy;if(_noticeComment.length){[_comments focusComment:_noticeComment parent:_noticeParent];_noticeComment=nil;_noticeParent=nil;}if(_current<(NSInteger)_records.count){NSDictionary *record=_records[_current];_comments.coverURL=Text(String(record[@"cover"]));if(!_comments.coverURL.length)_comments.coverURL=Text(String(Array(record[@"images"]).firstObject));}__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.dragAction=^(CGFloat offset,NSInteger phase){[weak commentDragged:offset phase:phase];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
