@@ -2,7 +2,7 @@
  const raw=new Map();let more=false;
  const parse=text=>{try{return JSON.parse(String(text).replace(/("(?:aweme_id|music_id|id|mid|uid)"\s*:\s*)(\d{16,})(?=\s*[,}])/g,'$1"$2"'));}catch(_){return null;}};
  const id=value=>value==null||typeof value==='number'&&!Number.isSafeInteger(value)?'':String(value);
- const track=value=>{const sound=value.music||{};return id(sound.id_str)||id(sound.music_id_str)||id(sound.mid)||id(sound.music_id)||id(sound.id)||id(value.music_id_str)||id(value.music_id);};
+ const track=value=>{const sound=value.music||{};return id(sound.id_str)||id(sound.music_id_str)||id(sound.id)||id(sound.music_id)||id(sound.mid)||id(value.music_id_str)||id(value.music_id);};
  const walk=(value,identifier,depth=0,seen=new WeakSet(),budget={left:5000},trusted=false)=>{
   if(!value||typeof value!=='object'||depth>9||seen.has(value)||budget.left--<=0)return;seen.add(value);
   const aweme=id(value.aweme_id),mid=track(value);

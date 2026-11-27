@@ -40,8 +40,9 @@
     const response=await new Promise(resolve => {
       const xhr=new XMLHttpRequest();let finished=false,timer;
       const finish=result=>{if(!finished){finished=true;clearTimeout(timer);resolve(result);}};
-      timer=setTimeout(()=>{finish({status:-1,body:'',headers:''});try{xhr.abort();}catch(_){}},14000);
-      xhr.open(method,path+'?'+new URLSearchParams(values).toString());xhr.withCredentials=true;xhr.timeout=12000;
+      const timeout=options.timeout||12000;
+      timer=setTimeout(()=>{finish({status:-1,body:'',headers:''});try{xhr.abort();}catch(_){}},timeout+(options.timeout?500:2000));
+      xhr.open(method,path+'?'+new URLSearchParams(values).toString());xhr.withCredentials=true;xhr.timeout=timeout;
       xhr.setRequestHeader('Accept','application/json, text/plain, */*');
       for(const [name,value] of Object.entries(options.headers||{}))xhr.setRequestHeader(name,value);
       if(method==='POST') xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded; charset=UTF-8');
@@ -76,7 +77,7 @@
     const uid=id(value.uid||value.id_str||value.id);
     return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:ipFrom(value)};
   };
-  const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.mid)||id(value?.music_id)||id(value?.id);
+  const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.id)||id(value?.music_id)||id(value?.mid);
   const music=value=>{
     value=value||{};
     return {id:musicIdentifier(value),title:value.title||'原声',author:value.author||value.owner_nickname||'',cover:first(value.cover_large)||first(value.cover_medium)||first(value.cover_thumb),url:first(value.play_url),duration:Number(value.duration||0)};
@@ -192,7 +193,28 @@
       }
       if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return musicPage(data,params.id);}
       if(operation==='musicWorks'){
-        const data=await get('/aweme/v1/web/music/aweme/',{music_id:params.id,cursor,count:'10',scene:'1'});return musicPage(data,params.id);
+        const identifier=id(params.id);if(!identifier)throw new Error('平台未提供有效原声标识');
+        if(!cursor.startsWith('search:')){
+          try{
+            const data=await get('/aweme/v1/web/music/aweme/',{music_id:identifier,cursor,count:'10',scene:'1'},{timeout:4000});
+            const result=musicPage(data,identifier);
+            if(result.items.length)return Object.assign(result,{lookup:'official'});
+          }catch(error){if(error.verificationRequired)throw error;}
+        }
+        const title=String(params.title||'').trim(),author=String(params.author||'').trim();
+        if(!title||/^(?:原声|作品原声)$/.test(title))throw new Error('平台原声列表暂不可用，且未提供可搜索的音乐名称');
+        const keyword=[title,author&&!title.includes(author)?author:''].filter(Boolean).join(' ');
+        let offset=cursor.startsWith('search:')?cursor.slice(7):'0',more=false,scanned=0;
+        const found=new Map();
+        for(let pageIndex=0;pageIndex<3;pageIndex++){
+          const data=await get('/aweme/v1/web/search/item/',{search_channel:'aweme_video_web',keyword,search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset,count:'24',need_filter_settings:offset==='0'?'1':'0',list_type:'single'},{timeout:6500});
+          const list=data.data||data.aweme_list||[],normalized=works(list);scanned+=normalized.length;
+          for(const item of normalized)if(item.musicID===identifier)found.set(item.id,item);
+          const next=id(data.cursor??data.offset),advance=next&&Number(next)>Number(offset);
+          more=!!data.has_more&&!!advance;offset=advance?next:offset;
+          if(found.size||!more)break;
+        }
+        return {items:[...found.values()],cursor:'search:'+offset,more,lookup:'search',scanned};
       }
       if(operation==='following'){
         const data=await get('/aweme/v1/web/user/following/list/',{sec_user_id:params.sec||'',user_id:params.uid||'',cursor,offset:cursor,count:'30',source_type:'1'});

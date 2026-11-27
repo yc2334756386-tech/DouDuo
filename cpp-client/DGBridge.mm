@@ -2,7 +2,6 @@
 #import "DGDiagnostics.h"
 #import "DGSession.h"
 #import "DGVerification.h"
-void DGReadMusicPage(DGBridge *,NSString *,NSString *,DGResult);
 
 NSString *DGUserAgent(void) {
     return @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
@@ -110,7 +109,6 @@ NSString *DGUserAgent(void) {
     decisionHandler(([@[@"http", @"https", @"about"] containsObject:scheme]) ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
 }
 - (void)request:(NSString *)operation parameters:(NSDictionary *)parameters completion:(DGResult)completion {
-    if([operation isEqualToString:@"musicWorks"]&&[parameters[@"cursor"]hasPrefix:@"web:"]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],completion);return;}
     if (_failure) { completion(nil, _failure); return; }
     NSUInteger generation = _generation;
     __block DGResult pending=[completion copy];
@@ -118,7 +116,7 @@ NSString *DGUserAgent(void) {
         DGResult callback=pending;pending=nil;if(callback){if(error)DGDiagnostic(@"bridge.request_error",operation);callback(result,error);}
     };
     // Includes queueing and JS execution. A stuck page may not strand a screen forever.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ([operation isEqualToString:@"musicWorks"]?55:32) * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ([operation isEqualToString:@"musicWorks"]?38:32) * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         deliver(nil, @"请求超时，请稍后刷新或打开登录网页完成验证");
     });
     __weak DGBridge *weakSelf = self;
@@ -136,7 +134,6 @@ NSString *DGUserAgent(void) {
                 if([result[@"items"]isKindOfClass:NSArray.class]){NSMutableDictionary *native=[result mutableCopy];native[@"items"]=DGNormalizeWebItems(result[@"items"]);result=native;}
                 NSString *message = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
                 if (failure || !result) message = @"网页请求未完成，请刷新或在登录网页完成验证";
-                if([operation isEqualToString:@"musicWorks"]&&(message||([parameters[@"cursor"] isEqual:@"0"]&&![result[@"items"]count]))&&![result[@"verificationRequired"]boolValue]){DGReadMusicPage(self,parameters[@"id"],parameters[@"cursor"],deliver);return;}
                 deliver(result, message);
                 if([result[@"verificationRequired"]boolValue]&&![operation isEqualToString:@"suggest"])dispatch_async(dispatch_get_main_queue(),^{DGOpenVerification(self,operation,parameters);});
                 if(!message&&[operation isEqualToString:@"profile"]&&[result[@"loggedIn"]boolValue])DGSessionCapture(nil);

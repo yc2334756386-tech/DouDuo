@@ -352,13 +352,13 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(_mode==DGExploreMusic&&!DGValue(self.music[@"id"]).length){[self resolveMusicIdentifier];return;}
     _loading=YES;_failed=NO;_footer.enabled=NO;[_footer setTitle:@"正在加载…" forState:UIControlStateNormal];if(!_records.count)_empty.text=@"正在读取内容";
     NSString *operation=[self operation],*oldCursor=_cursor.copy;NSUInteger generation=_generation;
-    NSDictionary *parameters=@{@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"id":DGValue(self.music[@"id"]),@"kw":_query?:@"",@"cursor":_cursor};
+    NSDictionary *parameters=@{@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"id":DGValue(self.music[@"id"]),@"title":DGValue(self.music[@"title"]),@"author":DGValue(self.music[@"author"]),@"kw":_query?:@"",@"cursor":_cursor};
     __weak DGExplore *weakSelf=self;
     [_bridge request:operation parameters:parameters completion:^(NSDictionary *result,NSString *error){
         DGExplore *self=weakSelf;if(!self||generation!=self->_generation)return;self->_loading=NO;[self->_refresh endRefreshing];
         if(error){[self endLocate];self->_failed=YES;if(self->_mode==DGExploreMusic&&self->_records.count)self->_context.text=[NSString stringWithFormat:@"平台列表暂不可用 · 已识别 %lu 条",(unsigned long)self->_records.count];if(!self->_records.count)self->_empty.text=error;[self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal];self->_footer.enabled=YES;return;}
         BOOL people=[self peopleRows],music=[self musicRows];
-        if(self->_mode==DGExploreMusic)DGDiagnostic(@"music.lookup",[NSString stringWithFormat:@"returned=%lu more=%d",(unsigned long)Array(result[@"items"]).count,[result[@"more"]boolValue]]);
+        if(self->_mode==DGExploreMusic)DGDiagnostic(@"music.lookup",[NSString stringWithFormat:@"source=%@ returned=%lu scanned=%ld more=%d",[result[@"lookup"]isEqual:@"search"]?@"search":@"official",(unsigned long)Array(result[@"items"]).count,(long)Number(result[@"scanned"]),[result[@"more"]boolValue]]);
         for(id raw in Array(result[@"items"])){
             if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *record=raw;NSString *identifier=DGValue(record[people?@"sec":@"id"]);
             if(!identifier.length||[self->_ids containsObject:identifier])continue;
@@ -368,9 +368,13 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         }
         if(self->_mode==DGExploreProfile&&self->_selectedTab==0)[self->_records sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){BOOL first=[a[@"pinned"]boolValue],second=[b[@"pinned"]boolValue];return first==second?NSOrderedSame:first?NSOrderedAscending:NSOrderedDescending;}];++self->_seekPages;self->_cursor=DGValue(result[@"cursor"]);if(!self->_cursor.length)self->_cursor=@"0";
         self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
-        if(self->_mode==DGExploreMusic)self->_context.text=[NSString stringWithFormat:@"使用这首原声的作品 · 已识别 %lu 条",(unsigned long)self->_records.count];
+        if(self->_mode==DGExploreMusic)self->_context.text=[NSString stringWithFormat:[result[@"lookup"]isEqual:@"search"]?@"已按原声 ID 核对 %lu 条 · 搜索结果可能不全":@"使用这首原声的作品 · 已识别 %lu 条",(unsigned long)self->_records.count];
         self->_empty.text=self->_records.count?@"":people?@"暂无可查看的用户":music?@"还没有收藏音乐":@"暂无可查看的作品，内容也可能被账号隐私设置限制";
         [self->_footer setTitle:self->_more?@"继续加载":@"已显示全部可查看内容" forState:UIControlStateNormal];self->_footer.enabled=self->_more;
+        if(self->_mode==DGExploreMusic&&[result[@"lookup"]isEqual:@"search"]){
+            if(!self->_records.count)self->_empty.text=@"当前搜索页未找到同一原声的作品，可继续查找或打开网页翻页";
+            [self->_footer setTitle:self->_more?@"继续查找同原声作品":@"本次搜索结束，可使用网页继续查找" forState:UIControlStateNormal];
+        }
         self->_filteredWorks=nil;[self->_table reloadData];[self locateIfNeeded];
         if(self->_libraryQuery.length){
             BOOL found=[self listed].count>0;[self showKeywordResult];
@@ -416,7 +420,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)openMusicPage{
     NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length){DGToast(self,@"平台未提供原声标识");return;}
-    if(!_searchPage){__weak DGExplore *weak=self;_searchPage=DGMakeMusicWebPage(identifier,^(NSArray<NSDictionary *> *items){[weak importSearchItems:items];});}
+    if(!_searchPage){NSString *title=DGValue(self.music[@"title"]),*author=DGValue(self.music[@"author"]);NSString *keyword=[title isEqual:@"原声"]||[title isEqual:@"作品原声"]?@"":title;if(keyword.length&&author.length&&[title rangeOfString:author].location==NSNotFound)keyword=[keyword stringByAppendingFormat:@" %@",author];__weak DGExplore *weak=self;_searchPage=DGMakeMusicWebPage(identifier,keyword,^(NSArray<NSDictionary *> *items){[weak importSearchItems:items];});}
     [self.navigationController pushViewController:_searchPage animated:YES];
 }
 - (void)showFollowing {
@@ -484,7 +488,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{if(![self peopleRows]&&![self musicRows])return;NSDictionary *record=_records[indexPath.row];if([self peopleRows])[self.navigationController pushViewController:DGMakeProfile(_bridge,DGValue(record[@"sec"]),DGValue(record[@"nickname"]),@"") animated:YES];else{if(!DGValue(record[@"url"]).length){DGToast(self,@"平台未提供该曲目的播放地址");return;}if(DGMusicMatches(DGValue(record[@"id"]))&&DGMusicPlayer().rate>0)DGMusicPause();else{DGMusicSetOwner(self);DGMusicPlayQueue(_records.copy,indexPath.row,_bridge,_cursor,_more);}[_table reloadData];}}
 - (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)path{if([self musicRows]&&path.row<(NSInteger)[self listed].count)[self.navigationController pushViewController:DGMakeMusic(_bridge,_records[path.row]) animated:YES];}
-- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath{NSInteger scale=[self peopleRows]||[self musicRows]?1:3;if(!_failed&&_more&&!_loading&&(indexPath.row+4)*scale>=(NSInteger)[self listed].count)[self loadPage];}
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath{if(_mode==DGExploreMusic&&[_cursor hasPrefix:@"search:"])return;NSInteger scale=[self peopleRows]||[self musicRows]?1:3;if(!_failed&&_more&&!_loading&&(indexPath.row+4)*scale>=(NSInteger)[self listed].count)[self loadPage];}
 
 @end
 
