@@ -41,14 +41,40 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
  if((self=[super initWithFrame:frame])){CAGradientLayer *gradient=(CAGradientLayer *)self.layer;gradient.colors=@[(id)UIColor.blackColor.CGColor,(id)UIColor.blackColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.72].CGColor,(id)[UIColor colorWithWhite:0 alpha:.28].CGColor,(id)UIColor.clearColor.CGColor];gradient.locations=@[@0,@.42,@.64,@.82,@1];gradient.startPoint=CGPointMake(.5,0);gradient.endPoint=CGPointMake(.5,1);}return self;
 }
 @end
+@interface DGNavigationController()<UIGestureRecognizerDelegate>
+@end
 @implementation DGNavigationController{
- UIVisualEffectView *_topBlur;DGNavigationFade *_fade;
+ UIVisualEffectView *_topBlur;DGNavigationFade *_fade;UIScreenEdgePanGestureRecognizer *_rootBack;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=NO;
+ [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
+ _rootBack=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:self action:@selector(rootBack:)];_rootBack.edges=UIRectEdgeLeft;_rootBack.delegate=self;[self.view addGestureRecognizer:_rootBack];
  UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
  _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{
+ if(gesture!=self.interactivePopGestureRecognizer&&gesture!=_rootBack)return YES;
+ if(self.transitionCoordinator||self.presentedViewController)return NO;
+ UIViewController *top=self.topViewController;
+ if(self.modalInPresentation||top.modalInPresentation)return NO;
+ if([top conformsToProtocol:@protocol(DGInPageBack)]&&[(id<DGInPageBack>)top dgHasPreviousPage])return NO;
+ if(gesture==self.interactivePopGestureRecognizer)return self.viewControllers.count>1;
+ return self.viewControllers.count==1&&self.presentingViewController&&[objc_getAssociatedObject(self,DGPageKey)isKindOfClass:DGPageTransition.class];
+}
+- (void)rootBack:(UIScreenEdgePanGestureRecognizer *)gesture{
+ DGPageTransition *transition=objc_getAssociatedObject(self,DGPageKey);if(!transition)return;
+ CGFloat fraction=MIN(1,MAX(0,[gesture translationInView:self.view].x/MAX(1,self.view.bounds.size.width)));
+ switch(gesture.state){
+  case UIGestureRecognizerStateBegan:
+   transition.interaction=[UIPercentDrivenInteractiveTransition new];transition.interaction.completionCurve=UIViewAnimationCurveEaseOut;
+   {UIViewController *page=self.topViewController;[self dismissViewControllerAnimated:YES completion:^{if(!self.presentingViewController&&[page respondsToSelector:@selector(dgDidReturnToPreviousPage)])[(id<DGInPageBack>)page dgDidReturnToPreviousPage];}];}break;
+  case UIGestureRecognizerStateChanged:[transition.interaction updateInteractiveTransition:fraction];break;
+  case UIGestureRecognizerStateEnded:
+   if(fraction>.35||[gesture velocityInView:self.view].x>650)[transition.interaction finishInteractiveTransition];else[transition.interaction cancelInteractiveTransition];transition.interaction=nil;break;
+  case UIGestureRecognizerStateCancelled:case UIGestureRecognizerStateFailed:[transition.interaction cancelInteractiveTransition];transition.interaction=nil;break;
+  default:break;
+ }
 }
 - (void)viewDidLayoutSubviews{
  [super viewDidLayoutSubviews];CGRect bar=[self.navigationBar convertRect:self.navigationBar.bounds toView:self.view];CGFloat height=MAX(1,CGRectGetMaxY(bar)+64);_topBlur.hidden=self.navigationBarHidden;CGRect frame=CGRectMake(0,0,self.view.bounds.size.width,height);

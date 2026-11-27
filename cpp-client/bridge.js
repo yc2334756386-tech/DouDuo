@@ -132,7 +132,9 @@
       if(operation==='normalizeMusicResponse'){
         const data=parse(params.json);if(!data||Number(data.status_code??-1)!==0)throw new Error(data?.status_msg||data?.message||'原声移动接口未返回有效内容');
         if(params.detail){const result=music(data.music_info||data.music||data.data?.music_info||{});if(result.id!==String(params.id))throw new Error('官网返回的原声标识与当前作品不一致');return result;}
-        return Object.assign(musicPage(data,String(params.id)),{lookup:'mobile'});
+        const result=musicPage(data,String(params.id));
+        result.items=result.items.map(item=>Object.assign(item,{mobileBrief:true,needsDetail:!item.authorID||!item.avatar,author:item.authorID?item.author:'作者资料加载中'}));
+        return Object.assign(result,{lookup:'mobile'});
       }
       if(operation==='feed'){
         const data=await get('/aweme/v1/web/tab/feed/',{count:'10',refresh_index:String(params.refresh||1),video_type_select:'1',aweme_pc_rec_raw_data:JSON.stringify({is_client:false,ff_danmaku_status:0,danmaku_switch_status:0}),globalwid:'',pull_type:Number(params.refresh||1)<3?'0':'2',min_window:'0',free_right:'0',ug_source:'',creative_id:''});
@@ -198,11 +200,11 @@
         const data=await get('/aweme/v1/web/music/detail/',{music_id:params.id,scene:'1'});return music(data.music_info||data.music||{});
       }
       if(operation==='legacyMusic'){const data=await get('/web/api/v2/music/list/aweme/',{music_id:params.id,cursor,count:'20'});return musicPage(data,params.id);}
-      if(operation==='musicWorks'){
+      if(operation==='musicWorks'||operation==='musicWorksDesktop'){
         const identifier=id(params.id);if(!identifier)throw new Error('平台未提供有效原声标识');
         try{
           const data=await get('/aweme/v1/web/music/aweme/',{music_id:identifier,cursor:/^\d+$/.test(cursor)?cursor:'0',count:'12'},{timeout:8000});
-          return Object.assign(musicPage(data,identifier),{lookup:'official'});
+          const result=musicPage(data,identifier);return Object.assign(result,{cursor:'desktop:'+result.cursor,lookup:'official'});
         }catch(error){
           if(error.verificationRequired)throw error;
           throw new Error('平台未返回原声作品列表，请打开该原声的官网页面；已识别的作品会保留');

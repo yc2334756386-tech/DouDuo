@@ -29,6 +29,7 @@ static inline Work ReadWork(NSDictionary *value) {
     BOOL quality=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.quality"],smooth=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.highFPS"];
     NSDictionary *variants=[value[@"variants"]isKindOfClass:NSDictionary.class]?value[@"variants"]:@{};id selected=variants[quality&&smooth?@"qualityFPS":quality?@"quality":smooth?@"smooth":@""];
     if([selected isKindOfClass:NSDictionary.class]&&String(selected[@"play"]).size()){work.play=String(selected[@"play"]);work.alternate=String(selected[@"alternate"]);}
+    if(work.play.find("/aweme/v1/play/")!=std::string::npos&&(work.alternate.starts_with("https://")||work.alternate.starts_with("http://"))&&work.alternate.find("/aweme/v1/play/")==std::string::npos)std::swap(work.play,work.alternate);
     work.comments = Number(value[@"comments"]); work.likes = Number(value[@"likes"]);
     work.duration = [value[@"duration"] doubleValue];
 work.authorID=String(value[@"authorID"]);work.authorUID=String(value[@"authorUID"]);
@@ -79,7 +80,7 @@ static inline UIVisualEffectView *Glass(CGFloat radius) {
 }
 static inline AVURLAsset *Asset(NSString *url) {
     NSURL *address=[NSURL URLWithString:url];if(address.fileURL)return [AVURLAsset URLAssetWithURL:address options:nil];
-    return [AVURLAsset URLAssetWithURL:address options:@{@"AVURLAssetHTTPHeaderFieldsKey":@{@"User-Agent":DGUserAgent(),@"Referer":@"https://www.douyin.com/"}}];
+    return [AVURLAsset URLAssetWithURL:address options:@{AVURLAssetPreferPreciseDurationAndTimingKey:@NO,@"AVURLAssetHTTPHeaderFieldsKey":@{@"User-Agent":DGUserAgent(),@"Referer":@"https://www.douyin.com/"}}];
 }
 
 
@@ -90,12 +91,17 @@ static inline AVURLAsset *Asset(NSString *url) {
 @end
 @interface DGNavigationController:UINavigationController
 @end
+@protocol DGInPageBack <NSObject>
+- (BOOL)dgHasPreviousPage;
+@optional
+- (void)dgDidReturnToPreviousPage;
+@end
 void DGConfigurePageTransition(UIViewController *controller);
 double DGHoldSpeed(void);
 NSAttributedString *DGRichText(NSString *plain, NSArray *emoticons, UIFont *font, UIColor *color);
 void DGShowFullCaption(UIViewController *host, NSString *text);
 void DGMusicPlayQueue(NSArray<NSDictionary *> *music, NSInteger index, DGBridge *bridge, NSString *cursor, BOOL more);
-@interface DGLogin : UIViewController <WKNavigationDelegate,WKUIDelegate>
+@interface DGLogin : UIViewController <WKNavigationDelegate,WKUIDelegate,DGInPageBack>
 @property(nonatomic,copy) void (^finished)(void);
 @end
 void DGToast(UIViewController *host, NSString *message);

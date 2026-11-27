@@ -6,6 +6,7 @@
 #import "DGComments.h"
 #import "DGAnimation.h"
 #import "DGNavigationResume.h"
+#import "DGWorkDetails.h"
 @interface DGSwipeClock:NSObject
 @property(nonatomic,copy) void (^sample)(CADisplayLink *);
 - (void)tick:(CADisplayLink *)link;
@@ -52,6 +53,8 @@
     CFTimeInterval _checkpointSavedAt,_checkpointAttemptAt,_lastBecameActive;
     std::vector<Work> _beforeProfileViews;
     void (^_deferredFeedUpdate)(void);
+    NSMutableSet<NSString *> *_detailRequested;
+    NSMutableDictionary<NSString *,NSDictionary *> *_resolvedDetails;
 }
 - (instancetype)init {if((self=[super init])){_ownsBridge=YES;_operation=@"feed";_records=[NSMutableArray array];_cursor=@"0";}return self;}
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge {
@@ -256,7 +259,7 @@
 }
 - (void)recommend{[self hideMessages];_navigationTabs.selectedSegmentIndex=1;if(![_operation isEqualToString:@"feed"]){_operation=@"feed";[self resetChannel];}else [self activate];}
 - (void)followFeed{[self hideMessages];_navigationTabs.selectedSegmentIndex=0;if(![_operation isEqualToString:@"followFeed"]){_operation=@"followFeed";[self resetChannel];}else[self activate];}
-- (void)resetChannel{_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();[self cancelRecommendationFeedback];[self finishPaging];DGCacheSetIdle(NO);_cachedBootstrap=NO;_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;_loading=NO;[self closeComments];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];_feed.clear();[_records removeAllObjects];[_collection reloadData];_current=0;_cursor=@"0";_refreshIndex=1;_emptyPages=0;if([_operation isEqualToString:@"feed"])[self startWithCachedRecommendation];[self loadFeed:YES];[self.view setNeedsLayout];}
+- (void)resetChannel{_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();[self cancelRecommendationFeedback];[self finishPaging];DGCacheSetIdle(NO);_cachedBootstrap=NO;[_detailRequested removeAllObjects];[_resolvedDetails removeAllObjects];_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;_loading=NO;[self closeComments];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];_feed.clear();[_records removeAllObjects];[_collection reloadData];_current=0;_cursor=@"0";_refreshIndex=1;_emptyPages=0;if([_operation isEqualToString:@"feed"])[self startWithCachedRecommendation];[self loadFeed:YES];[self.view setNeedsLayout];}
 - (void)refreshFeed{if(_staticFeed||_loading){[_pull endRefreshing];return;}_retainedComments=nil;_retainedCommentWorkID=nil;[self closeComments];if(_failed)[_bridge reload];_refreshIndex=1;_cursor=@"0";_emptyPages=0;[self loadFeed:YES];}
 - (void)startWithCachedRecommendation {
  if(_staticFeed||![_operation isEqualToString:@"feed"]||(!_feed.works.empty()&&!_restoredWork.length))return;
@@ -323,7 +326,10 @@
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section{return _feed.works.size();}
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)path{return collectionView.bounds.size;}
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)path {
-    DGFeedCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"work" forIndexPath:path];cell.bridge=_bridge;cell.presenter=self;const Work &work=_feed.works[path.item];[cell pagingInMotion:_pagingMotion];[cell display:work];NSString *workID=Text(work.id);if(!_restoredApplied&&[_restoredWork isEqualToString:workID]){_restoredApplied=YES;[cell restorePlaybackPosition:_restoredPosition paused:_restoredPaused];}[cell compact:_comments!=nil];[cell cleanScreen:_cleanScreen];NSString *sec=Text(work.authorID),*name=Text(work.author);NSDictionary *record=path.item<(NSInteger)_records.count?_records[path.item]:@{};__weak DGFeed *weakSelf=self;
+    DGFeedCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"work" forIndexPath:path];[self configureCell:cell atIndexPath:path];return cell;
+}
+- (void)configureCell:(DGFeedCell *)cell atIndexPath:(NSIndexPath *)path{
+    cell.bridge=_bridge;cell.presenter=self;const Work &work=_feed.works[path.item];[cell pagingInMotion:_pagingMotion];[cell display:work];NSString *workID=Text(work.id);if(!_restoredApplied&&[_restoredWork isEqualToString:workID]){_restoredApplied=YES;[cell restorePlaybackPosition:_restoredPosition paused:_restoredPaused];}[cell compact:_comments!=nil];[cell cleanScreen:_cleanScreen];NSString *sec=Text(work.authorID),*name=Text(work.author);NSDictionary *record=path.item<(NSInteger)_records.count?_records[path.item]:@{};__weak DGFeed *weakSelf=self;
     __weak DGFeedCell *weakCell=cell;cell.moreAction=^{DGFeed *self=weakSelf;if(!self||self.presentedViewController)return;NSMutableDictionary *options=[record mutableCopy];options[@"selectedImage"]=[weakCell selectedImageURL]?:@"";[self presentViewController:DGMakeOptions(self->_bridge,options) animated:YES completion:nil];};cell.actionMenuAction=^(CGPoint point){DGFeed *self=weakSelf;if(!self||self.presentedViewController)return;NSMutableDictionary *options=[record mutableCopy];options[@"selectedImage"]=[weakCell selectedImageURL]?:@"";options[@"menuOrigin"]=[NSValue valueWithCGPoint:[weakCell.contentView convertPoint:point toView:self.view]];[self presentViewController:DGMakeActions(self->_bridge,options) animated:YES completion:nil];};cell.viewedAction=^{DGFeed *self=weakSelf;DGFeedCell *view=weakCell;if(!self||!view||self->_pagingMotion)return;
   NSIndexPath *visible=[self->_collection indexPathForCell:view];if(!visible||visible.item!=self->_current||visible.item>=(NSInteger)self->_feed.works.size())return;
   const Work &current=self->_feed.works[visible.item];if(current.id!=String(workID))return;
@@ -331,10 +337,27 @@
   DGRecordViewed(current);[self warmAfterSettling];
  };if(_ownsBridge)cell.checkpointAction=^{DGFeed *self=weakSelf;if(self&&!self->_inactive&&CACurrentMediaTime()-self->_checkpointAttemptAt>=15)[self savePlaybackCheckpoint];};
  cell.advanceAction=^BOOL{return [weakSelf advanceWork];};cell.commentsAction=^{[weakSelf showComments:workID];};cell.profileAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,workID)];};
-    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"shareURL":record[@"musicShareURL"]?:@"",@"contextWork":record})];};return cell;
+    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"shareURL":record[@"musicShareURL"]?:@"",@"contextWork":record})];};
+}
+- (void)resolveBriefWorkAtIndex:(NSInteger)index{
+ if(index<0||index>=(NSInteger)_records.count)return;NSDictionary *record=_records[index];if(!DGWorkNeedsDetails(record))return;
+ if(!_detailRequested)_detailRequested=[NSMutableSet set];NSString *identifier=Text(String(record[@"id"]));if([_detailRequested containsObject:identifier])return;[_detailRequested addObject:identifier];
+ NSUInteger generation=_generation;__weak DGFeed *weak=self;
+ DGResolveWorkDetails(_bridge,record,index==_current,^(NSDictionary *result,NSString *error){DGFeed *self=weak;if(!self||generation!=self->_generation)return;NSDictionary *detail=Array(result[@"items"]).firstObject;if(error||!detail)return;
+  if(!self->_resolvedDetails)self->_resolvedDetails=[NSMutableDictionary dictionary];self->_resolvedDetails[identifier]=detail;
+  if(self->_foreground&&!self->_inactive&&!self->_pagingMotion)[self activate];
+ });
+}
+- (void)applyResolvedDetails{
+ if(!_resolvedDetails.count)return;
+ NSDictionary *updates=_resolvedDetails.copy;[_resolvedDetails removeAllObjects];
+ for(NSUInteger i=0;i<_records.count&&i<_feed.works.size();i++){NSString *identifier=Text(String(_records[i][@"id"]));NSDictionary *detail=updates[identifier];if(!detail)continue;
+  _records[i]=detail;_feed.works[i]=ReadWork(detail);NSIndexPath *path=[NSIndexPath indexPathForItem:i inSection:0];DGFeedCell *cell=(DGFeedCell *)[_collection cellForItemAtIndexPath:path];if(cell)[self configureCell:cell atIndexPath:path];
+ }
 }
 - (void)activate {
  if(_relayout||!_foreground||_inactive||_pagingMotion)return;
+ [self applyResolvedDetails];
  CGFloat height=_collection.bounds.size.height;if(height<=0)return;
  _current=MAX(0,(NSInteger)llround(_collection.contentOffset.y/height));
  if(_retainedCommentWorkID.length&&(_current>=(NSInteger)_feed.works.size()||![_retainedCommentWorkID isEqualToString:Text(_feed.works[_current].id)])){_retainedComments=nil;_retainedCommentWorkID=nil;}
@@ -356,6 +379,7 @@
   }
  }
  [selected active:YES];
+ if(selected)[self resolveBriefWorkAtIndex:_current];
  if(allowed){[self warmAfterSettling];[self resolveIP];}
 }
 - (void)beginPaging {
@@ -416,10 +440,13 @@
 - (void)warmAfterSettling {
  if(_inactive||!_foreground)return;
  NSUInteger request=++_warmGeneration,generation=_generation;__weak DGFeed *weak=self;
- CFTimeInterval delay=MAX(.39,.8-(CACurrentMediaTime()-_lastBecameActive));
+ CFTimeInterval delay=MAX(.12,.8-(CACurrentMediaTime()-_lastBecameActive));
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
   DGFeed *self=weak;if(!self||request!=self->_warmGeneration||generation!=self->_generation||!self->_foreground||self->_inactive||!self->_visible||self->_showingMessages||self->_pagingMotion)return;
   DGFeedCell *active=(DGFeedCell *)[self->_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:self->_current inSection:0]];
+  BOOL photo=self->_current>=0&&self->_current<(NSInteger)self->_feed.works.size()&&self->_feed.works[self->_current].photo();
+  if(!photo&&![active hasRenderedMedia])return;
+  [self resolveBriefWorkAtIndex:self->_current+1];
   if(self->_current<(NSInteger)self->_feed.works.size())DGWarmWorks(self->_feed.works,self->_current);
   BOOL recommends=!self->_staticFeed&&[self->_operation isEqualToString:@"feed"];
   if(recommends){
@@ -488,7 +515,7 @@
     [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
 - (void)openLogin{if(self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];DGLogin *login=[DGLogin new];__weak DGFeed *weakSelf=self;login.finished=^{[weakSelf sessionChanged:YES];};UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:login];DGConfigurePageTransition(nav);[self presentViewController:nav animated:YES completion:nil];}
-- (void)sessionChanged:(BOOL)reload{DGClearNavigationResume();_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
+- (void)sessionChanged:(BOOL)reload{DGClearNavigationResume();[_detailRequested removeAllObjects];[_resolvedDetails removeAllObjects];_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
 @end
 UIViewController *DGMakeFeedController(void){return [DGFeed new];}
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works,NSInteger selected,DGBridge *bridge){return [[DGFeed alloc] initWithRecords:works selected:selected bridge:bridge];}

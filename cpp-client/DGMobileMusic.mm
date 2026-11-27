@@ -5,14 +5,23 @@
 namespace {
 BOOL ValidID(NSString *value){return [value isKindOfClass:NSString.class]&&value.length&&value.length<=24&&[value rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"0123456789"].invertedSet].location==NSNotFound;}
 NSURLSession *Session(){static NSURLSession *session;static dispatch_once_t once;dispatch_once(&once,^{NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.HTTPShouldSetCookies=NO;config.HTTPMaximumConnectionsPerHost=2;config.timeoutIntervalForRequest=12;config.timeoutIntervalForResource=16;session=[NSURLSession sessionWithConfiguration:config];});return session;}
+void Desktop(DGBridge *bridge,NSDictionary *parameters,NSString *cursor,DGResult completion){
+ NSMutableDictionary *query=[parameters mutableCopy];query[@"cursor"]=cursor;
+ [bridge request:@"musicWorksDesktop" parameters:query completion:^(NSDictionary *result,NSString *error){
+  if(error||([cursor isEqualToString:@"0"]&&!Array(result[@"items"]).count)){completion(@{@"items":@[],@"cursor":@"limited",@"more":@NO,@"limited":@YES,@"lookup":@"mobile"},nil);return;}
+  completion(result,nil);
+ }];
+}
 }
 void DGReadMobileMusic(DGBridge *bridge,NSString *operation,NSDictionary *parameters,DGResult completion){
  NSString *identifier=Text(String(parameters[@"id"]));BOOL detail=[operation isEqualToString:@"musicDetail"];
  if(!ValidID(identifier)){completion(nil,@"平台未提供有效原声标识");return;}
- NSString *cursor=Text(String(parameters[@"cursor"]));if(!ValidID(cursor))cursor=@"0";
+ NSString *cursor=Text(String(parameters[@"cursor"]));
+ if(!detail&&[cursor hasPrefix:@"desktop:"]){Desktop(bridge,parameters,[cursor substringFromIndex:8],completion);return;}
+ if([cursor hasPrefix:@"mobile:"])cursor=[cursor substringFromIndex:7];if(!ValidID(cursor))cursor=@"0";
  NSURLComponents *url=[NSURLComponents componentsWithString:detail?@"https://www.iesdouyin.com/web/api/v2/music/info/":@"https://www.iesdouyin.com/web/api/v2/music/list/aweme/"];
  NSMutableArray *query=[NSMutableArray arrayWithObject:[NSURLQueryItem queryItemWithName:@"music_id" value:identifier]];
- if(!detail)for(NSArray *pair in @[@[@"count",@"15"],@[@"cursor",cursor],@[@"aid",@"1128"],@[@"screen_limit",@"3"],@[@"download_click_limit",@"0"]])[query addObject:[NSURLQueryItem queryItemWithName:pair[0] value:pair[1]]];
+ if(!detail)for(NSArray *pair in @[@[@"count",@"50"],@[@"cursor",cursor],@[@"aid",@"1128"],@[@"screen_limit",@"3"],@[@"download_click_limit",@"0"]])[query addObject:[NSURLQueryItem queryItemWithName:pair[0] value:pair[1]]];
  url.queryItems=query;NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url.URL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
  [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
  [request setValue:[NSString stringWithFormat:@"https://www.iesdouyin.com/share/music/%@/",identifier] forHTTPHeaderField:@"Referer"];
@@ -26,7 +35,12 @@ void DGReadMobileMusic(DGBridge *bridge,NSString *operation,NSDictionary *parame
    if(![scope isEqualToString:DGCurrentFeedScope()]){completion(nil,@"账号状态已变化，请重新打开原声页");return;}
    DGDiagnostic(@"music.mobile_response",[NSString stringWithFormat:@"operation=%@ status=%ld bytes=%lu code=%ld",operation,(long)status,(unsigned long)data.length,(long)error.code]);
    if(error||status<200||status>=300||!raw.length){completion(nil,@"原声移动网页接口未返回内容，可稍后重试；已识别作品会保留");return;}
-   [bridge request:@"normalizeMusicResponse" parameters:@{@"id":identifier,@"detail":@(detail),@"json":raw} completion:completion];
+   [bridge request:@"normalizeMusicResponse" parameters:@{@"id":identifier,@"detail":@(detail),@"json":raw} completion:^(NSDictionary *result,NSString *failure){
+    if(detail||failure){completion(result,failure);return;}
+    NSString *next=Text(String(result[@"cursor"]));BOOL more=[result[@"more"]boolValue];
+    if(![cursor isEqual:@"0"]&&([next isEqual:cursor]||!ValidID(next))){Desktop(bridge,parameters,@"0",completion);return;}
+    NSMutableDictionary *page=[result mutableCopy];page[@"cursor"]=[@"mobile:" stringByAppendingString:(ValidID(next)?next:@"0")];page[@"more"]=@(more&&ValidID(next));completion(page,nil);
+   }];
   });
  }]resume];
 }

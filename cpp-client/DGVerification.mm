@@ -4,7 +4,7 @@
 static BOOL DGVerificationShowing=NO;
 static CFTimeInterval DGVerificationCancelledAt=0;
 static UIViewController *DGForegroundController(void){for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){if(scene.activationState!=UISceneActivationStateForegroundActive||![scene isKindOfClass:UIWindowScene.class])continue;for(UIWindow *window in ((UIWindowScene *)scene).windows)if(window.isKeyWindow){UIViewController *controller=window.rootViewController;while(controller.presentedViewController)controller=controller.presentedViewController;if([controller isKindOfClass:UINavigationController.class])controller=((UINavigationController *)controller).topViewController;return controller;}}return nil;}
-@interface DGVerification:UIViewController
+@interface DGVerification:UIViewController<DGInPageBack>
 @property(nonatomic,strong) DGBridge *bridge;
 @property(nonatomic,strong) WKWebView *sourceWeb;
 @property(nonatomic,copy) NSString *operation;
@@ -31,6 +31,8 @@ static UIViewController *DGForegroundController(void){for(UIScene *scene in UIAp
 }
 - (void)restore{if(!_web)return;[_web removeFromSuperview];[_previousContainer addSubview:_web];_web.frame=_previousFrame;_web.autoresizingMask=_previousAutoresizing;_web.userInteractionEnabled=_previousInteraction;_web=nil;}
 - (void)cancel{DGVerificationCancelledAt=CACurrentMediaTime();[self finish:NO];}
+- (BOOL)dgHasPreviousPage{return NO;}
+- (void)dgDidReturnToPreviousPage{if(_closing)return;DGVerificationCancelledAt=CACurrentMediaTime();_closing=YES;[_timer invalidate];[self restore];DGVerificationShowing=NO;DGSessionCapture(nil);}
 - (void)finish:(BOOL)passed{
  if(_closing)return;_closing=YES;[_timer invalidate];[self restore];DGVerificationShowing=NO;UIViewController *origin=self.origin;NSString *operation=self.operation;DGSessionCapture(nil);
  [self dismissViewControllerAnimated:YES completion:^{if(passed){[NSNotificationCenter.defaultCenter postNotificationName:@"DGVerificationCompleted" object:nil userInfo:@{@"operation":operation?:@""}];if([origin respondsToSelector:@selector(refresh)])[origin performSelector:@selector(refresh)];}else [NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];
