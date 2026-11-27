@@ -14,11 +14,11 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 @property(nonatomic,copy) void (^openImageAction)(NSString *,UIImageView *);
 @property(nonatomic,copy) void (^saveImageAction)(NSString *);
 @property(nonatomic,copy) void (^copyAction)(NSString *);
-- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading;
+- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading recipient:(NSString *)recipient;
 @end
 @implementation DGCommentCell {
     DGImage *_avatar;
-    UILabel *_name,*_body,*_meta;
+    UILabel *_name,*_recipient,*_body,*_meta;
     UIButton *_reply;
     UIStackView *_stack,*_media;
     NSLayoutConstraint *_leading,*_avatarWidth,*_avatarHeight;
@@ -34,6 +34,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _avatar.isAccessibilityElement=YES; _avatar.accessibilityTraits=UIAccessibilityTraitButton;
         _name=Label(12,UIFontWeightSemibold); _name.textColor=UIColor.secondaryLabelColor;
         _name.userInteractionEnabled=YES; [_name addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
+        _recipient=Label(12,UIFontWeightMedium);_recipient.textColor=UIColor.secondaryLabelColor;_recipient.numberOfLines=0;_recipient.hidden=YES;
         _body=Label(15,UIFontWeightRegular); _body.numberOfLines=0; _body.userInteractionEnabled=YES;
         [_body addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(copyText:)]];
         _meta=Label(11,UIFontWeightRegular); _meta.textColor=UIColor.secondaryLabelColor;
@@ -42,7 +43,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _reply.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
         _reply.tintColor=[UIColor colorWithRed:.70 green:.91 blue:.94 alpha:1];
         [_reply addTarget:self action:@selector(replies) forControlEvents:UIControlEventTouchUpInside];
-        _stack=[[UIStackView alloc] initWithArrangedSubviews:@[_name,_body,_media,_meta,_reply]];
+        _stack=[[UIStackView alloc] initWithArrangedSubviews:@[_name,_recipient,_body,_media,_meta,_reply]];
         _stack.axis=UILayoutConstraintAxisVertical; _stack.spacing=7;
         _avatar.translatesAutoresizingMaskIntoConstraints=NO; _stack.translatesAutoresizingMaskIntoConstraints=NO;
         [self.contentView addSubview:_avatar]; [self.contentView addSubview:_stack];
@@ -74,10 +75,11 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         [image.heightAnchor constraintEqualToConstant:sticker?132:(nested?150:176)]]];
     [image remote:url];
 }
-- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading {
+- (void)display:(const Comment &)comment nested:(BOOL)nested expanded:(BOOL)expanded loading:(BOOL)loading recipient:(NSString *)recipient {
     [_avatar remote:Text(comment.avatar)]; _leading.constant=nested?66:18;
     _avatarWidth.constant=nested?28:36; _avatarHeight.constant=nested?28:36; _avatar.layer.cornerRadius=nested?14:18;
     _avatar.accessibilityLabel=[Text(comment.author) stringByAppendingString:@"的主页"];
+    _recipient.hidden=!nested;_recipient.text=nested?(recipient.length?[NSString stringWithFormat:@"回复 @%@",recipient]:@"回复对象暂不可见"):nil;
     _name.text=Text(comment.author); _plainText=Text(comment.text); _body.hidden=comment.text.empty();
     NSMutableArray *emojis=[NSMutableArray array];for(const auto &emoji:comment.emoticons)[emojis addObject:@{@"name":Text(emoji.first),@"url":Text(emoji.second)}];_inlineEmoji=emojis;[self renderEmoji];
     for(NSDictionary *emoji in _inlineEmoji){NSString *url=emoji[@"url"];if([DGEmojiCache() objectForKey:url]||!url.length)continue;
@@ -163,6 +165,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 namespace { struct DGReplyState {
     std::vector<Comment> items;
     std::unordered_set<std::string> ids;
+    std::unordered_map<std::string,std::string> authors;
     std::string cursor="0";
     bool expanded=false,loading=false,more=true,loaded=false,failed=false;
 }; }
@@ -308,7 +311,7 @@ namespace { struct DGReplyState {
         if(error) {state.failed=true;[self reloadThread:identifier];DGToast(self,error);[self advanceFocus];return;}
         state.loaded=true;
         for(id value in Array(result[@"items"])) {if(![value isKindOfClass:NSDictionary.class])continue;
-            Comment reply=ReadComment(value); if(!reply.id.empty()&&state.ids.insert(reply.id).second)state.items.emplace_back(std::move(reply));}
+            Comment reply=ReadComment(value); if(!reply.id.empty()&&state.ids.insert(reply.id).second){state.authors[reply.id]=reply.author;state.items.emplace_back(std::move(reply));}}
         state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];[self advanceFocus];
     }];
 }
@@ -328,7 +331,13 @@ namespace { struct DGReplyState {
     }
     const Comment &comment=indexPath.row==0?parent:state->items[indexPath.row-1];
     DGCommentCell *cell=[tableView dequeueReusableCellWithIdentifier:@"comment" forIndexPath:indexPath];
-    [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading&&!state->loaded];
+    NSString *recipient=nil;
+    if(indexPath.row>0){
+        if(comment.replyToID.empty()||comment.replyToID==parent.id)recipient=Text(parent.author);
+        else if(auto target=state->authors.find(comment.replyToID);target!=state->authors.end())recipient=Text(target->second);
+        if(!recipient.length)recipient=Text(comment.replyToAuthor);
+    }
+    [cell display:comment nested:indexPath.row>0 expanded:state&&state->expanded loading:state&&state->loading&&!state->loaded recipient:recipient];
     cell.contentView.backgroundColor=[_highlightID isEqualToString:Text(comment.id)]?[UIColor.systemTealColor colorWithAlphaComponent:.16]:UIColor.clearColor;
     NSString *sec=Text(comment.authorID),*name=Text(comment.author);
     cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};

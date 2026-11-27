@@ -19,7 +19,7 @@ struct Work {
 };
 struct Comment {
     std::string id, text, author, avatar, location;
-    std::string authorID, sticker;
+    std::string authorID, sticker, replyToID, replyToAuthor;
     std::vector<std::pair<std::string,std::string>> emoticons;
     std::vector<std::string> images;
     std::int64_t likes = 0, replies = 0, timestamp = 0;

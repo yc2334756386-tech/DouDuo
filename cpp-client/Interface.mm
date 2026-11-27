@@ -346,6 +346,12 @@
   NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
   DGDiagnostic(@"swipe.settled",[NSString stringWithFormat:@"from=%ld to=%ld total_ms=%.0f coast_ms=%.0f frames=%lu long_gaps=%lu max_gap_ms=%.1f",(long)_pagingStartIndex,(long)target,(end-_pagingStarted)*1000,_pagingRelease>0?(end-_pagingRelease)*1000:0,(unsigned long)_pagingSamples,(unsigned long)_pagingLongFrames,_pagingMaxGap*1000]);
  }
+ if(_pagingMotion&&_foreground&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.autoScroll"]&&_current>=0&&_current<(NSInteger)_feed.works.size()){
+  CGFloat height=_collection.bounds.size.height;
+  NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
+  const Work &previous=_feed.works[_current];
+  if(target!=_current&&!previous.photo()&&!previous.isLive)DGResetWorkPlayback(Text(previous.id));
+ }
  _pagingStarted=0;[_pagingClock invalidate];_pagingClock=nil;_pagingMotion=NO;
  NSArray *visible=_collection.visibleCells;
  for(DGFeedCell *cell in _departingCells.allObjects)if(![visible containsObject:cell])[cell active:NO];

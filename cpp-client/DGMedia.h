@@ -30,6 +30,7 @@
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGClearPlayers(void);
+void DGResetWorkPlayback(NSString *identifier);
 
 void DGTrimPlayers(void);
 

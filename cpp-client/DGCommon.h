@@ -45,6 +45,7 @@ static inline Comment ReadComment(NSDictionary *value) {
     comment.id = String(value[@"id"]); comment.text = String(value[@"text"]);
     comment.author = String(value[@"author"]); comment.avatar = String(value[@"avatar"]);
     comment.location = String(value[@"location"]); comment.authorID=String(value[@"authorID"]); comment.sticker=String(value[@"sticker"]); comment.likes = Number(value[@"likes"]);
+    comment.replyToID=String(value[@"replyToID"]);comment.replyToAuthor=String(value[@"replyToAuthor"]);
     comment.replies = Number(value[@"replies"]); comment.timestamp = Number(value[@"timestamp"]);
     comment.liked=[value[@"liked"]boolValue];
     for (id image in Array(value[@"images"])) comment.images.emplace_back(String(image));
