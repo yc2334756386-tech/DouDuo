@@ -167,7 +167,7 @@
 }
 - (NSString *)currentWorkIdentifier{
  NSInteger index=_positioned?_current:_selected;
- if(_collection.bounds.size.height>0)index=MAX(0,(NSInteger)llround(_collection.contentOffset.y/_collection.bounds.size.height));
+ if(_collection.bounds.size.height>0&&(!_staticFeed||_positioned))index=MAX(0,(NSInteger)llround(_collection.contentOffset.y/_collection.bounds.size.height));
  return index>=0&&index<(NSInteger)_feed.works.size()?Text(_feed.works[index].id):nil;
 }
 - (void)prepareResumeState:(NSDictionary *)state {
