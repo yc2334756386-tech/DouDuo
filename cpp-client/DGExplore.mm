@@ -78,7 +78,7 @@ static NSString *DGCount(id value) { return Text(douglass::compact(Number(value)
     _newBadge.hidden=![record[@"newInBatch"]boolValue];self.accessoryType=music?UITableViewCellAccessoryDetailButton:UITableViewCellAccessoryNone;_chevron.hidden=music;_image.layer.cornerRadius=music?12:28;[_image remote:DGValue(record[music?@"cover":@"avatar"])];
     _name.text=DGValue(record[music?@"title":@"nickname"]);_name.textColor=music&&DGMusicMatches(DGValue(record[@"id"]))?UIColor.systemTealColor:UIColor.labelColor;
     if(music){NSInteger seconds=Number(record[@"duration"]);_subtitle.text=[NSString stringWithFormat:@"%@%@",DGValue(record[@"author"]),seconds>0?[NSString stringWithFormat:@" · %ld:%02ld",(long)seconds/60,(long)seconds%60]:@""];}
-    else {NSString *signature=DGValue(record[@"signature"]);_subtitle.text=signature.length?signature:[NSString stringWithFormat:@"%@ 作品 · %@ 粉丝",DGCount(record[@"works"]),DGCount(record[@"followers"])];}
+    else {NSString *signature=[DGValue(record[@"signature"])stringByReplacingOccurrencesOfString:@"\n" withString:@" "];BOOL known=record[@"followersKnown"]?[record[@"followersKnown"]boolValue]:record[@"followers"]!=nil;NSString *followers=known?[NSString stringWithFormat:@"%@ 粉丝",DGCount(record[@"followers"])]:@"粉丝数暂未提供";_subtitle.text=signature.length?[followers stringByAppendingFormat:@"\n%@",signature]:followers;}
 }
 @end
 
@@ -244,7 +244,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         _stats=Label(13,UIFontWeightMedium);_stats.textColor=UIColor.secondaryLabelColor;[_header addSubview:_stats];
         _context=Label(11,UIFontWeightRegular);_context.textColor=UIColor.secondaryLabelColor;_context.numberOfLines=2;[_header addSubview:_context];
         if(_mode==DGExploreProfile){
-            _tabs=[[UISegmentedControl alloc] initWithItems:_own?@[@"作品",@"喜欢",@"收藏",@"收藏音乐"]:@[@"作品",@"喜欢"]];_tabs.selectedSegmentIndex=0;
+            _tabs=[[UISegmentedControl alloc] initWithItems:_own?@[@"作品",@"喜欢",@"收藏",@"收藏音乐"]:@[@"作品",@"喜欢"]];_tabs.apportionsSegmentWidthsByContent=YES;_tabs.selectedSegmentIndex=0;
             [_tabs addTarget:self action:@selector(tabChanged) forControlEvents:UIControlEventValueChanged];[_header addSubview:_tabs];
             {_librarySearch=[UISearchBar new];_librarySearch.searchBarStyle=UISearchBarStyleMinimal;_librarySearch.placeholder=@"搜索作品文案或话题";_librarySearch.returnKeyType=UIReturnKeySearch;_librarySearch.delegate=self;_librarySearch.hidden=YES;[_header addSubview:_librarySearch];}
             _followingButton=[UIButton buttonWithType:UIButtonTypeSystem];[_followingButton setTitle:@"关注列表 ›" forState:UIControlStateNormal];_followingButton.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -290,6 +290,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  self.title=_own?@"我的":self.displayName;_name.text=self.displayName;[_avatar remote:DGValue(result[@"avatar"])];
  NSString *signature=DGValue(result[@"signature"]);_signature.text=signature.length?signature:@"这个人还没有填写简介";
  _stats.text=[NSString stringWithFormat:@"%@ 获赞 · %@ 粉丝",DGCount(result[@"likes"]),DGCount(result[@"followers"])];
+ BOOL worksKnown=result[@"worksKnown"]?[result[@"worksKnown"]boolValue]:result[@"works"]!=nil;[_tabs setTitle:worksKnown?[NSString stringWithFormat:@"作品 %lld",Number(result[@"works"])]:@"作品" forSegmentAtIndex:0];
  [_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];[self updateRelationship];
  NSString *location=DGValue(result[@"location"]);_context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
 }

@@ -75,7 +75,8 @@
   const user=value=>{
     value=value||{};
     const uid=id(value.uid||value.id_str||value.id);
-    return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number(value.follower_count||value.mplatform_followers_count||0),following:Number(value.following_count||0),works:Number(value.aweme_count||0),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:ipFrom(value)};
+    const followers=value.follower_count??value.mplatform_followers_count,workCount=value.aweme_count;
+    return {uid,sec:value.sec_uid||value.sec_user_id||'',nickname:value.nickname||'',avatar:first(value.avatar_larger)||first(value.avatar_medium)||first(value.avatar_thumb),signature:value.signature||'',followers:Number.isFinite(Number(followers))?Number(followers):0,followersKnown:followers!=null&&Number.isFinite(Number(followers)),following:Number(value.following_count||0),works:Number.isFinite(Number(workCount))?Number(workCount):0,worksKnown:workCount!=null&&Number.isFinite(Number(workCount)),likes:Number(value.total_favorited||0),followStatus:Number(value.follow_status||0),blocked:!!(value.is_block||Number(value.block_status)===1),isMe:!!value.is_me||!!(selfUID&&uid===selfUID),location:ipFrom(value)};
   };
   const musicIdentifier=(value)=>id(value?.id_str)||id(value?.music_id_str)||id(value?.id)||id(value?.music_id)||id(value?.mid);
   const music=value=>{
