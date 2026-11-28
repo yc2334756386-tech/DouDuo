@@ -1,6 +1,7 @@
 #pragma once
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
+#include <array>
 #include <atomic>
 
 BOOL DGRifeAvailable(void);
@@ -12,8 +13,10 @@ public:
     ~DGRife();
     DGRife(const DGRife &)=delete;
     DGRife &operator=(const DGRife &)=delete;
-    CVPixelBufferRef copyMidpoint(CVPixelBufferRef previous,CVPixelBufferRef current,double deadline,
-                                 const std::atomic_bool &cancelled);
+    // The caller owns the returned buffers at phases 1/4, 1/2 and 3/4.
+    std::array<CVPixelBufferRef,3> copyInterpolatedFrames(CVPixelBufferRef previous,CVPixelBufferRef current,
+                                                          double midpointDeadline,double quarterDeadline,
+                                                          const std::atomic_bool &cancelled);
     bool rejected() const;
 private:
     struct State;

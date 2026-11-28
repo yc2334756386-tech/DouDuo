@@ -6,6 +6,7 @@ from pathlib import Path
 import urllib.request
 
 import coremltools as ct
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -91,22 +92,22 @@ class RIFE(nn.Module):
         y, x = torch.meshgrid(torch.linspace(-1, 1, HEIGHT), torch.linspace(-1, 1, WIDTH), indexing="ij")
         self.register_buffer("grid", torch.stack((x, y), dim=-1).unsqueeze(0), persistent=False)
         self.register_buffer("grid_scale", torch.tensor([2 / (WIDTH - 1), 2 / (HEIGHT - 1)]), persistent=False)
-        self.register_buffer("phase", torch.full((1, 1, HEIGHT, WIDTH), 0.5), persistent=False)
 
     def warp(self, tensor, flow):
         coords = self.grid + flow.permute(0, 2, 3, 1) * self.grid_scale
         return F.grid_sample(tensor, coords, mode="bilinear", padding_mode="border", align_corners=True)
 
-    def forward(self, previous, current):
+    def forward(self, previous, current, phase):
+        phase = phase.expand(1, 1, HEIGHT, WIDTH)
         f0, f1 = self.encode(previous), self.encode(current)
-        flow, mask, feat = self.block0(torch.cat((previous, current, f0, f1, self.phase), dim=1))
+        flow, mask, feat = self.block0(torch.cat((previous, current, f0, f1, phase), dim=1))
         for block in (self.block1, self.block2, self.block3, self.block4):
             fwd, back = flow[:, :2], flow[:, 2:4]
             warped = (
                 self.warp(previous, fwd), self.warp(current, back),
                 self.warp(f0, fwd), self.warp(f1, back),
             )
-            update, mask, feat = block(torch.cat((*warped, self.phase, mask, feat), dim=1), flow)
+            update, mask, feat = block(torch.cat((*warped, phase, mask, feat), dim=1), flow)
             flow = flow + update
         mask = torch.sigmoid(mask)
         result = self.warp(previous, flow[:, :2]) * mask + self.warp(current, flow[:, 2:4]) * (1 - mask)
@@ -149,11 +150,12 @@ def main():
     shape = (1, 3, HEIGHT, WIDTH)
     example = torch.zeros(shape)
     with torch.inference_mode():
-        traced = torch.jit.trace(model, (example, example), check_trace=False)
+        traced = torch.jit.trace(model, (example, example, torch.full((1, 1, 1, 1), 0.5)), check_trace=False)
+        image_inputs = [ct.ImageType(name=name, shape=shape, scale=1 / 255) for name in ("previous", "current")]
         ct_model = ct.convert(
             traced,
             convert_to="milinternal" if args.graph_only else "mlprogram",
-            inputs=[ct.ImageType(name=name, shape=shape, scale=1 / 255) for name in ("previous", "current")],
+            inputs=[*image_inputs, ct.TensorType(name="phase", shape=(1, 1, 1, 1), dtype=np.float32)],
             outputs=[ct.ImageType(name="midpoint")],
             minimum_deployment_target=ct.target.iOS18,
             compute_precision=ct.precision.FLOAT16,
@@ -164,7 +166,7 @@ def main():
         return
     ct_model.author = "Practical-RIFE contributors"
     ct_model.license = "MIT"
-    ct_model.short_description = "RIFE 4.25, fixed 320×192, midpoint interpolator"
+    ct_model.short_description = "RIFE 4.25, fixed 320×192, phase-controlled frame interpolation"
     ct_model.save(str(args.output))
 
 

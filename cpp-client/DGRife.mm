@@ -70,9 +70,9 @@ CVPixelBufferPoolRef makePool(size_t width,size_t height,OSType format) {
     return pool;
 }
 
-OwnedPixel nextPixel(CVPixelBufferPoolRef pool) {
+OwnedPixel nextPixel(CVPixelBufferPoolRef pool,NSNumber *limit=@4) {
     CVPixelBufferRef buffer=nullptr;
-    NSDictionary *options=@{(__bridge NSString *)kCVPixelBufferPoolAllocationThresholdKey:@4};
+    NSDictionary *options=@{(__bridge NSString *)kCVPixelBufferPoolAllocationThresholdKey:limit};
     if(pool)CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault,pool,
         (__bridge CFDictionaryRef)options,&buffer);
     return OwnedPixel(buffer);
@@ -107,6 +107,7 @@ BOOL DGRifeRequested(void) {
 
 struct DGRife::State {
     MLModel *__strong model=nil;
+    MLMultiArray *__strong phase=nil;
     CIContext *__strong context=nil;
     CVPixelBufferPoolRef inputs=nullptr,rgbOutput=nullptr,outputs=nullptr;
     VTPixelTransferSessionRef transfer=nullptr;
@@ -128,25 +129,27 @@ bool DGRife::rejected() const {
     return state_->unavailable||computeCheck.load()==ComputeCheck::rejected;
 }
 
-CVPixelBufferRef DGRife::copyMidpoint(CVPixelBufferRef previous,CVPixelBufferRef current,double deadline,
-                                     const std::atomic_bool &cancelled) {
-    if(cancelled.load()||rejected()||!previous||!current)return nullptr;
+std::array<CVPixelBufferRef,3> DGRife::copyInterpolatedFrames(CVPixelBufferRef previous,CVPixelBufferRef current,
+                                                              double midpointDeadline,double quarterDeadline,
+                                                              const std::atomic_bool &cancelled) {
+    if(cancelled.load()||rejected()||!previous||!current)return {};
     const size_t width=CVPixelBufferGetWidth(current),height=CVPixelBufferGetHeight(current);
     if(width<128||height<128||std::max(width,height)>1920||width*height>1920*1080||
-       width!=CVPixelBufferGetWidth(previous)||height!=CVPixelBufferGetHeight(previous))return nullptr;
+       width!=CVPixelBufferGetWidth(previous)||height!=CVPixelBufferGetHeight(previous))return {};
     requestComputePlan();
-    if(computeCheck.load()!=ComputeCheck::allowed)return nullptr;
+    if(computeCheck.load()!=ComputeCheck::allowed)return {};
     State &state=*state_;
     if(!state.model){
         NSError *error=nil;
         state.model=[MLModel modelWithContentsOfURL:rifeModelURL() configuration:rifeConfiguration() error:&error];
-        if(!state.model){
+        if(state.model)state.phase=[[MLMultiArray alloc] initWithShape:@[@1,@1,@1,@1] dataType:MLMultiArrayDataTypeFloat32 error:&error];
+        if(!state.model||!state.phase){
             state.unavailable=true;
             DGDiagnostic(@"video.rife.load",[NSString stringWithFormat:@"code=%ld",(long)error.code]);
-            return nullptr;
+            return {};
         }
     }
-    if(cancelled.load()||CACurrentMediaTime()>=deadline)return nullptr;
+    if(cancelled.load()||CACurrentMediaTime()>=midpointDeadline)return {};
     if(!state.context){
         state.context=[CIContext contextWithOptions:@{kCIContextCacheIntermediates:@NO}];
         state.color=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -161,7 +164,7 @@ CVPixelBufferRef DGRife::copyMidpoint(CVPixelBufferRef previous,CVPixelBufferRef
         state.width=width;state.height=height;
     }
     auto first=nextPixel(state.inputs),second=nextPixel(state.inputs);
-    if(!first||!second||!state.color||!state.outputs||!state.transfer)return nullptr;
+    if(!first||!second||!state.color||!state.outputs||!state.transfer)return {};
     const bool rotated=height>width;
     const CGRect modelBounds=CGRectMake(0,0,modelWidth,modelHeight);
     const double w=rotated?height:width,h=rotated?width:height;
@@ -174,36 +177,56 @@ CVPixelBufferRef DGRife::copyMidpoint(CVPixelBufferRef previous,CVPixelBufferRef
         [state.context render:image toCVPixelBuffer:output bounds:modelBounds colorSpace:state.color];
     };
     prepare(previous,first.get());
-    if(cancelled.load()||CACurrentMediaTime()>=deadline)return nullptr;
+    if(cancelled.load()||CACurrentMediaTime()>=midpointDeadline)return {};
     prepare(current,second.get());
-    if(cancelled.load()||CACurrentMediaTime()>=deadline)return nullptr;
     NSError *error=nil;
     NSDictionary *features=@{
         @"previous":[MLFeatureValue featureValueWithPixelBuffer:first.get()],
-        @"current":[MLFeatureValue featureValueWithPixelBuffer:second.get()]
+        @"current":[MLFeatureValue featureValueWithPixelBuffer:second.get()],
+        @"phase":[MLFeatureValue featureValueWithMultiArray:state.phase]
     };
     auto *provider=[[MLDictionaryFeatureProvider alloc] initWithDictionary:features error:&error];
-    CFTimeInterval started=CACurrentMediaTime();
-    id<MLFeatureProvider> prediction=provider?[state.model predictionFromFeatures:provider error:&error]:nil;
-    CVPixelBufferRef midpoint=[prediction featureValueForName:@"midpoint"].imageBufferValue;
-    if(!midpoint||cancelled.load()||CACurrentMediaTime()>=deadline){
-        if(DGDiagnosticEnabled())DGDiagnostic(@"video.rife.frame_skipped",
-            [NSString stringWithFormat:@"inference_ms=%.1f code=%ld",(CACurrentMediaTime()-started)*1000,(long)error.code]);
-        return nullptr;
+    if(!provider)return {};
+    const auto predict=[&](float phase,double deadline)->OwnedPixel {
+        @autoreleasepool {
+            const auto started=CACurrentMediaTime();
+            if(cancelled.load()||started>=deadline)return {};
+            *static_cast<float *>(state.phase.dataPointer)=phase;
+            NSError *predictionError=nil;
+            id<MLFeatureProvider> prediction=[state.model predictionFromFeatures:provider error:&predictionError];
+            CVPixelBufferRef imageBuffer=[prediction featureValueForName:@"midpoint"].imageBufferValue;
+            if(!imageBuffer||cancelled.load()||CACurrentMediaTime()>=deadline){
+                if(phase==.5f&&DGDiagnosticEnabled())DGDiagnostic(@"video.rife.frame_skipped",
+                    [NSString stringWithFormat:@"inference_ms=%.1f code=%ld",(CACurrentMediaTime()-started)*1000,(long)predictionError.code]);
+                return {};
+            }
+            auto rgb=nextPixel(state.rgbOutput),output=nextPixel(state.outputs,quarterDeadline>0?@6:@4);
+            if(!rgb||!output)return {};
+            CIImage *image=[[CIImage imageWithCVPixelBuffer:imageBuffer] imageByCroppingToRect:content];
+            image=[image imageByApplyingTransform:CGAffineTransformMakeTranslation(-content.origin.x,-content.origin.y)];
+            image=[image imageByApplyingTransform:CGAffineTransformMakeScale(1/scale,1/scale)];
+            if(rotated)image=[image imageByApplyingOrientation:8];
+            CGRect extent=image.extent;
+            image=[image imageByApplyingTransform:CGAffineTransformMakeTranslation(-extent.origin.x,-extent.origin.y)];
+            [state.context render:image toCVPixelBuffer:rgb.get() bounds:CGRectMake(0,0,width,height) colorSpace:state.color];
+            CVBufferSetAttachment(rgb.get(),kCVImageBufferColorPrimariesKey,kCVImageBufferColorPrimaries_ITU_R_709_2,kCVAttachmentMode_ShouldPropagate);
+            CVBufferSetAttachment(rgb.get(),kCVImageBufferTransferFunctionKey,kCVImageBufferTransferFunction_sRGB,kCVAttachmentMode_ShouldPropagate);
+            CVBufferPropagateAttachments(current,output.get());
+            if(VTPixelTransferSessionTransferImage(state.transfer,rgb.get(),output.get())!=noErr)return {};
+            if(cancelled.load()||CACurrentMediaTime()>=deadline)return {};
+            return output;
+        }
+    };
+    const auto started=CACurrentMediaTime();
+    auto midpoint=predict(.5f,midpointDeadline);
+    if(!midpoint)return {};
+    const double cost=CACurrentMediaTime()-started;
+    if(CACurrentMediaTime()+2*cost+.002<quarterDeadline){
+        auto firstQuarter=predict(.25f,quarterDeadline);
+        if(firstQuarter&&CACurrentMediaTime()+cost<quarterDeadline){
+            auto thirdQuarter=predict(.75f,quarterDeadline);
+            if(thirdQuarter)return {firstQuarter.release(),midpoint.release(),thirdQuarter.release()};
+        }
     }
-    auto rgb=nextPixel(state.rgbOutput),output=nextPixel(state.outputs);
-    if(!rgb||!output)return nullptr;
-    CIImage *image=[[CIImage imageWithCVPixelBuffer:midpoint] imageByCroppingToRect:content];
-    image=[image imageByApplyingTransform:CGAffineTransformMakeTranslation(-content.origin.x,-content.origin.y)];
-    image=[image imageByApplyingTransform:CGAffineTransformMakeScale(1/scale,1/scale)];
-    if(rotated)image=[image imageByApplyingOrientation:8];
-    CGRect extent=image.extent;
-    image=[image imageByApplyingTransform:CGAffineTransformMakeTranslation(-extent.origin.x,-extent.origin.y)];
-    [state.context render:image toCVPixelBuffer:rgb.get() bounds:CGRectMake(0,0,width,height) colorSpace:state.color];
-    CVBufferSetAttachment(rgb.get(),kCVImageBufferColorPrimariesKey,kCVImageBufferColorPrimaries_ITU_R_709_2,kCVAttachmentMode_ShouldPropagate);
-    CVBufferSetAttachment(rgb.get(),kCVImageBufferTransferFunctionKey,kCVImageBufferTransferFunction_sRGB,kCVAttachmentMode_ShouldPropagate);
-    CVBufferPropagateAttachments(current,output.get());
-    if(VTPixelTransferSessionTransferImage(state.transfer,rgb.get(),output.get())!=noErr)return nullptr;
-    if(cancelled.load()||CACurrentMediaTime()>=deadline)return nullptr;
-    return output.release();
+    return {nullptr,midpoint.release(),nullptr};
 }

@@ -31,7 +31,7 @@
 - (void)viewDidLoad{[super viewDidLoad];self.title=@"画面与音频实验室";self.tableView.backgroundColor=UIColor.systemGroupedBackgroundColor;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=92;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 4;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?6:section==1?2:section==2?8:1;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?7:section==1?2:section==2?8:1;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return @[@"画面增强 · 默认关闭",@"音频增强 · 默认关闭",@"八段均衡 · ±12 dB",@"实现与限制"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return section==0?@"MetalFX 为单帧空间放大，不生成原片没有的真实细节。最高 1.5×、长边不超过 1920；高温时旁路。画面预设独立于音频。":section==1?@"首次开启调音对后续新作品生效，参数调节实时生效。处理不了的音频格式和直播 HLS 保留原声；不切换音频会话。":section==2?@"预设会覆盖八段增益，选好后可逐项调节。低延迟 IIR，无频谱可视化持续刷新。":@"AutoEq 用于生成耳机校正参数；本版没有冒用通用耳机校正。OctaEQ 仅作设计参考，不移植 VST3 或 GPL 源码。处理核心为本项目 C++，系统框架由 Objective-C++ 适配。";}
 - (DGExperimentalControlCell *)base:(NSString *)title detail:(NSString *)detail{DGExperimentalControlCell *cell=[DGExperimentalControlCell new];cell.controlTitle.text=title;cell.controlDetail.text=detail;cell.controlDetail.hidden=!detail.length;return cell;}
@@ -68,8 +68,18 @@
    else cell.controlDetail.text=DGVTFSystemInterpolationAvailable()?@"低延迟优先使用系统插帧。":@"低延迟使用兼容插帧，快速运动时可能出现残影。";
    return cell;
   }
-  if(path.row==3)return [self toggle:@"插帧转场保护" key:DGInterpolationProtectionKey detail:@"画面跳变、快速转场或快运镜时播放原始帧，稳定后恢复插帧"];
-  if(path.row==4)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
+  if(path.row==3){
+   DGExperimentalControlCell *cell=[self base:@"插帧倍率" detail:@"4× 需要更高刷新率和处理性能，来不及补帧时自动降档。"];
+   UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:@[@"2×",@"4×"]];
+   control.accessibilityIdentifier=DGInterpolationMultiplierKey;
+   control.selectedSegmentIndex=DGInterpolationMultiplier()==4?1:0;
+   [control addTarget:self action:@selector(interpolationMultiplierChanged:) forControlEvents:UIControlEventValueChanged];
+   [cell.controlStack addArrangedSubview:control];
+   [control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;
+   return cell;
+  }
+  if(path.row==4)return [self toggle:@"插帧转场保护" key:DGInterpolationProtectionKey detail:@"画面跳变、快速转场或快运镜时播放原始帧，稳定后恢复插帧"];
+  if(path.row==5)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
   return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"切片时释放增强资源，画面稳定后再启动增强"];
  }
 
@@ -83,6 +93,10 @@
  [prefs setBool:control.selectedSegmentIndex==1 forKey:@"douglass.experimental.frameInterpolation"];
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];
  [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:2 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)interpolationMultiplierChanged:(UISegmentedControl *)control {
+ [NSUserDefaults.standardUserDefaults setInteger:control.selectedSegmentIndex==1?4:2 forKey:DGInterpolationMultiplierKey];
+ [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];
 }
 - (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.transitionProtection"]||[key isEqualToString:DGInterpolationProtectionKey]){
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];return;
