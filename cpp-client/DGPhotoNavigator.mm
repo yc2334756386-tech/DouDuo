@@ -2,11 +2,19 @@
 #import "DGAnimation.h"
 #include "InteractionState.hpp"
 @interface DGPhotoNavigator()<UIGestureRecognizerDelegate>
+- (void)edgeTick:(CADisplayLink *)link;
+@end
+@interface DGPhotoEdgeClock:NSObject
+@property(nonatomic,weak) DGPhotoNavigator *owner;
+@end
+@implementation DGPhotoEdgeClock
+- (void)tick:(CADisplayLink *)link{DGPhotoNavigator *owner=_owner;if(owner)[owner edgeTick:link];else [link invalidate];}
 @end
 @implementation DGPhotoNavigator{
  NSArray<NSString *> *_urls;NSMutableArray<DGImage *> *_images;NSInteger _index;
  BOOL _browsing;NSUInteger _imageGeneration;douglass::GalleryScrubber _scrubber;
  UIPanGestureRecognizer *_pan;UIView *_thumbnails;UILabel *_count;CALayer *_selection;
+ CADisplayLink *_edgeLink;CFTimeInterval _edgeTimestamp;
 }
 - (instancetype)initWithFrame:(CGRect)frame{
  if((self=[super initWithFrame:frame])){
@@ -15,17 +23,22 @@
   _pan=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(pan:)];_pan.maximumNumberOfTouches=1;_pan.delegate=self;[self addGestureRecognizer:_pan];
   [self addGestureRecognizer:[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(tap:)]];
   _count=Label(15,UIFontWeightMedium);_count.textAlignment=NSTextAlignmentCenter;_count.hidden=YES;_count.layer.shadowColor=UIColor.blackColor.CGColor;_count.layer.shadowOpacity=.55;_count.layer.shadowRadius=2;_count.layer.shadowOffset=CGSizeMake(0,1);[self addSubview:_count];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationInactive:) name:UIApplicationWillResignActiveNotification object:nil];
  }return self;
 }
+- (void)dealloc{[_edgeLink invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)applicationInactive:(NSNotification *)notification{[self cancelBrowsing];}
 - (BOOL)browsing{return _browsing;}
 - (UIImage *)selectedThumbnail{return _index>=0&&_index<(NSInteger)_images.count?_images[_index].image:nil;}
 - (void)setBrowsing:(BOOL)value{
+ if(!value)[self stopEdgeClock];
  if(_browsing==value)return;_browsing=value;_thumbnails.hidden=!value;_selection.hidden=!value;_count.hidden=!value;
  if(value){_thumbnails.alpha=0;_count.alpha=0;[self loadVisibleThumbnails];}else for(DGImage *image in _images)[image remote:@""];
  [self setNeedsDisplay];[self setNeedsLayout];if(self.onBrowsingChanged)self.onBrowsingChanged(value);
  if(value)DGAnimate(.12,^{self->_thumbnails.alpha=1;self->_count.alpha=1;},nil);
 }
 - (void)cancelBrowsing{
+ [self stopEdgeClock];
  if(!_browsing)return;[self finishBrowsing];_pan.enabled=NO;_pan.enabled=YES;
 }
 - (void)images:(NSArray<NSString *> *)urls{
@@ -70,13 +83,25 @@
  NSInteger index=(NSInteger)llround(_scrubber.position());if(index!=_index){DGHaptic();[self page:index];if(self.onSelect)self.onSelect(index);}
  [self setNeedsLayout];[self layoutIfNeeded];[self loadVisibleThumbnails];
 }
+- (void)stopEdgeClock{[_edgeLink invalidate];_edgeLink=nil;_edgeTimestamp=0;}
+- (void)updateEdgeClock{
+ if(!_browsing||!self.window||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||!_scrubber.canAdvanceAtEdge()){[self stopEdgeClock];return;}
+ if(_edgeLink)return;DGPhotoEdgeClock *clock=[DGPhotoEdgeClock new];clock.owner=self;_edgeTimestamp=0;_edgeLink=[CADisplayLink displayLinkWithTarget:clock selector:@selector(tick:)];DGApplyDisplayLinkRate(_edgeLink,self);[_edgeLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+}
+- (void)edgeTick:(CADisplayLink *)link{
+ if(link!=_edgeLink)return;
+ if(!_browsing||!self.window||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||(_pan.state!=UIGestureRecognizerStateBegan&&_pan.state!=UIGestureRecognizerStateChanged)){[self cancelBrowsing];return;}
+ CFTimeInterval elapsed=_edgeTimestamp?link.timestamp-_edgeTimestamp:0;_edgeTimestamp=link.timestamp;
+ if(_scrubber.advanceEdge(elapsed))[self applyScrub];if(!_scrubber.canAdvanceAtEdge())[self stopEdgeClock];
+}
 - (void)finishBrowsing{
+ [self stopEdgeClock];
  if(!_browsing)return;NSInteger index=(NSInteger)_scrubber.finish();[self page:index];if(self.onSelect)self.onSelect(index);[self setBrowsing:NO];
 }
 - (void)pan:(UIPanGestureRecognizer *)gesture{
  CGPoint point=[gesture locationInView:self];
  if(gesture.state==UIGestureRecognizerStateBegan){CGPoint delta=[gesture translationInView:self];_scrubber.begin(_index,point.x-delta.x,self.bounds.size.width,_urls.count);[self setBrowsing:YES];}
- if(gesture.state==UIGestureRecognizerStateBegan||gesture.state==UIGestureRecognizerStateChanged){_scrubber.move(point.x);[self applyScrub];}
+ if(gesture.state==UIGestureRecognizerStateBegan||gesture.state==UIGestureRecognizerStateChanged){_scrubber.move(point.x);[self applyScrub];[self updateEdgeClock];}
  if(gesture.state==UIGestureRecognizerStateEnded||gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)[self finishBrowsing];
 }
 - (void)tap:(UITapGestureRecognizer *)gesture{

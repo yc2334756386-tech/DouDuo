@@ -6,14 +6,17 @@ class GalleryScrubber {
 public:
     void begin(std::size_t index,double fingerX,double width,std::size_t count) noexcept;
     void move(double fingerX) noexcept;
+    bool advanceEdge(double elapsed) noexcept;
+    bool canAdvanceAtEdge() const noexcept;
     std::size_t finish() noexcept;
     double position() const noexcept{return position_;}
     double thumbnailX(std::size_t index) const noexcept;
     std::size_t indexAt(double x) const noexcept;
 private:
     double bounded(double value) const noexcept;
+    double edgeVelocity() const noexcept;
     std::size_t count_=0;
-    double start_=0,position_=0,anchor_=0,width_=0,stride_=28;
+    double position_=0,anchor_=0,width_=0,stride_=28;
 };
 
 enum class SearchBack { input,close };
