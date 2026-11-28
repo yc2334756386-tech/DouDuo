@@ -5,6 +5,7 @@
 #include <utility>
 
 namespace douglass {
+void sortComments(std::vector<Comment> &comments,bool latest){std::stable_sort(comments.begin(),comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});}
 std::size_t Feed::append(std::vector<Work> incoming, bool hasMore, bool replace) {
     if (replace) clear();
     std::size_t added = 0;

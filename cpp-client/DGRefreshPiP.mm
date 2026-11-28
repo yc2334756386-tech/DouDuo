@@ -22,6 +22,7 @@ NSNotificationName const DGRefreshPiPStatusChanged=@"DGRefreshPiPStatusChanged";
 @property(nonatomic,copy) NSString *status;
 @property(nonatomic) BOOL starting,issued,stopping,blocked,video;
 @property(nonatomic) NSUInteger generation;
+@property(nonatomic) NSUInteger startAttempt;
 - (void)apply;
 - (NSString *)currentStatus;
 @end
@@ -30,14 +31,32 @@ NSNotificationName const DGRefreshPiPStatusChanged=@"DGRefreshPiPStatusChanged";
 - (void)tick:(CADisplayLink *)link;
 @end
 @implementation DGRefreshPiPClock
-- (void)tick:(CADisplayLink *)link{DGRefreshPiP *owner=_owner;if(!owner||!owner.pip.pictureInPictureActive){[link invalidate];return;}owner.surface.timestamp=link.timestamp;[owner.surface setNeedsDisplay];[owner.surface.layer setNeedsDisplay];}
+- (void)tick:(CADisplayLink *)link{DGRefreshPiP *owner=_owner;if(!owner){[link invalidate];return;}if(owner.stopping||(!owner.starting&&!owner.pip.pictureInPictureActive&&!owner.pip.pictureInPictureSuspended)){[link invalidate];if(owner.link==link)owner.link=nil;return;}if(owner.pip.pictureInPictureSuspended)return;owner.surface.timestamp=link.timestamp;[owner.surface setNeedsDisplay];}
 @end
 @implementation DGRefreshPiP
+- (NSString *)startMetrics{return [NSString stringWithFormat:@"attempt=%lu possible=%d active=%d suspended=%d source_window=%d source_hidden=%d source_alpha=%.2f source_w=%.1f source_h=%.1f content_w=%.1f content_h=%.1f app_state=%ld",(unsigned long)_startAttempt,_pip.pictureInPicturePossible,_pip.pictureInPictureActive,_pip.pictureInPictureSuspended,_source.window!=nil,_source.hidden,_source.alpha,_source.bounds.size.width,_source.bounds.size.height,_content.view.bounds.size.width,_content.view.bounds.size.height,(long)UIApplication.sharedApplication.applicationState];}
+- (void)startContentClock{
+ if(_link)return;DGRefreshPiPClock *clock=[DGRefreshPiPClock new];clock.owner=self;_link=[CADisplayLink displayLinkWithTarget:clock selector:@selector(tick:)];_link.preferredFramesPerSecond=30;[_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+ _surface.timestamp=CACurrentMediaTime();[_surface setNeedsDisplay];[_surface.layer displayIfNeeded];
+}
+- (void)checkStart:(NSUInteger)check generation:(NSUInteger)generation{
+ if(generation!=_generation||!_starting||_stopping)return;
+ if(_pip.pictureInPictureActive){[self pictureInPictureControllerDidStartPictureInPicture:_pip];return;}
+ if(_pip.pictureInPictureSuspended){_starting=NO;[self publishStatus];return;}
+ if(check==0||check==5||check==10)DGDiagnostic(@"refresh.pip_start_wait",[self startMetrics]);
+ if(check>=10){
+  DGDiagnostic(@"refresh.pip_start_timeout",[self startMetrics]);_pip.delegate=nil;[_pip stopPictureInPicture];[self cleanup];
+  if(_startAttempt==0&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"]&&!_video){++_startAttempt;DGDiagnostic(@"refresh.pip_compatibility_retry",@"content_height=180");[self apply];return;}
+  _blocked=YES;_status=@"PiP 未启动，保留前台高刷请求";[self publishStatus];return;
+ }
+ __weak DGRefreshPiP *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weak checkStart:check+1 generation:generation];});
+}
 - (void)publishStatus{[NSNotificationCenter.defaultCenter postNotificationName:DGRefreshPiPStatusChanged object:self];}
 - (NSString *)currentStatus{
  if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"])return @"已关闭";
  if(_video)return @"作品画中画优先，保留前台高刷请求";
  if(_stopping)return @"微型 PiP 正在停止，完成后重新开启";
+ if(_pip.pictureInPictureSuspended)return @"微型 PiP 已挂起，等待系统恢复";
  if(_pip.pictureInPictureActive)return @"微型 PiP 已开启";
  if(_starting)return _issued?@"微型 PiP 正在启动":@"正在准备微型 PiP";
  if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return @"回到前台后准备微型 PiP";
@@ -66,34 +85,37 @@ NSNotificationName const DGRefreshPiPStatusChanged=@"DGRefreshPiPStatusChanged";
 - (void)tryStart:(NSUInteger)attempt generation:(NSUInteger)generation{
  if(generation!=_generation||_stopping||_video||_blocked||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"])return;
  if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){_starting=NO;[self publishStatus];return;}
- if(_pip.pictureInPicturePossible){
-  _issued=YES;[self publishStatus];
+ BOOL sourceReady=_source.window&&!CGRectIsEmpty(_source.bounds)&&!_source.hidden&&_source.alpha>.01&&!CGRectIsEmpty(_content.view.bounds);
+ if(_pip.pictureInPicturePossible&&sourceReady){
+  _issued=YES;[self startContentClock];[self publishStatus];DGDiagnostic(@"refresh.pip_start_requested",[self startMetrics]);
   @try{[_pip startPictureInPicture];}@catch(NSException *exception){[self cleanup];_blocked=YES;_status=@"系统未接受微型 PiP，保留前台高刷请求";[self publishStatus];DGDiagnostic(@"refresh.pip_rejected",exception.name);return;}
-  __weak DGRefreshPiP *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{DGRefreshPiP *session=weak;if(!session||generation!=session.generation||!session.starting||session.stopping)return;if(session.pip.pictureInPictureActive){[session pictureInPictureControllerDidStartPictureInPicture:session.pip];return;}[session cleanup];session.blocked=YES;session.status=@"PiP 启动未完成，关闭开关后可重试";[session publishStatus];DGDiagnostic(@"refresh.pip_start_timeout",nil);});return;
+  [self checkStart:0 generation:generation];return;
  }
- if(attempt>=6){_starting=NO;_status=@"系统尚未允许 PiP，保留前台高刷请求";[self publishStatus];DGDiagnostic(@"refresh.pip_unavailable",nil);return;}
+ if(attempt>=8){_starting=NO;_status=@"系统尚未允许 PiP，保留前台高刷请求";[self publishStatus];DGDiagnostic(@"refresh.pip_unavailable",[self startMetrics]);return;}
  __weak DGRefreshPiP *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weak tryStart:attempt+1 generation:generation];});
 }
 - (void)apply{
  BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];
- if(!enabled){_blocked=NO;[self stop];return;}
+ if(!enabled){_blocked=NO;_startAttempt=0;[self stop];return;}
  if(_video){[self stop];return;}
- if(_blocked||_starting||_stopping||_pip.pictureInPictureActive||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){[self publishStatus];return;}
+ if(_blocked||_starting||_stopping||_pip.pictureInPictureActive||_pip.pictureInPictureSuspended||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){[self publishStatus];return;}
  if(![AVPictureInPictureController isPictureInPictureSupported]){_status=@"设备不支持 PiP，保留前台高刷请求";[self publishStatus];return;}
  UIWindow *window=nil;for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)if([scene isKindOfClass:UIWindowScene.class]&&scene.activationState==UISceneActivationStateForegroundActive)for(UIWindow *candidate in ((UIWindowScene *)scene).windows)if(candidate.isKeyWindow){window=candidate;break;}
  if(!window||window.windowScene.screen.maximumFramesPerSecond<120){_status=@"等待支持高刷的前台窗口";[self publishStatus];return;}
  @try{if(!_pip){
-  _source=[[UIView alloc]initWithFrame:CGRectMake(MAX(0,(window.bounds.size.width-320)/2),window.safeAreaInsets.top+2,320,.1)];_source.backgroundColor=UIColor.clearColor;_source.alpha=.01;_source.userInteractionEnabled=NO;_source.accessibilityElementsHidden=YES;[window addSubview:_source];
-  _content=[AVPictureInPictureVideoCallViewController new];_content.preferredContentSize=CGSizeMake(320,.1);_content.view.backgroundColor=UIColor.clearColor;_content.view.opaque=NO;_content.view.userInteractionEnabled=NO;_content.view.clipsToBounds=YES;
+  CGFloat startHeight=_startAttempt?180:44;
+  _source=[[UIView alloc]initWithFrame:CGRectMake(MAX(0,(window.bounds.size.width-320)/2),window.safeAreaInsets.top+2,320,startHeight)];_source.backgroundColor=UIColor.clearColor;_source.alpha=1;_source.userInteractionEnabled=NO;_source.accessibilityElementsHidden=YES;[window addSubview:_source];
+  _content=[AVPictureInPictureVideoCallViewController new];_content.preferredContentSize=CGSizeMake(320,startHeight);_content.view.frame=CGRectMake(0,0,320,startHeight);_content.view.backgroundColor=UIColor.clearColor;_content.view.opaque=NO;_content.view.userInteractionEnabled=NO;_content.view.clipsToBounds=YES;
   _surface=[[DGRefreshSurface alloc]initWithFrame:_content.view.bounds];_surface.backgroundColor=UIColor.clearColor;_surface.opaque=NO;_surface.userInteractionEnabled=NO;_surface.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[_content.view addSubview:_surface];
   AVPictureInPictureControllerContentSource *source=[[AVPictureInPictureControllerContentSource alloc]initWithActiveVideoCallSourceView:_source contentViewController:_content];_pip=[[AVPictureInPictureController alloc]initWithContentSource:source];_pip.delegate=self;
  }}@catch(NSException *exception){[self cleanup];_blocked=YES;_status=@"系统未接受微型 PiP，保留前台高刷请求";[self publishStatus];DGDiagnostic(@"refresh.pip_rejected",exception.name);return;}
- _starting=YES;_status=nil;[self publishStatus];[self tryStart:0 generation:++_generation];
+ _starting=YES;_status=nil;[self publishStatus];NSUInteger generation=++_generation;__weak DGRefreshPiP *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weak tryStart:0 generation:generation];});
 }
+- (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)controller{if(controller==_pip)DGDiagnostic(@"refresh.pip_will_start",[self startMetrics]);}
+- (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)controller{if(controller==_pip)DGDiagnostic(@"refresh.pip_will_stop",[self startMetrics]);}
 - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)controller{
  if(controller!=_pip)return;if(_stopping||_video||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"]){[self stop];[controller stopPictureInPicture];return;}_starting=NO;_issued=YES;_status=nil;_content.preferredContentSize=CGSizeMake(320,.1);
- if(_link){[self publishStatus];return;}
- DGRefreshPiPClock *clock=[DGRefreshPiPClock new];clock.owner=self;_link=[CADisplayLink displayLinkWithTarget:clock selector:@selector(tick:)];_link.preferredFrameRateRange=CAFrameRateRangeDefault;_link.preferredFramesPerSecond=30;[_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+ [self startContentClock];
  DGDiagnostic(@"refresh.pip_started",@"route=VideoCall content_fps=30 preferred_height=0.1");
  [self publishStatus];
 }
@@ -101,7 +123,7 @@ NSNotificationName const DGRefreshPiPStatusChanged=@"DGRefreshPiPStatusChanged";
  if(controller!=_pip)return;BOOL requested=_stopping||_video||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];[self cleanup];if(!requested){_blocked=YES;_status=@"PiP 已被系统停止，关闭开关后可重试";[self publishStatus];}else [self apply];DGDiagnostic(@"refresh.pip_stopped",[NSString stringWithFormat:@"requested=%d",requested]);
 }
 - (void)pictureInPictureController:(AVPictureInPictureController *)controller failedToStartPictureInPictureWithError:(NSError *)error{
- if(controller!=_pip)return;BOOL cancelled=_stopping||_video||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];[self cleanup];if(cancelled)[self apply];else{_blocked=YES;_status=@"PiP 启动失败，保留前台高刷请求";[self publishStatus];}DGDiagnostic(@"refresh.pip_failed",[NSString stringWithFormat:@"code=%ld cancelled=%d",(long)error.code,cancelled]);
+ if(controller!=_pip)return;DGDiagnostic(@"refresh.pip_failed_state",[self startMetrics]);BOOL cancelled=_stopping||_video||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];[self cleanup];if(cancelled)[self apply];else{_blocked=YES;_status=@"PiP 启动失败，保留前台高刷请求";[self publishStatus];}DGDiagnostic(@"refresh.pip_failed",[NSString stringWithFormat:@"domain=%@ code=%ld cancelled=%d",error.domain,(long)error.code,cancelled]);
 }
 - (void)pictureInPictureController:(AVPictureInPictureController *)controller restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL))completionHandler{completionHandler(YES);}
 @end

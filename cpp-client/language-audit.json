@@ -1,18 +1,18 @@
 {
-  "version": "0.20.15",
+  "version": "0.20.16",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
   "standard": "C++20",
   "active_source_counts": {
-    ".cpp": 6,
-    ".hpp": 6,
+    ".cpp": 7,
+    ".hpp": 7,
     ".h": 23,
     ".mm": 39,
     ".js": 4
   },
   "compiled_translation_units": {
-    "C++20": 6,
+    "C++20": 7,
     "Objective-C++": 39,
     "Swift": 0
   },
@@ -26,7 +26,8 @@
     "ClientPolicy.cpp",
     "ChannelState.cpp",
     "ContrastMap.cpp",
-    "InteractionState.cpp"
+    "InteractionState.cpp",
+    "RenderBudget.cpp"
   ],
   "existing_pure_cpp_modules": [
     "Core.cpp",
@@ -37,11 +38,14 @@
     "restored index and position validation",
     "account confirmation classification",
     "hold speed tiers",
-    "portrait fill eligibility and source-to-viewport crop budget",
+    "portrait fill eligibility (crop limit reverted at user request)",
+    "animation lease deadlines, cancellation expiry and deferred-work eligibility",
+    "comment ordering",
+    "aspect-fit/fill sampling geometry",
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "wider per-line contrast and texture classification, temporal stabilization, hysteresis and feathered complementary masks",
+    "linear sRGB luminance, actual ink contrast, per-line texture hysteresis and feathered complementary masks",
     "gallery gesture state, incremental dragging, bounded edge-hold advancement, fixed center rail and spaced thumbnail geometry",
     "search first appearance, input/results state and back routing",
     "gallery display-awake eligibility"

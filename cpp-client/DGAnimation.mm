@@ -1,10 +1,16 @@
 #import "DGAnimation.h"
 #import "DGDiagnostics.h"
 #import "DGRefreshPiP.h"
+#include "RenderBudget.hpp"
+static douglass::RenderBudget renderBudget;
+uint64_t DGBeginAnimationPriority(NSTimeInterval duration){return renderBudget.begin(CACurrentMediaTime(),duration);}
+void DGEndAnimationPriority(uint64_t token){renderBudget.end(token);}
+BOOL DGAnimationPriorityActive(void){return renderBudget.active(CACurrentMediaTime());}
+void DGAfterAnimations(dispatch_block_t action){if(!action)return;if(DGAnimationPriorityActive()){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{DGAfterAnimations(action);});return;}action();}
 static NSArray *Points(){NSArray *points=[NSUserDefaults.standardUserDefaults arrayForKey:@"douglass.animation.points"];return points.count==4?points:@[@.16,@1,@.3,@1];}
 NSTimeInterval DGDuration(NSTimeInterval base){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.animation.speed"];return base/(speed>=.2&&speed<=4?speed:.8);}
 CAMediaTimingFunction *DGTiming(void){NSArray *p=Points();return [CAMediaTimingFunction functionWithControlPoints:[p[0]floatValue]:[p[1]floatValue]:[p[2]floatValue]:[p[3]floatValue]];}
-UIViewPropertyAnimator *DGAnimate(NSTimeInterval duration,void (^changes)(void),void (^done)(BOOL)){NSArray *p=Points();UICubicTimingParameters *timing=[[UICubicTimingParameters alloc]initWithControlPoint1:CGPointMake([p[0]doubleValue],[p[1]doubleValue]) controlPoint2:CGPointMake([p[2]doubleValue],[p[3]doubleValue])];UIViewPropertyAnimator *animator=[[UIViewPropertyAnimator alloc]initWithDuration:DGDuration(duration) timingParameters:timing];[animator addAnimations:changes];if(done)[animator addCompletion:^(UIViewAnimatingPosition position){done(position==UIViewAnimatingPositionEnd);}];[animator startAnimation];return animator;}
+UIViewPropertyAnimator *DGAnimate(NSTimeInterval duration,void (^changes)(void),void (^done)(BOOL)){NSArray *p=Points();UICubicTimingParameters *timing=[[UICubicTimingParameters alloc]initWithControlPoint1:CGPointMake([p[0]doubleValue],[p[1]doubleValue]) controlPoint2:CGPointMake([p[2]doubleValue],[p[3]doubleValue])];NSTimeInterval actual=DGDuration(duration);uint64_t priority=DGBeginAnimationPriority(actual);UIViewPropertyAnimator *animator=[[UIViewPropertyAnimator alloc]initWithDuration:actual timingParameters:timing];[animator addAnimations:changes];[animator addCompletion:^(UIViewAnimatingPosition position){DGEndAnimationPriority(priority);if(done)done(position==UIViewAnimatingPositionEnd);}];[animator startAnimation];return animator;}
 @interface DGCurveView:UIControl
 @property(nonatomic,copy) NSArray *points;
 @end

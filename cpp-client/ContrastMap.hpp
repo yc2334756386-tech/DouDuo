@@ -4,6 +4,8 @@
 #include <vector>
 
 namespace douglass {
+struct MediaRect {double x=0,y=0,width=0,height=0;};
+MediaRect fittedMedia(double sourceWidth,double sourceHeight,MediaRect viewport,bool fill) noexcept;
 // A small screen-space map shared by all visible comments, never a video-sized buffer.
 class ContrastMap {
 public:
@@ -14,8 +16,7 @@ private:
     double lineHeight_=0;
     std::vector<std::uint8_t> darkInk_;
     std::vector<float> light_,opacity_;
-    std::vector<std::uint32_t> integral_;
-    std::vector<std::uint64_t> squared_;
+    std::vector<double> integral_,squared_;
     std::vector<float> opacityIntegral_;
 };
 }

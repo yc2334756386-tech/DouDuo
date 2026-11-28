@@ -50,6 +50,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation,_warmGeneration,_feedRequest,_refreshFeedback;
     BOOL _pagingMotion,_cachedBootstrap,_manualRecommendationRefresh;
+    uint64_t _pagingPriority;
     NSHashTable<DGFeedCell *> *_departingCells;
     CADisplayLink *_pagingClock;
     CFTimeInterval _pagingStarted,_pagingPrevious,_pagingMaxGap,_pagingRelease;
@@ -112,7 +113,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(musicArtworkChanged:) name:@"DGMusicArtworkChanged" object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playbackPreferencesChanged) name:@"DGPlaybackQualityChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(filtersChanged) name:@"DGFiltersChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(accountChanged) name:@"DGAccountChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGMusicStateChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(verificationCompleted:) name:@"DGVerificationCompleted" object:nil];if(_staticFeed)[self updateEmpty:nil];else{[self restoreInterruptedPlayback];[self startWithCachedRecommendation];[self loadFeed:YES];[self loadProfile];}
 }
-- (void)dealloc{[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)dealloc{DGEndAnimationPriority(_pagingPriority);[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return _showingMessages?UIStatusBarStyleDefault:UIStatusBarStyleLightContent;}
 - (void)appearanceChanged{if(!self.isViewLoaded)return;self.view.backgroundColor=_showingMessages?UIColor.systemBackgroundColor:UIColor.blackColor;_bar.overrideUserInterfaceStyle=_showingMessages?UIUserInterfaceStyleUnspecified:UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self appearanceChanged];}
@@ -462,6 +463,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 }
 - (void)beginPaging {
  if(_pagingMotion)return;
+ _pagingPriority=DGBeginAnimationPriority(30);
  _pagingMotion=YES;++_warmGeneration;DGSuspendPrerolls();
  if(DGDiagnosticEnabled()){
   _pagingStarted=CACurrentMediaTime();_pagingPrevious=_pagingStarted;_pagingRelease=0;_pagingMaxGap=0;_pagingSamples=0;_pagingLongFrames=0;_pagingStartIndex=_current;
@@ -485,6 +487,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  _pagingPrevious=link.timestamp;
 }
 - (void)finishPaging {
+ DGEndAnimationPriority(_pagingPriority);_pagingPriority=0;
  if(_pagingMotion&&_pagingStarted>0){
   CFTimeInterval end=CACurrentMediaTime();CGFloat height=_collection.bounds.size.height;
   NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
@@ -522,10 +525,12 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
 - (void)warmAfterSettling {
  if(_inactive||!_foreground)return;
+ if(DGAnimationPriorityActive()){__weak DGFeed *weak=self;DGAfterAnimations(^{[weak warmAfterSettling];});return;}
  NSUInteger request=++_warmGeneration,generation=_generation;__weak DGFeed *weak=self;
  CFTimeInterval delay=MAX(.12,.8-(CACurrentMediaTime()-_lastBecameActive));
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
   DGFeed *self=weak;if(!self||request!=self->_warmGeneration||generation!=self->_generation||!self->_foreground||self->_inactive||!self->_visible||self->_showingMessages||self->_pagingMotion)return;
+  if(DGAnimationPriorityActive()){[self warmAfterSettling];return;}
   DGFeedCell *active=(DGFeedCell *)[self->_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:self->_current inSection:0]];
   BOOL photo=self->_current>=0&&self->_current<(NSInteger)self->_feed.works.size()&&self->_feed.works[self->_current].photo();
   if(!photo&&![active hasRenderedMedia])return;

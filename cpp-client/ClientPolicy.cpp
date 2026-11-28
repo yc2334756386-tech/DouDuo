@@ -23,13 +23,8 @@ double holdRate(double upward,double maximum) noexcept {
     if(upward<64)return 2.;
     return std::isfinite(maximum)&&maximum>=2&&maximum<=4?maximum:3.;
 }
-bool fillsPortrait(bool enabled,bool compact,bool photo,double width,double height,double viewportWidth,double viewportHeight) noexcept {
-    if(!enabled||compact||photo||!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=width||!std::isfinite(viewportWidth)||!std::isfinite(viewportHeight)||viewportWidth<=0||viewportHeight<=0)return false;
-    const double sourceRatio=width/height,viewportRatio=viewportWidth/viewportHeight;
-    if(!std::isfinite(sourceRatio)||!std::isfinite(viewportRatio)||sourceRatio<=0||viewportRatio<=0)return false;
-    // Aspect-fill may trim only a small margin: retain at least 88% of the source.
-    const double retained=std::min(sourceRatio/viewportRatio,viewportRatio/sourceRatio);
-    return retained>=.88;
+bool fillsPortrait(bool enabled,bool compact,bool photo,double width,double height) noexcept {
+    return enabled&&!compact&&!photo&&std::isfinite(width)&&std::isfinite(height)&&width>0&&height>width;
 }
 double photoScrubPosition(double current,double displacement,double stride,std::size_t count) noexcept {
     if(count==0)return 0;

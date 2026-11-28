@@ -27,6 +27,7 @@ struct Comment {
     std::int64_t likes = 0, replies = 0, timestamp = 0;
     bool liked = false;
 };
+void sortComments(std::vector<Comment> &comments,bool latest);
 class Feed {
 public:
     std::vector<Work> works;

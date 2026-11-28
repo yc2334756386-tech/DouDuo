@@ -2,12 +2,14 @@
 #import "DGCommon.h"
 #import "DGFeedCache.h"
 #import "DGDiagnostics.h"
+#import "DGAnimation.h"
 
 namespace {
 constexpr NSUInteger Limit=2*1024*1024;
 BOOL Consumed=NO,Restoring=NO;
+BOOL SaveQueued=NO;
 NSUInteger SaveGeneration=0;
-dispatch_queue_t SaveQueue(){static dispatch_queue_t queue;static dispatch_once_t once;dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.navigation-save",DISPATCH_QUEUE_SERIAL);});return queue;}
+dispatch_queue_t SaveQueue(){static dispatch_queue_t queue;static dispatch_once_t once;dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.navigation-save",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_UTILITY,0));});return queue;}
 NSURL *File(){return [[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"NavigationResume.json"];}
 void Present(UIViewController *host,NSArray *groups,NSUInteger index,DGBridge *bridge){
  if(index>=groups.count){Restoring=NO;return;}
@@ -27,6 +29,7 @@ void Present(UIViewController *host,NSArray *groups,NSUInteger index,DGBridge *b
 }
 void DGSaveNavigationResume(UIWindow *window){
  if(!window||Restoring||!Consumed)return;
+ if(DGAnimationPriorityActive()){if(!SaveQueued){SaveQueued=YES;__weak UIWindow *weak=window;DGAfterAnimations(^{SaveQueued=NO;DGSaveNavigationResume(weak);});}return;}
  NSMutableArray *groups=[NSMutableArray array];UIViewController *page=window.rootViewController.presentedViewController;
  while(page&&groups.count<3){
   NSArray *controllers=[page isKindOfClass:UINavigationController.class]?((UINavigationController *)page).viewControllers:@[page];

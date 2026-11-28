@@ -1,5 +1,6 @@
 #import "DGAmbient.h"
 #import "DGDiagnostics.h"
+#import "DGAnimation.h"
 #import <CoreImage/CoreImage.h>
 #import <QuartzCore/QuartzCore.h>
 #include "ContrastMap.hpp"
@@ -50,25 +51,22 @@ static UIImage *DGMaskImage(NSData *bytes,size_t width,size_t height){
  if(CGRectEqualToRect(region,_contrastRect)&&layer==_videoLayer)return;_contrastRect=region;_videoLayer=layer;[self resetContrast];
 }
 - (void)sample{
- NSInteger level=[self level];BOOL adaptive=_adaptive&&_transformReady&&_item&&_contrastRect.size.width>0&&_contrastRect.size.height>0;
- if(!_active||_busy||(level==4&&!adaptive)||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious)return;
+ NSInteger level=[self level];BOOL adaptive=_adaptive&&_transformReady&&(_item||_image.image)&&_contrastRect.size.width>0&&_contrastRect.size.height>0;
+ if(!_active||_busy||DGAnimationPriorityActive()||(level==4&&!adaptive)||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious)return;
  CIImage *input=nil;
  if(_output){CMTime time=[_output itemTimeForHostTime:CACurrentMediaTime()];if([_output hasNewPixelBufferForItemTime:time]){CVPixelBufferRef buffer=[_output copyPixelBufferForItemTime:time itemTimeForDisplay:NULL];if(buffer){input=[CIImage imageWithCVPixelBuffer:buffer];CVPixelBufferRelease(buffer);}}}
- else{UIImage *image=_image.image;if(image&&image!=_previousImage){_previousImage=image;if(image.CGImage)input=[CIImage imageWithCGImage:image.CGImage];}}
+ else{UIImage *image=_image.image;if(image&&(adaptive||image!=_previousImage)){_previousImage=image;if(image.CGImage)input=[CIImage imageWithCGImage:image.CGImage];}}
  if(!input)return;
- AVPlayerLayer *video=_videoLayer;CALayer *geometry=video.presentationLayer?:video,*destination=self.layer.presentationLayer?:self.layer;
- CGRect content=CGRectZero;CGSize source=_item.presentationSize;CGRect visibleBounds=geometry.bounds;
- if(video&&source.width>0&&source.height>0){
-  if([video.videoGravity isEqualToString:AVLayerVideoGravityResize])content=visibleBounds;
-  else{CGFloat sx=visibleBounds.size.width/source.width,sy=visibleBounds.size.height/source.height,scale=[video.videoGravity isEqualToString:AVLayerVideoGravityResizeAspectFill]?MAX(sx,sy):MIN(sx,sy);CGSize fitted=CGSizeMake(source.width*scale,source.height*scale);content=CGRectMake(CGRectGetMidX(visibleBounds)-fitted.width/2,CGRectGetMidY(visibleBounds)-fitted.height/2,fitted.width,fitted.height);}
- }
+ AVPlayerLayer *video=_item?_videoLayer:nil;CALayer *media=video?:_image.layer,*geometry=media.presentationLayer?:media,*destination=self.layer.presentationLayer?:self.layer;
+ CGRect content=video.videoRect;CGSize source=_item?_item.presentationSize:_image.image.size;CGRect visibleBounds=geometry.bounds;
+ if(CGRectIsEmpty(content)&&source.width>0&&source.height>0){BOOL fill=video?[video.videoGravity isEqualToString:AVLayerVideoGravityResizeAspectFill]:_image.contentMode==UIViewContentModeScaleAspectFill;auto rect=douglass::fittedMedia(source.width,source.height,{visibleBounds.origin.x,visibleBounds.origin.y,visibleBounds.size.width,visibleBounds.size.height},fill);content=CGRectMake(rect.x,rect.y,rect.width,rect.height);}
  CGRect videoRect=geometry?[geometry convertRect:content toLayer:destination]:CGRectZero,viewport=geometry?[geometry convertRect:visibleBounds toLayer:destination]:CGRectZero;
  if(CGRectIsEmpty(videoRect))adaptive=NO;
  BOOL average=level!=4&&CACurrentMediaTime()-_lastAmbient>=.6;if(!average&&!adaptive)return;if(average)_lastAmbient=CACurrentMediaTime();
- _busy=YES;NSUInteger generation=_generation;__weak DGAmbient *weak=self;CIImage *inputFrame=input;CGRect bounds=self.bounds,region=_contrastRect;CGAffineTransform transform=_trackTransform;NSArray *background=((CAGradientLayer *)_gradient.presentationLayer).colors?:_gradient.colors;background=background.copy;auto contrastMap=_contrastMap;CGFloat font=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(font<12||font>28)font=14;double lanePoints=font+12;
+ _busy=YES;CFTimeInterval captured=CACurrentMediaTime();NSUInteger generation=_generation;__weak DGAmbient *weak=self;CIImage *inputFrame=input;CGRect bounds=self.bounds,region=_contrastRect;CGAffineTransform transform=_trackTransform;NSArray *background=((CAGradientLayer *)_gradient.presentationLayer).colors?:_gradient.colors;background=background.copy;auto contrastMap=_contrastMap;CGFloat font=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(font<12||font>28)font=14;double lanePoints=font+12;
  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{@autoreleasepool{
   static CIContext *context;static dispatch_once_t once;dispatch_once(&once,^{context=[CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer:@NO,kCIContextWorkingColorSpace:NSNull.null,kCIContextCacheIntermediates:@NO}];});
-  CIImage *frame=[inputFrame imageByApplyingTransform:transform];CGRect extent=frame.extent;NSMutableArray *colors=nil;CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+  CIImage *frame=[inputFrame imageByApplyingTransform:transform];CGRect extent=frame.extent;NSMutableArray *colors=nil;CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
   if(average){
    CGFloat ratio=32/MAX(1,MAX(extent.size.width,extent.size.height));CIImage *small=[frame imageByApplyingTransform:CGAffineTransformMakeScale(ratio,ratio)];CGRect e=small.extent;colors=[NSMutableArray array];CGFloat gains[]={.78,.5,.3,.16,0};
    for(NSInteger part=0;part<2;part++){CGRect half=CGRectMake(e.origin.x,e.origin.y+(1-part)*e.size.height/2,e.size.width,e.size.height/2);CIFilter *filter=[CIFilter filterWithName:@"CIAreaAverage" withInputParameters:@{kCIInputImageKey:small,kCIInputExtentKey:[CIVector vectorWithCGRect:half]}];uint8_t rgba[4]={0};[context render:filter.outputImage toBitmap:rgba rowBytes:4 bounds:CGRectMake(0,0,1,1) format:kCIFormatRGBA8 colorSpace:space];CGFloat gain=gains[level];[colors addObject:(id)[UIColor colorWithRed:rgba[0]/255.0*gain green:rgba[1]/255.0*gain blue:rgba[2]/255.0*gain alpha:1].CGColor];}
@@ -84,11 +82,10 @@ static UIImage *DGMaskImage(NSData *bytes,size_t width,size_t height){
    CGRect roi=CGRectMake(region.origin.x,height-CGRectGetMaxY(region),region.size.width,region.size.height);CGFloat scale=MIN(1,128/MAX(1,region.size.width));size_t width=MAX(1,(size_t)ceil(region.size.width*scale)),rows=MAX(1,(size_t)ceil(region.size.height*scale));
    CIImage *cropped=[[[scene imageByCroppingToRect:roi] imageByApplyingTransform:CGAffineTransformMakeTranslation(-roi.origin.x,-roi.origin.y)] imageByApplyingTransform:CGAffineTransformMakeScale(scale,scale)];
    CGImageRef small=[context createCGImage:cropped fromRect:CGRectMake(0,0,width,rows) format:kCIFormatRGBA8 colorSpace:space];
-   if(small){NSMutableData *pixels=[NSMutableData dataWithLength:width*rows*4];CGContextRef bitmap=CGBitmapContextCreate(pixels.mutableBytes,width,rows,8,width*4,space,kCGBitmapByteOrder32Big|kCGImageAlphaPremultipliedLast);
-    if(bitmap){CGContextDrawImage(bitmap,CGRectMake(0,0,width,rows),small);CGContextRelease(bitmap);NSMutableData *whiteBytes=[NSMutableData dataWithLength:width*rows*4],*blackBytes=[NSMutableData dataWithLength:width*rows*4];contrastMap->makeMasks((const uint8_t *)pixels.bytes,width,rows,width*4,(uint8_t *)whiteBytes.mutableBytes,(uint8_t *)blackBytes.mutableBytes,lanePoints*scale);white=DGMaskImage(whiteBytes,width,rows);black=DGMaskImage(blackBytes,width,rows);}CGImageRelease(small);}
+   if(small){CFDataRef pixels=CGDataProviderCopyData(CGImageGetDataProvider(small));size_t stride=CGImageGetBytesPerRow(small);if(pixels&&stride>=width*4&&CFDataGetLength(pixels)>=(CFIndex)(stride*rows)){NSMutableData *whiteBytes=[NSMutableData dataWithLength:width*rows*4],*blackBytes=[NSMutableData dataWithLength:width*rows*4];contrastMap->makeMasks(CFDataGetBytePtr(pixels),width,rows,stride,(uint8_t *)whiteBytes.mutableBytes,(uint8_t *)blackBytes.mutableBytes,lanePoints*scale);white=DGMaskImage(whiteBytes,width,rows);black=DGMaskImage(blackBytes,width,rows);}if(pixels)CFRelease(pixels);CGImageRelease(small);}
   }
   CGColorSpaceRelease(space);
-  dispatch_async(dispatch_get_main_queue(),^{DGAmbient *self=weak;if(!self)return;self->_busy=NO;if(generation!=self->_generation||!self->_active)return;if(colors){self->_gradient.hidden=[self level]==4;[CATransaction begin];[CATransaction setAnimationDuration:.65];self->_gradient.colors=colors;[CATransaction commit];}if(white&&black&&self->_adaptive&&self.contrastReady)self.contrastReady(white,black);});
+  dispatch_async(dispatch_get_main_queue(),^{DGAmbient *self=weak;if(!self)return;self->_busy=NO;if(generation!=self->_generation||!self->_active||DGAnimationPriorityActive()||CACurrentMediaTime()-captured>.2)return;if(colors){self->_gradient.hidden=[self level]==4;[CATransaction begin];[CATransaction setAnimationDuration:.65];self->_gradient.colors=colors;[CATransaction commit];}if(white&&black&&self->_adaptive&&self.contrastReady)self.contrastReady(white,black);});
  }});
 }
 - (void)dealloc{[_timer invalidate];if(_output&&_item)[_item removeOutput:_output];[NSNotificationCenter.defaultCenter removeObserver:self];}

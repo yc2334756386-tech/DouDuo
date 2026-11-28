@@ -2,8 +2,17 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <array>
 
 namespace douglass {
+MediaRect fittedMedia(double sourceWidth,double sourceHeight,MediaRect viewport,bool fill) noexcept{
+    if(!std::isfinite(sourceWidth)||!std::isfinite(sourceHeight)||sourceWidth<=0||sourceHeight<=0||!std::isfinite(viewport.width)||!std::isfinite(viewport.height)||viewport.width<=0||viewport.height<=0)return {};
+    const double sx=viewport.width/sourceWidth,sy=viewport.height/sourceHeight,scale=fill?std::max(sx,sy):std::min(sx,sy),width=sourceWidth*scale,height=sourceHeight*scale;
+    return {viewport.x+(viewport.width-width)/2,viewport.y+(viewport.height-height)/2,width,height};
+}
+static const std::array<float,256> &linearComponents(){
+    static const auto values=[](){std::array<float,256> values{};for(std::size_t i=0;i<values.size();++i){const double encoded=i/255.;values[i]=static_cast<float>(encoded<=.04045?encoded/12.92:std::pow((encoded+.055)/1.055,2.4));}return values;}();return values;
+}
 void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size_t height,
                             std::size_t stride,std::uint8_t *white,std::uint8_t *black,double lineHeight) {
     if(!rgba||!white||!black||!width||!height||width>2048||height>2048||
@@ -13,10 +22,11 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
     const std::size_t pixels=width*height,pitch=width+1;
     if(fresh){width_=width;height_=height;lineHeight_=lineHeight;darkInk_.assign(pixels,0);light_.assign(pixels,0);opacity_.assign(pixels,0);}
     integral_.assign(pitch*(height+1),0);squared_.assign(pitch*(height+1),0);opacityIntegral_.assign(pitch*(height+1),0);
+    const auto &linear=linearComponents();
     for(std::size_t y=0;y<height;++y){
-        std::uint32_t row=0;std::uint64_t squareRow=0;
+        double row=0,squareRow=0;
         for(std::size_t x=0;x<width;++x){
-            const auto *p=rgba+y*stride+x*4;const unsigned light=(54u*p[0]+183u*p[1]+19u*p[2])>>8;row+=light;squareRow+=light*light;
+            const auto *p=rgba+y*stride+x*4;const double light=.2126*linear[p[0]]+.7152*linear[p[1]]+.0722*linear[p[2]];row+=light;squareRow+=light*light;
             integral_[(y+1)*pitch+x+1]=integral_[y*pitch+x+1]+row;
             squared_[(y+1)*pitch+x+1]=squared_[y*pitch+x+1]+squareRow;
         }
@@ -31,17 +41,16 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
             const std::size_t top=lineHeight?std::min(height-1,static_cast<std::size_t>(std::floor(std::floor(y/lineHeight)*lineHeight))):(y>radius?y-radius:0);
             const std::size_t bottom=lineHeight?std::min(height,static_cast<std::size_t>(std::ceil((std::floor(y/lineHeight)+1)*lineHeight))):std::min(height,y+radius+1);
             const auto sum=integral_[bottom*pitch+right]-integral_[top*pitch+right]-integral_[bottom*pitch+left]+integral_[top*pitch+left];
-            const float average=static_cast<float>(sum)/(255.f*(right-left)*(bottom-top));
+            const float average=static_cast<float>(sum/((right-left)*(bottom-top)));
             const auto squareSum=squared_[bottom*pitch+right]-squared_[top*pitch+right]-squared_[bottom*pitch+left]+squared_[top*pitch+left];
-            const float variance=std::max(0.f,static_cast<float>(squareSum)/(65025.f*(right-left)*(bottom-top))-average*average);
-            const bool busy=variance>.035f&&average<.86f;
+            const float variance=std::max(0.f,static_cast<float>(squareSum/((right-left)*(bottom-top)))-average*average);
             const std::size_t i=y*width+x;auto &dark=darkInk_[i];
-            if(fresh){light_[i]=average;dark=!busy&&average>=.55f;opacity_[i]=dark?1.f:0.f;}
-            else{
-                light_[i]=std::abs(average-light_[i])>.18f?average:light_[i]+(average-light_[i])*.65f;
-                if(busy)dark=0;else if(light_[i]>.60f)dark=1;else if(light_[i]<.48f)dark=0;
-                opacity_[i]+=((dark?1.f:0.f)-opacity_[i])*.5f;
-            }
+            if(fresh)light_[i]=average;else light_[i]=std::abs(average-light_[i])>.10f?average:light_[i]+(average-light_[i])*.75f;
+            // Compare the actual near-white and charcoal inks in linear sRGB.
+            // Texture widens the dead band; it never unconditionally forces white.
+            const float blackContrast=(light_[i]+.05f)/(.015f+.05f),whiteContrast=(.955f+.05f)/(light_[i]+.05f),ratio=blackContrast/whiteContrast,margin=variance>.06f?1.22f:1.13f;
+            if(fresh){dark=ratio>=1.f;opacity_[i]=dark?1.f:0.f;}
+            else{if(ratio>margin)dark=1;else if(ratio<1.f/margin)dark=0;opacity_[i]+=((dark?1.f:0.f)-opacity_[i])*.72f;}
             row+=opacity_[i];opacityIntegral_[(y+1)*pitch+x+1]=opacityIntegral_[y*pitch+x+1]+row;
         }
     }

@@ -2,6 +2,16 @@
 #import "DGCommon.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import "DGDiagnostics.h"
+@interface DGTransitionClock:NSObject
+@property(nonatomic,strong) CADisplayLink *link;
+@property(nonatomic) CFTimeInterval last,maxGap;
+@property(nonatomic) NSUInteger frames,longFrames;
+- (void)tick:(CADisplayLink *)link;
+@end
+@implementation DGTransitionClock
+- (void)tick:(CADisplayLink *)link{if(_last){CFTimeInterval gap=link.timestamp-_last,nominal=link.targetTimestamp-link.timestamp;_maxGap=MAX(_maxGap,gap);if(nominal>0&&gap>nominal*1.65)++_longFrames;}++_frames;_last=link.timestamp;}
+@end
 @interface DGPagePresentation:UIPresentationController
 @end
 @implementation DGPagePresentation
@@ -46,6 +56,15 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
 @implementation DGNavigationController{
  UIVisualEffectView *_topBlur;DGNavigationFade *_fade;UIScreenEdgePanGestureRecognizer *_rootBack;
 }
+- (void)trackTransition:(uint64_t)priority started:(CFTimeInterval)started operation:(NSString *)operation{
+ id<UIViewControllerTransitionCoordinator> transition=self.transitionCoordinator;if(!transition){DGEndAnimationPriority(priority);return;}
+ DGTransitionClock *probe=nil;if(DGDiagnosticEnabled()){probe=[DGTransitionClock new];probe.link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];DGApplyDisplayLinkRate(probe.link,self.view);[probe.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];DGDiagnostic(@"transition.prepared",[NSString stringWithFormat:@"operation=%@ preparation_ms=%.1f",operation,(CACurrentMediaTime()-started)*1000]);}
+ BOOL registered=[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){DGEndAnimationPriority(priority);[probe.link invalidate];probe.link=nil;if(probe)DGDiagnostic(@"transition.finished",[NSString stringWithFormat:@"operation=%@ elapsed_ms=%.1f frames=%lu max_gap_ms=%.1f long_frames=%lu cancelled=%d",operation,(CACurrentMediaTime()-started)*1000,(unsigned long)probe.frames,probe.maxGap*1000,(unsigned long)probe.longFrames,context.isCancelled]);}];
+ if(!registered){DGEndAnimationPriority(priority);[probe.link invalidate];probe.link=nil;}else if(probe){__weak DGTransitionClock *weak=probe;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,10*NSEC_PER_SEC),dispatch_get_main_queue(),^{DGTransitionClock *clock=weak;[clock.link invalidate];clock.link=nil;});}
+}
+- (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated{CFTimeInterval start=CACurrentMediaTime();uint64_t priority=animated?DGBeginAnimationPriority(3):0;[super pushViewController:controller animated:animated];if(priority)[self trackTransition:priority started:start operation:@"push"];}
+- (UIViewController *)popViewControllerAnimated:(BOOL)animated{CFTimeInterval start=CACurrentMediaTime();uint64_t priority=animated?DGBeginAnimationPriority(3):0;UIViewController *page=[super popViewControllerAnimated:animated];if(priority)[self trackTransition:priority started:start operation:@"pop"];return page;}
+- (NSArray<UIViewController *> *)popToViewController:(UIViewController *)controller animated:(BOOL)animated{CFTimeInterval start=CACurrentMediaTime();uint64_t priority=animated?DGBeginAnimationPriority(3):0;NSArray *pages=[super popToViewController:controller animated:animated];if(priority)[self trackTransition:priority started:start operation:@"pop_to"];return pages;}
 - (void)viewDidLoad{
  [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;self.navigationBar.tintColor=UIColor.labelColor;self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
  _rootBack=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:self action:@selector(rootBack:)];_rootBack.edges=UIRectEdgeLeft;_rootBack.delegate=self;[self.view addGestureRecognizer:_rootBack];

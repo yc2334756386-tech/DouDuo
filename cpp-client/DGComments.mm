@@ -1,7 +1,6 @@
 #import "DGComments.h"
 #include <unordered_map>
 static UIImage *DGCommentEmojiPlaceholder(){static UIImage *image;static dispatch_once_t once;dispatch_once(&once,^{image=[[[UIGraphicsImageRenderer alloc]initWithSize:CGSizeMake(21,21)]imageWithActions:^(UIGraphicsImageRendererContext *context){}];});return image;}
-static void DGSortComments(std::vector<Comment> &comments,bool latest){std::stable_sort(comments.begin(),comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});}
 
 @interface DGCommentImage : DGImage
 @property(nonatomic, copy) NSString *sourceURL;
@@ -272,7 +271,7 @@ namespace { struct DGReplyState {
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
 - (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
 - (void)sortLoaded{
-    DGSortComments(_comments,_sort.selectedSegmentIndex==1);
+    douglass::sortComments(_comments,_sort.selectedSegmentIndex==1);
 }
 - (void)sortChanged{[self sortLoaded];[_table reloadData];[_table setContentOffset:CGPointZero animated:NO];_savedOffset=CGPointZero;}
 - (void)focusComment:(NSString *)identifier parent:(NSString *)parent {
@@ -315,7 +314,7 @@ namespace { struct DGReplyState {
         std::size_t previousCount=self->_comments.size();std::vector<Comment> incoming;
         for(id value in Array(result[@"items"])) { if(![value isKindOfClass:NSDictionary.class])continue;
             Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)incoming.emplace_back(std::move(comment)); }
-        DGSortComments(incoming,self->_sort.selectedSegmentIndex==1);for(auto &comment:incoming)self->_comments.emplace_back(std::move(comment));
+        douglass::sortComments(incoming,self->_sort.selectedSegmentIndex==1);for(auto &comment:incoming)self->_comments.emplace_back(std::move(comment));
         self->_cursor=[result[@"cursor"] description]?:@"0"; self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
         self->_empty.text=self->_comments.empty()?@"还没有评论":@"";
         long long total=Number(result[@"total"]); self->_titleLabel.text=total>0?[NSString stringWithFormat:@"评论 %@",Text(douglass::compact(total))]:(self->_parent.length?@"回复":@"评论");

@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#import "DGAnimation.h"
 void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInterval last=0;CFTimeInterval now=CACurrentMediaTime();if(now-last<.08)return;last=now;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];});}
 @implementation DGImage {
     NSURLSessionDataTask *_task;
@@ -24,6 +25,11 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 }
 - (void)layoutSubviews{[super layoutSubviews];_loadingSpinner.center=CGPointMake(self.bounds.size.width/2,self.bounds.size.height/2);_failureLabel.text=self.bounds.size.width<60?@"!":@"加载失败";_failureLabel.frame=CGRectMake(4,(self.bounds.size.height-22)/2,MAX(0,self.bounds.size.width-8),22);}
 - (void)didMoveToWindow{[super didMoveToWindow];[self updateLoadingState];}
+- (void)commitImage:(UIImage *)image source:(NSString *)url generation:(NSUInteger)load{
+    if(load!=_loadGeneration||![_source isEqualToString:url])return;
+    if(DGAnimationPriorityActive()){__weak DGImage *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weak commitImage:image source:url generation:load];});return;}
+    _task=nil;_loading=NO;_loadFailed=image==nil;self.image=image?:self.placeholderImage;[self updateLoadingState];if(image&&self.imageReady)self.imageReady(image);
+}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
     dispatch_once(&once, ^{ cache = [NSCache new]; cache.totalCostLimit = 16 * 1024 * 1024; });
@@ -37,13 +43,14 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached;if(self.imageReady)self.imageReady(cached); return; }
+    if(maxPixels>480){UIImage *preview=[DGImage.cache objectForKey:[NSString stringWithFormat:@"%@|480",url]];if(preview)self.image=preview;}
     NSURL *address = [NSURL URLWithString:url];
     if (!address){_loadFailed=YES;[self updateLoadingState];return;}
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:address cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:20];
     [request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     __weak DGImage *weakSelf = self;
-    void (^finish)(UIImage *)=^(UIImage *image){dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weakSelf;if(!self||load!=self->_loadGeneration||![self->_source isEqualToString:url])return;self->_task=nil;self->_loading=NO;self->_loadFailed=image==nil;self.image=image?:self.placeholderImage;[self updateLoadingState];if(image&&self.imageReady)self.imageReady(image);});};
+    void (^finish)(UIImage *)=^(UIImage *image){dispatch_async(dispatch_get_main_queue(),^{[weakSelf commitImage:image source:url generation:load];});};
     _loading=YES;[self updateLoadingState];
     _task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (!data.length || error||([response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode>=400)){finish(nil);return;}
@@ -53,6 +60,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
             (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
 
             (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform:@YES,
+            (__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES,
             (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(maxPixels)});
         UIImage *image = thumbnail ? [UIImage imageWithCGImage:thumbnail] : nil;
         size_t frames=CGImageSourceGetCount(source);
@@ -61,7 +69,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
             size_t stride=MAX((size_t)1,(frames+11)/12);
             for(size_t index=0;index<frames;index+=stride){
                 CGImageRef frame=CGImageSourceCreateThumbnailAtIndex(source,index,(__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
-(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(MIN(maxPixels,(NSUInteger)320))});
+(__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES,(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(MIN(maxPixels,(NSUInteger)320))});
                 if(!frame)continue;[animation addObject:[UIImage imageWithCGImage:frame]];CGImageRelease(frame);
                 NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,index,NULL));
                 NSDictionary *gif=properties[(__bridge NSString *)kCGImagePropertyGIFDictionary];

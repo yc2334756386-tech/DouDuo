@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.20.15
+抖音极简版 / DouGlass 0.20.16
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -26,3 +26,12 @@ https://github.com/Yoroin/GlobalRefresh-PiP
 Reference revision: 7e8f8d6eda86794ee9daebed171d3ca53530e893
 Reimplemented in Objective-C++ using public AVKit VideoCall content APIs.
 No source from this project is compiled as Swift in this application.
+
+Adaptive contrast research references (no upstream source files are vendored):
+Material Color Utilities — Google LLC, Apache-2.0
+https://github.com/material-foundation/material-color-utilities
+TinyColor — Brian Grinstead, MIT
+https://github.com/bgrins/TinyColor
+BackgroundCheck — Kenneth Cachia, MIT
+https://github.com/kennethcachia/background-check
+Linear-sRGB contrast and local texture concepts are independently implemented in C++.

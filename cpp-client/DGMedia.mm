@@ -203,7 +203,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  [self setNeedsLayout];[self layoutIfNeeded];
 }
 - (void)applyVideoGravity{
- CGSize size=_player.currentItem.presentationSize,viewport=_playerLayer.bounds.size;BOOL fill=douglass::fillsPortrait(_fill,_compact,_work.photo(),size.width,size.height,viewport.width,viewport.height);
+ CGSize size=_player.currentItem.presentationSize;BOOL fill=douglass::fillsPortrait(_fill,_compact,_work.photo(),size.width,size.height);
  NSString *gravity=fill?AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;if(![_playerLayer.videoGravity isEqualToString:gravity])_playerLayer.videoGravity=gravity;
  _cover.contentMode=fill?UIViewContentModeScaleAspectFill:UIViewContentModeScaleAspectFit;
 }
