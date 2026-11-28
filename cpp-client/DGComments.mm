@@ -1,5 +1,6 @@
 #import "DGComments.h"
 #include <unordered_map>
+#include "InteractionState.hpp"
 static UIImage *DGCommentEmojiPlaceholder(){static UIImage *image;static dispatch_once_t once;dispatch_once(&once,^{image=[[[UIGraphicsImageRenderer alloc]initWithSize:CGSizeMake(21,21)]imageWithActions:^(UIGraphicsImageRendererContext *context){}];});return image;}
 
 @interface DGCommentImage : DGImage
@@ -217,6 +218,7 @@ namespace { struct DGReplyState {
     UIButton *_close,*_footer;
     UITableView *_table;
     BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
+    BOOL _previewOpen;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
     std::vector<Comment> _comments;
     std::unordered_set<std::string> _ids;
     std::unordered_map<std::string,DGReplyState> _replyStates;
@@ -270,6 +272,23 @@ namespace { struct DGReplyState {
 - (void)dragHandle:(UIPanGestureRecognizer *)gesture{CGFloat y=MAX(0,[gesture translationInView:self.view.superview.superview].y);if(gesture.state==UIGestureRecognizerStateChanged&&self.dragAction)self.dragAction(y,0);if(gesture.state==UIGestureRecognizerStateEnded&&self.dragAction)self.dragAction(y,(y>70||[gesture velocityInView:self.view].y>650)?1:2);if((gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)&&self.dragAction)self.dragAction(y,2);}
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
 - (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
+- (void)capturePreviewPosition{
+ NSIndexPath *path=[[_table.indexPathsForVisibleRows sortedArrayUsingSelector:@selector(compare:)]firstObject];std::string parent,row;CGFloat inset=0;
+ if(path&&path.section<(NSInteger)_comments.size()){parent=_comments[path.section].id;row=parent;if(path.row>0){auto found=_replyStates.find(parent);if(found!=_replyStates.end())row=(std::size_t)path.row<=found->second.items.size()?found->second.items[path.row-1].id:"#footer";}inset=_table.contentOffset.y-CGRectGetMinY([_table rectForRowAtIndexPath:path]);}
+ _previewPosition.capture(std::move(parent),std::move(row),inset,_table.contentOffset.y);[_table setContentOffset:_table.contentOffset animated:NO];
+}
+- (void)restorePreviewPosition{
+ if(!_previewPosition.valid())return;[_table layoutIfNeeded];NSInteger section=[self indexOfComment:Text(_previewPosition.parent())],row=0;BOOL found=section!=NSNotFound;
+ if(found&&_previewPosition.row()!=_previewPosition.parent()){found=NO;auto state=_replyStates.find(_previewPosition.parent());if(state!=_replyStates.end()&&state->second.expanded){if(_previewPosition.row()=="#footer"){row=state->second.items.size()+1;found=YES;}else for(std::size_t i=0;i<state->second.items.size();++i)if(state->second.items[i].id==_previewPosition.row()){row=i+1;found=YES;break;}}}
+ found=found&&row<[_table numberOfRowsInSection:section];CGFloat y=found?CGRectGetMinY([_table rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:section]]):0,minimum=-_table.adjustedContentInset.top,maximum=MAX(minimum,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);double target=_previewPosition.offset(y,found,minimum,maximum);if(fabs(target-_table.contentOffset.y)>.5)[_table setContentOffset:CGPointMake(0,target) animated:NO];_savedOffset=_table.contentOffset;_remembered=YES;
+}
+- (BOOL)deferPreviewUpdate:(NSString *)key action:(dispatch_block_t)action{if(!_previewOpen)return NO;if(!_previewUpdates)_previewUpdates=[NSMutableDictionary dictionary];_previewUpdates[key]=[action copy];return YES;}
+- (void)previewClosed{
+ _previewOpen=NO;_table.scrollEnabled=YES;[self restorePreviewPosition];NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();[self restorePreviewPosition];
+}
+- (void)openPreview:(NSString *)url source:(UIImageView *)source{
+ if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;}
+}
 - (void)sortLoaded{
     douglass::sortComments(_comments,_sort.selectedSegmentIndex==1);
 }
@@ -302,12 +321,17 @@ namespace { struct DGReplyState {
  [self finishFocus:nil];
 }
 - (void)loadMore {
-    if(_loading||!_more)return; _loading=YES; _failed=NO;
+    if(_previewOpen||_loading||!_more)return; _loading=YES; _failed=NO;
     [_footer setTitle:@"正在读取评论…" forState:UIControlStateNormal]; _footer.enabled=NO;
     if(_comments.empty())_empty.text=@"正在读取评论"; NSString *oldCursor=_cursor.copy;
     __weak DGComments *weakSelf=self;
     [_bridge request:_parent.length?@"replies":@"comments" parameters:@{@"id":_workID,@"parent":_parent?:@"",@"cursor":_cursor} completion:^(NSDictionary *result,NSString *error) {
-        DGComments *self=weakSelf; if(!self)return;
+        [weakSelf applyCommentPage:result error:error cursor:oldCursor];
+    }];
+}
+- (void)applyCommentPage:(NSDictionary *)result error:(NSString *)error cursor:(NSString *)oldCursor{
+    __weak DGComments *weak=self;if([self deferPreviewUpdate:@"comments" action:^{[weak applyCommentPage:result error:error cursor:oldCursor];}])return;
+
         if(error) {self->_loading=NO; self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
             [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES;[self advanceFocus];return; }
         NSIndexPath *anchor=self->_table.indexPathsForVisibleRows.firstObject;NSString *anchorID=anchor&&anchor.section<(NSInteger)self->_comments.size()?Text(self->_comments[anchor.section].id):@"";CGFloat anchorOffset=anchor?self->_table.contentOffset.y-CGRectGetMinY([self->_table rectForRowAtIndexPath:anchor]):0;
@@ -322,7 +346,6 @@ namespace { struct DGReplyState {
         if(self->_comments.size()>previousCount){NSIndexSet *sections=[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(previousCount,self->_comments.size()-previousCount)];[UIView performWithoutAnimation:^{if(!previousCount)[self->_table reloadData];else[self->_table insertSections:sections withRowAnimation:UITableViewRowAnimationNone];[self->_table layoutIfNeeded];}];}
         NSInteger section=[self indexOfComment:anchorID];if(section!=NSNotFound&&anchor.row<[self->_table numberOfRowsInSection:section]){NSIndexPath *path=[NSIndexPath indexPathForRow:anchor.row inSection:section];CGFloat y=CGRectGetMinY([self->_table rectForRowAtIndexPath:path])+anchorOffset;if(fabs(y-self->_table.contentOffset.y)>.5)[self->_table setContentOffset:CGPointMake(0,y) animated:NO];if(self->_remembered)self->_savedOffset=self->_table.contentOffset;}
         self->_loading=NO;[self advanceFocus];
-    }];
 }
 - (NSInteger)indexOfComment:(NSString *)identifier {
     std::string key=String(identifier); for(std::size_t i=0;i<_comments.size();++i)if(_comments[i].id==key)return(NSInteger)i; return NSNotFound;
@@ -345,13 +368,17 @@ namespace { struct DGReplyState {
     state.loading=true; state.failed=false; state.expanded=true; NSString *cursor=Text(state.cursor); [self reloadThread:identifier];
     __weak DGComments *weakSelf=self;
     [_bridge request:@"replies" parameters:@{@"id":_workID,@"parent":identifier,@"cursor":cursor} completion:^(NSDictionary *result,NSString *error) {
-        DGComments *self=weakSelf; if(!self)return; DGReplyState &state=self->_replyStates[key]; state.loading=false;
+        [weakSelf applyReplyPage:result error:error parent:identifier cursor:cursor];
+    }];
+}
+- (void)applyReplyPage:(NSDictionary *)result error:(NSString *)error parent:(NSString *)identifier cursor:(NSString *)cursor{
+    __weak DGComments *weak=self;if([self deferPreviewUpdate:[@"reply:" stringByAppendingString:identifier] action:^{[weak applyReplyPage:result error:error parent:identifier cursor:cursor];}])return;std::string key=String(identifier);
+ DGReplyState &state=self->_replyStates[key]; state.loading=false;
         if(error) {state.failed=true;[self reloadThread:identifier];DGToast(self,error);[self advanceFocus];return;}
         state.loaded=true;
         for(id value in Array(result[@"items"])) {if(![value isKindOfClass:NSDictionary.class])continue;
             Comment reply=ReadComment(value); if(!reply.id.empty()&&state.ids.insert(reply.id).second){state.authors[reply.id]=reply.author;state.items.emplace_back(std::move(reply));}}
         state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];[self advanceFocus];
-    }];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return(NSInteger)_comments.size();}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -380,7 +407,7 @@ namespace { struct DGReplyState {
     NSString *sec=Text(comment.authorID),*name=Text(comment.author);
     cell.profileAction=^{DGComments *self=weakSelf;if(!self)return;if(!sec.length){DGToast(self,@"平台未提供该用户的主页标识");return;}if(self.profileAction)self.profileAction(sec,name);};
     cell.replyAction=^{[weakSelf toggleReplies:parentID];};
-    cell.openImageAction=^(NSString *url,UIImageView *source){DGComments *self=weakSelf;if(self)DGShowImage(self,url,source);};
+    cell.openImageAction=^(NSString *url,UIImageView *source){[weakSelf openPreview:url source:source];};
     cell.saveImageAction=^(NSString *url){DGComments *self=weakSelf;if(self)DGConfirmImageSave(self,url);};
     cell.copyAction=^(NSString *text){DGComments *self=weakSelf;if(self)DGConfirmTextCopy(self,text,@"复制这条评论？",@"评论已复制");};
     return cell;

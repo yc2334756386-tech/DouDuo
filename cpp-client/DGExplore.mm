@@ -125,7 +125,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     DGImage *_avatar;UILabel *_name,*_signature,*_stats,*_context;UISegmentedControl *_tabs;UIButton *_followingButton,*_play,*_collectMusic;BOOL _musicCollectBusy,_refreshingMusicID;
     UIVisualEffectView *_musicControls;UISearchBar *_search;UIRefreshControl *_refresh;
     UISegmentedControl *_searchTabs;UIButton *_webSearch,*_followUser,*_blockUser;UILabel *_searchHint;UIViewController *_searchPage;
-    NSInteger _searchKind;BOOL _relationshipBusy,_webImportMode;NSString *_pendingWorkID;
+    NSInteger _searchKind;BOOL _relationshipBusy,_webImportMode;
     DGSearchAssist *_assist;CGFloat _keyboardTop;douglass::SearchFlow _searchFlow;
     UIVisualEffectView *_locateGlass;UIButton *_locateButton;BOOL _locating;
     UISearchBar *_librarySearch;NSString *_libraryQuery;NSInteger _libraryPages;
@@ -207,8 +207,9 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     id<UIViewControllerTransitionCoordinator> transition=self.transitionCoordinator;
     if(animated&&_zoomPlayer&&[transition viewControllerForKey:UITransitionContextFromViewControllerKey]==_zoomPlayer){
         [self sourceForReturningWork:DGCurrentWorkID(_zoomPlayer)];
+        __weak UIViewController *returning=_zoomPlayer;
         [transition animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){self->_table.transform=CGAffineTransformIdentity;}
-                                  completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled)self->_zoomPlayer=nil;}];
+                                  completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled&&self->_zoomPlayer==returning)self->_zoomPlayer=nil;}];
     }else _table.transform=CGAffineTransformIdentity;
     if(_mode==DGExploreMusic)[self updateMusicPlayback];
     if(_mode==DGExploreSearch)[self updateSearchBackButton];else if(self.navigationController.viewControllers.firstObject==self)self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
@@ -222,9 +223,10 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  [super viewWillDisappear:animated];
  id<UIViewControllerTransitionCoordinator> transition=self.transitionCoordinator;
  if(!animated||!_zoomPlayer||[transition viewControllerForKey:UITransitionContextToViewControllerKey]!=_zoomPlayer)return;
+ __weak UIViewController *entering=_zoomPlayer;
  [transition animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){
   self->_table.transform=CGAffineTransformMakeScale(.975,.975);
- } completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(context.isCancelled)self->_table.transform=CGAffineTransformIdentity;}];
+ } completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(context.isCancelled&&self->_zoomPlayer==entering)self->_table.transform=CGAffineTransformIdentity;}];
 }
 - (void)viewDidDisappear:(BOOL)animated{[super viewDidDisappear:animated];if(UIApplication.sharedApplication.applicationState==UIApplicationStateActive)DGMusicStopOwned(self);}
 - (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];if(_audioEnd)[NSNotificationCenter.defaultCenter removeObserver:_audioEnd];}
@@ -554,13 +556,9 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)openWork:(NSInteger)index {
  NSArray *works=_displayRecords?:@[];if(index<0||index>=(NSInteger)works.count)return;
- if(self.navigationController.transitionCoordinator){
-  id<UIViewControllerTransitionCoordinator> transition=self.navigationController.transitionCoordinator;
-  if([transition viewControllerForKey:UITransitionContextToViewControllerKey]==self){_pendingWorkID=DGValue(works[index][@"id"]);__weak DGExplore *weak=self;[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){DGExplore *self=weak;if(!self||context.isCancelled||!self->_pendingWorkID.length)return;NSString *identifier=self->_pendingWorkID;self->_pendingWorkID=nil;dispatch_async(dispatch_get_main_queue(),^{if(self.navigationController.topViewController!=self)return;NSUInteger next=[self->_displayRecords indexOfObjectPassingTest:^BOOL(NSDictionary *record,NSUInteger i,BOOL *stop){return [DGValue(record[@"id"])isEqualToString:identifier];}];if(next!=NSNotFound)[self openWork:next];});}];}return;
- }
  if(self.navigationController&&self.navigationController.topViewController!=self)return;
  DGDiagnosticMemory(@"explore.open_work");[_librarySearch resignFirstResponder];DGMusicStop();
- UIViewController *player=DGMakeWorkPlayer(works,index,_bridge);
+ CFTimeInterval preparing=CACurrentMediaTime();UIViewController *player=DGMakeWorkPlayer(works,index,_bridge);DGDiagnostic(@"explore.work_prepared",[NSString stringWithFormat:@"records=%lu selected=%ld ms=%.1f lazy=1",(unsigned long)works.count,(long)index,(CACurrentMediaTime()-preparing)*1000]);
  if(!self.navigationController){player.modalPresentationStyle=UIModalPresentationFullScreen;[self presentViewController:player animated:YES completion:nil];return;}
  NSString *identifier=DGValue(works[index][@"id"]);__weak DGExplore *weak=self;
  if(!UIAccessibilityIsReduceMotionEnabled()){

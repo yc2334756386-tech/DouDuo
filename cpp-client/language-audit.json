@@ -1,5 +1,5 @@
 {
-  "version": "0.20.16",
+  "version": "0.20.17",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
@@ -8,12 +8,12 @@
     ".cpp": 7,
     ".hpp": 7,
     ".h": 23,
-    ".mm": 39,
+    ".mm": 40,
     ".js": 4
   },
   "compiled_translation_units": {
     "C++20": 7,
-    "Objective-C++": 39,
+    "Objective-C++": 40,
     "Swift": 0
   },
   "runtime_webkit_scripts": [
@@ -41,6 +41,9 @@
     "portrait fill eligibility (crop limit reverted at user request)",
     "animation lease deadlines, cancellation expiry and deferred-work eligibility",
     "comment ordering",
+    "comment/reply reading anchor identity and offset restoration",
+    "image preview double-tap zoom policy and bounded zoom geometry",
+    "lazy work model materialization flag",
     "aspect-fit/fill sampling geometry",
     "following state and author matching",
     "statistics parsing and validation",

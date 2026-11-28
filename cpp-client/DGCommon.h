@@ -3,7 +3,6 @@
 #import <AVFoundation/AVFoundation.h>
 #import <ImageIO/ImageIO.h>
 #import <Photos/Photos.h>
-#import <QuickLook/QuickLook.h>
 #import "DGBridge.h"
 #import "DGSession.h"
 #include "Core.hpp"
@@ -142,6 +141,7 @@ AVPlayer *DGMusicPlayer(void);
 BOOL DGMusicMatches(NSString *identifier);
 NSString *DGCurrentMusicID(void);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
+BOOL DGShowImageWithCompletion(UIViewController *host,NSString *url,UIImageView *source,dispatch_block_t completion);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);
 NSString *DGCurrentWorkID(UIViewController *player);

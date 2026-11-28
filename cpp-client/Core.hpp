@@ -15,6 +15,7 @@ struct Work {
     bool followStatusKnown = false;
     bool liked = false, collected = false;
     bool isAd = false, isLive = false;
+    bool materialized = true;
     double duration = 0;
     bool photo() const noexcept { return !images.empty(); }
     bool playable() const noexcept { return !id.empty() && (photo() || !play.empty()); }

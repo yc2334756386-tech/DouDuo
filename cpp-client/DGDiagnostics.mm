@@ -72,7 +72,8 @@ void DGDiagnosticEnable(BOOL enabled) {
     bool previous=Enabled.exchange(enabled,std::memory_order_relaxed);
     if(previous==enabled)return;
     if(enabled)PrepareExceptionRecord();else if(ExceptionFile>=0){close(ExceptionFile);ExceptionFile=-1;}
-    NSDate *when=NSDate.date;dispatch_async(LogQueue(),^{Append(enabled?@"logging.enabled":@"logging.disabled",when);});
+    NSString *event=enabled?[NSString stringWithFormat:@"logging.enabled version=%@ build=%@",NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"],NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"]]:@"logging.disabled";
+    NSDate *when=NSDate.date;dispatch_async(LogQueue(),^{Append(event,when);});
 }
 BOOL DGDiagnosticEnabled(void){return Enabled.load(std::memory_order_relaxed);}
 void DGDiagnostic(NSString *event,NSString *metrics) {

@@ -1,6 +1,7 @@
 #include "InteractionState.hpp"
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace douglass {
 double GalleryScrubber::bounded(double value) const noexcept{
@@ -54,5 +55,21 @@ SearchBack SearchFlow::back() noexcept{
 }
 bool keepGalleryAwake(bool appActive,bool visible,bool gallery,bool inactive) noexcept{
     return appActive&&visible&&gallery&&!inactive;
+}
+void ReadingPosition::capture(std::string parent,std::string row,double inset,double fallback){
+    parent_=std::move(parent);row_=std::move(row);inset_=std::isfinite(inset)?inset:0;fallback_=std::isfinite(fallback)?fallback:0;valid_=true;
+}
+double ReadingPosition::offset(double rowTop,bool found,double minimum,double maximum) const noexcept{
+    if(!std::isfinite(minimum))minimum=0;if(!std::isfinite(maximum)||maximum<minimum)maximum=minimum;
+    const double result=found&&std::isfinite(rowTop)?rowTop+inset_:fallback_;
+    return std::clamp(std::isfinite(result)?result:minimum,minimum,maximum);
+}
+double previewDoubleTapScale(double current) noexcept{return std::isfinite(current)&&current>1.05?1.:2.5;}
+ZoomRegion previewZoomRegion(double width,double height,double x,double y,double scale) noexcept{
+    if(!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0)return {};
+    if(!std::isfinite(scale))scale=1;scale=std::clamp(scale,1.,4.);
+    const double w=width/scale,h=height/scale;
+    x=std::isfinite(x)?x:width/2;y=std::isfinite(y)?y:height/2;
+    return {std::clamp(x-w/2,0.,width-w),std::clamp(y-h/2,0.,height-h),w,h};
 }
 }

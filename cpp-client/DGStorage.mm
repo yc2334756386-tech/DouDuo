@@ -102,32 +102,3 @@ void DGConfirmTextCopy(UIViewController *host,NSString *text,NSString *title,NSS
 void DGConfirmCopy(UIViewController *host,NSString *text){DGConfirmTextCopy(host,text,@"复制作品文案？",@"文案已复制");}
 void DGConfirmAvatarSave(UIViewController *host,NSString *url){if(!host||host.presentedViewController||!url.length)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"保存用户头像？" message:@"将这张头像添加到系统相册" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGSaveURL(host,url,NO);}]];[host presentViewController:alert animated:YES completion:nil];}
 void DGConfirmImageSave(UIViewController *host,NSString *url){if(!host||host.presentedViewController)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"保存评论图片？" message:@"将这张图片或表情包添加到相册" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"确认保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){DGSaveURL(host,url,NO);}]];[host presentViewController:alert animated:YES completion:nil];}
-@interface DGPreview : QLPreviewController <QLPreviewControllerDataSource,QLPreviewControllerDelegate>
-@property(nonatomic,strong) NSURL *file;
-@property(nonatomic,weak) UIImageView *source;
-@end
-@implementation DGPreview
-- (NSInteger)numberOfPreviewItemsInPreviewController:(QLPreviewController *)controller{return 1;}
-- (id<QLPreviewItem>)previewController:(QLPreviewController *)controller previewItemAtIndex:(NSInteger)index{return self.file;}
-- (UIView *)previewController:(QLPreviewController *)controller transitionViewForPreviewItem:(id<QLPreviewItem>)item{return self.source;}
-- (void)previewControllerDidDismiss:(QLPreviewController *)controller{[NSFileManager.defaultManager removeItemAtURL:self.file error:nil];[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}
-@end
-void DGShowImage(UIViewController *host,NSString *url,UIImageView *source) {
-    if(!url.length)return;
-    DGImage *loadingSource=[source isKindOfClass:DGImage.class]?(DGImage *)source:nil;
-    if(loadingSource.previewLoading)return;loadingSource.showsLoadingIndicator=YES;loadingSource.previewLoading=YES;
-    DGDownload(url,^(NSData *data,NSURLResponse *response,NSError *error){
-        if(error || !data.length){dispatch_async(dispatch_get_main_queue(),^{loadingSource.previewLoading=NO;});DGToast(host,@"图片加载失败");return;}
-        NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"图片-%@.%@",NSUUID.UUID.UUIDString,DGExtension(data,response,NO)]]];
-        if(![data writeToURL:file atomically:YES]){dispatch_async(dispatch_get_main_queue(),^{loadingSource.previewLoading=NO;});DGToast(host,@"无法打开图片，请稍后重试");return;}
-        dispatch_async(dispatch_get_main_queue(),^{
-            loadingSource.previewLoading=NO;
-            if(!host.viewIfLoaded.window||(source&&!source.window)){[NSFileManager.defaultManager removeItemAtURL:file error:nil];return;}
-            DGPreview *preview=[DGPreview new];preview.file=file;preview.source=source;preview.dataSource=preview;preview.delegate=preview;
-            UIViewController *presenter=host;while(presenter.parentViewController && ![presenter.parentViewController isKindOfClass:UINavigationController.class])presenter=presenter.parentViewController;
-            if(presenter.presentedViewController){[NSFileManager.defaultManager removeItemAtURL:file error:nil];return;}
-            [presenter presentViewController:preview animated:YES completion:nil];
-        });
-    });
-}
-

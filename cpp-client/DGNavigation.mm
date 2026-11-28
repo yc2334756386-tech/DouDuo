@@ -77,8 +77,9 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
 - (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self setNeedsStatusBarAppearanceUpdate];}
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{
  if(gesture!=self.interactivePopGestureRecognizer&&gesture!=_rootBack)return YES;
- if(self.transitionCoordinator||self.presentedViewController)return NO;
  UIViewController *top=self.topViewController;
+ if(self.presentedViewController)return NO;
+ if(self.transitionCoordinator&&!(gesture==self.interactivePopGestureRecognizer&&top.preferredTransition))return NO;
  if(self.modalInPresentation||top.modalInPresentation)return NO;
  if([top conformsToProtocol:@protocol(DGInPageBack)]&&[(id<DGInPageBack>)top dgHasPreviousPage])return NO;
  if(gesture==self.interactivePopGestureRecognizer)return self.viewControllers.count>1;
