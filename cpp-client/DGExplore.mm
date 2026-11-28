@@ -1,4 +1,5 @@
 #import "DGCommon.h"
+#include "InteractionState.hpp"
 #import "DGSearchAssist.h"
 #import "DGMusicIndex.h"
 #import "DGDiagnostics.h"
@@ -122,7 +123,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     UIVisualEffectView *_musicControls;UISearchBar *_search;UIRefreshControl *_refresh;
     UISegmentedControl *_searchTabs;UIButton *_webSearch,*_followUser,*_blockUser;UILabel *_searchHint;UIViewController *_searchPage;
     NSInteger _searchKind;BOOL _relationshipBusy,_webImportMode;
-    DGSearchAssist *_assist;CGFloat _keyboardTop;
+    DGSearchAssist *_assist;CGFloat _keyboardTop;douglass::SearchFlow _searchFlow;
     UIVisualEffectView *_locateGlass;UIButton *_locateButton;BOOL _locating;
     UISearchBar *_librarySearch;NSString *_libraryQuery;NSInteger _libraryPages;
     BOOL _profileSearchOpen,_locateKeywordResult,_aligningReturnSource,_workCountsChanged;NSArray<NSDictionary *> *_filteredWorks;__weak UIViewController *_zoomPlayer;
@@ -165,7 +166,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     else if(_mode==DGExploreMusic){[self seedKnownMusicWorks];[self updateMusicHeader];if([self.music[@"contextWork"]isKindOfClass:NSDictionary.class])[self resolveMusicIdentifier];else{[self loadMusicDetail];[self loadPage];}}
     else [self loadPage];
 }
-- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];DGSaveNavigationResume(self.view.window);}
+- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(_mode==DGExploreSearch&&_searchFlow.firstAppearance(self.resumeData!=nil))[_search becomeFirstResponder];DGSaveNavigationResume(self.view.window);}
 - (NSDictionary *)dgResumeState {
  if(!_table)return self.resumeData;
  BOOL single=[self peopleRows]||[self musicRows];NSUInteger scale=single?1:3;
@@ -177,7 +178,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  NSUInteger start=location>90?((location-90)/3)*3:0,count=MIN((NSUInteger)180,_records.count-start);
  NSArray *records=[_records subarrayWithRange:NSMakeRange(start,count)];
  CGFloat inset=first?CGRectGetMinY([_table rectForRowAtIndexPath:first])-_table.contentOffset.y:0;
- return @{@"kind":@"explore",@"mode":@(_mode),@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"name":self.displayName?:@"",@"locate":self.locate?:@"",@"music":self.music?:@{},@"person":_person?:@{},@"own":@(_own),@"tab":@(_selectedTab),@"searchKind":@(_searchKind),@"query":_query?:@"",@"draft":_search.text?:@"",@"libraryQuery":_libraryQuery?:@"",@"profileSearch":@(_profileSearchOpen),@"webImport":@(_webImportMode),@"records":records,@"cursor":_cursor?:@"0",@"more":@(_more&&start+count==_records.count),@"offset":@(_table.contentOffset.y),@"anchorID":anchorID,@"anchorInset":@(inset)};
+ return @{@"kind":@"explore",@"mode":@(_mode),@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"name":self.displayName?:@"",@"locate":self.locate?:@"",@"music":self.music?:@{},@"person":_person?:@{},@"own":@(_own),@"tab":@(_selectedTab),@"searchKind":@(_searchKind),@"searchInput":@(!_searchFlow.showingResults()),@"query":_query?:@"",@"draft":_search.text?:@"",@"libraryQuery":_libraryQuery?:@"",@"profileSearch":@(_profileSearchOpen),@"webImport":@(_webImportMode),@"records":records,@"cursor":_cursor?:@"0",@"more":@(_more&&start+count==_records.count),@"offset":@(_table.contentOffset.y),@"anchorID":anchorID,@"anchorInset":@(inset)};
 }
 - (void)applyResumeData {
  NSDictionary *state=self.resumeData;
@@ -193,7 +194,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  }
  if(_mode==DGExploreProfile&&[state[@"person"]isKindOfClass:NSDictionary.class]&&[state[@"person"]count]){_person=state[@"person"];[self showProfile:_person];}
  if(_mode==DGExploreMusic)[self updateMusicHeader];
- _assist.hidden=YES;_searchHint.text=@"已恢复上次的关键词和结果，可继续搜索或网页翻页。";
+ if(_mode==DGExploreSearch){if([state[@"searchInput"]boolValue])_searchFlow.input();else _searchFlow.results();_assist.hidden=_searchFlow.showingResults();_table.scrollEnabled=_assist.hidden;if(!_assist.hidden)[_assist keyword:@""];}else _assist.hidden=YES;_searchHint.text=@"已恢复上次的关键词和结果，可继续搜索或网页翻页。";
  _empty.text=_records.count?@"":@"已恢复上次页面，可下拉刷新";[_footer setTitle:_more?@"继续加载":@"已恢复上次列表，可下拉刷新" forState:UIControlStateNormal];_footer.enabled=_more;
  _restoreListPosition=YES;[_table reloadData];[self.view setNeedsLayout];
  if(_mode==DGExploreProfile&&!_person)[self loadProfile];
@@ -208,7 +209,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
                                   completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled)self->_zoomPlayer=nil;}];
     }else _table.transform=CGAffineTransformIdentity;
     if(_mode==DGExploreMusic)[self updateMusicPlayback];
-    if(self.navigationController.viewControllers.firstObject==self)self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
+    if(_mode==DGExploreSearch)[self updateSearchBackButton];else if(self.navigationController.viewControllers.firstObject==self)self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
 }
 - (void)workCountsChanged:(NSNotification *)notification{
  NSDictionary *state=notification.userInfo;NSString *identifier=DGValue(state[@"id"]);if(!identifier.length)return;
@@ -231,7 +232,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     _header=[UIView new];_header.backgroundColor=UIColor.clearColor;
     if(_mode==DGExploreSearch){
         _search=[UISearchBar new];_search.searchBarStyle=UISearchBarStyleMinimal;_search.placeholder=@"搜索视频与图文";_search.delegate=self;_search.returnKeyType=UIReturnKeySearch;[_header addSubview:_search];
-        _searchTabs=[[UISegmentedControl alloc]initWithItems:@[@"视频",@"用户"]];_searchTabs.selectedSegmentIndex=0;[_searchTabs addTarget:self action:@selector(searchKindChanged) forControlEvents:UIControlEventValueChanged];[_header addSubview:_searchTabs];
+        _searchTabs=[[UISegmentedControl alloc]initWithItems:@[@"综合",@"用户"]];_searchTabs.selectedSegmentIndex=0;[_searchTabs addTarget:self action:@selector(searchKindChanged) forControlEvents:UIControlEventValueChanged];[_header addSubview:_searchTabs];
         _webSearch=[UIButton buttonWithType:UIButtonTypeSystem];[_webSearch setTitle:@"网页翻页并导回 ↗" forState:UIControlStateNormal];_webSearch.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];[_webSearch addTarget:self action:@selector(openSearchPage) forControlEvents:UIControlEventTouchUpInside];[_header addSubview:_webSearch];
         _searchHint=Label(11,UIFontWeightRegular);_searchHint.textColor=UIColor.secondaryLabelColor;_searchHint.numberOfLines=2;_searchHint.text=@"结果只有一页时，可在官网手动翻页，再把已加载结果追加回这里。";[_header addSubview:_searchHint];
     }
@@ -468,17 +469,24 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(searchBar==_librarySearch){[searchBar resignFirstResponder];[self libraryChanged:searchBar.text submit:YES];return;}
     [self submitSearch:searchBar.text];
 }
-- (void)submitSearch:(NSString *)word{NSString *query=[word stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length)return;_search.text=query;[_assist remember:query];[_search resignFirstResponder];_assist.hidden=YES;_table.scrollEnabled=YES;_query=query;_searchPage=nil;[self resetList];}
-- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar{if(searchBar==_librarySearch)return;[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:searchBar.text];[self.view setNeedsLayout];}
+- (void)updateSearchBackButton{
+ if(_searchFlow.showingResults()){UIBarButtonItem *back=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"chevron.left"] style:UIBarButtonItemStylePlain target:self action:@selector(searchBack)];back.accessibilityLabel=@"返回搜索";self.navigationItem.leftBarButtonItem=back;}
+ else self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(searchBack)];
+}
+- (void)searchBack{
+ if(_searchFlow.back()==douglass::SearchBack::close){[self close];return;}
+ ++_generation;_loading=NO;[_refresh endRefreshing];[_search resignFirstResponder];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:@""];[self updateSearchBackButton];[self.view setNeedsLayout];DGSaveNavigationResume(self.view.window);
+}
+- (void)submitSearch:(NSString *)word{NSString *query=[word stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length)return;_search.text=query;[_assist remember:query];[_search resignFirstResponder];_searchFlow.results();[self updateSearchBackButton];_assist.hidden=YES;_table.scrollEnabled=YES;_query=query;_searchPage=nil;[self resetList];}
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar{if(searchBar==_librarySearch)return;_searchFlow.input();[self updateSearchBackButton];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:searchBar.text];[self.view setNeedsLayout];}
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText{if(searchBar==_librarySearch){[self libraryChanged:searchText submit:NO];return;}_assist.hidden=NO;[_assist keyword:searchText];[self.view setNeedsLayout];}
 - (void)searchKindChanged{
-    _searchKind=_searchTabs.selectedSegmentIndex;_searchPage=nil;_search.placeholder=_searchKind?@"搜索用户昵称或抖音号":@"搜索视频与图文";_query=[_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+    _searchKind=_searchTabs.selectedSegmentIndex;_searchPage=nil;_search.placeholder=_searchKind?@"搜索用户昵称或抖音号":@"搜索视频与图文";_query=[_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";if(_query.length){[_search resignFirstResponder];_searchFlow.results();_assist.hidden=YES;_table.scrollEnabled=YES;}else _searchFlow.input();[self updateSearchBackButton];
     [self resetList];if(!_query.length){_more=NO;_empty.text=_searchKind?@"搜索用户昵称或抖音号":@"搜索视频与图文作品";[_footer setTitle:@"输入关键词并搜索" forState:UIControlStateNormal];}
 }
 - (void)openSearchPage{
     if(_mode==DGExploreMusic){[self openMusicPage];return;}
-    _assist.hidden=YES;_table.scrollEnabled=YES;
-    NSString *query=[_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length){DGToast(self,@"请先输入搜索词");return;}[_search resignFirstResponder];[_assist remember:query];if(![query isEqualToString:_query]){_query=query;_searchPage=nil;[self resetList];}
+    NSString *query=[_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length){DGToast(self,@"请先输入搜索词");return;}_searchFlow.results();[self updateSearchBackButton];_assist.hidden=YES;_table.scrollEnabled=YES;[_search resignFirstResponder];[_assist remember:query];if(![query isEqualToString:_query]){_query=query;_searchPage=nil;[self resetList];}
     if(!_searchPage){__weak DGExplore *weak=self;NSString *keyword=_query.copy;NSInteger kind=_searchKind;_searchPage=DGMakeSearchPage(keyword,kind==1,^(NSArray<NSDictionary *> *items){DGExplore *self=weak;if(!self||![self->_query isEqualToString:keyword]||self->_searchKind!=kind)return;[self importSearchItems:items];});}
     [self.navigationController pushViewController:_searchPage animated:YES];
 }

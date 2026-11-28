@@ -1,18 +1,18 @@
 {
-  "version": "0.20.11",
+  "version": "0.20.12",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
   "standard": "C++20",
   "active_source_counts": {
-    ".cpp": 5,
-    ".hpp": 5,
+    ".cpp": 6,
+    ".hpp": 6,
     ".h": 22,
     ".mm": 38,
     ".js": 4
   },
   "compiled_translation_units": {
-    "C++20": 5,
+    "C++20": 6,
     "Objective-C++": 38,
     "Swift": 0
   },
@@ -25,7 +25,8 @@
   "new_pure_cpp_modules": [
     "ClientPolicy.cpp",
     "ChannelState.cpp",
-    "ContrastMap.cpp"
+    "ContrastMap.cpp",
+    "InteractionState.cpp"
   ],
   "existing_pure_cpp_modules": [
     "Core.cpp",
@@ -40,7 +41,10 @@
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "local brightness averaging, temporal stabilization, hysteresis and feathered complementary contrast masks"
+    "local brightness averaging, temporal stabilization, hysteresis and feathered complementary contrast masks",
+    "gallery gesture state, edge advancement and thumbnail geometry",
+    "search first appearance, input/results state and back routing",
+    "gallery display-awake eligibility"
   ],
   "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
   "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",

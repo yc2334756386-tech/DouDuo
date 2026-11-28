@@ -114,6 +114,20 @@
     for(const name of new Set(String(item.text||'').match(/\[[^\]\r\n]{1,14}\]/g)||[]))if(emojiCatalog[name])inline.push({name,url:emojiCatalog[name]});
     return {id:id(item.cid),replyToID:replyId&&replyId!=='0'?replyId:'',replyToAuthor,text:item.text||'',author:(item.user||{}).nickname||'抖音用户',authorID:(item.user||{}).sec_uid||'',avatar:first((item.user||{}).avatar_thumb),liked:!!item.user_digged,likes:Number(item.digg_count||0),replies:Number(item.reply_comment_total||0),timestamp:Number(item.create_time||0),location:item.ip_label||'',sticker:first(sticker.animate_url)||first(sticker.static_url),images:(item.image_list||[]).map(image=>first(image.origin_url)||first(image.medium_url)||first(image.thumb_url)).filter(Boolean),emoticons:inline};
   };
+  // General search contains mixed cards and nested image/video lists. Preserve
+  // returned card order, but never treat user/live/shop cards as playable works.
+  const generalWorks=payload=>{
+    const found=[],ids=new Set(),seen=new WeakSet();let budget=5000;
+    const visit=(value,depth=0)=>{
+      if(!value||typeof value!=='object'||depth>9||budget--<=0||seen.has(value))return;seen.add(value);
+      if(Array.isArray(value)){for(const row of value)visit(row,depth+1);return;}
+      const target=value.aweme_info||value.aweme||value;
+      if(target.aweme_id&&(target.video||target.images||target.image_post_info)){
+        const item=work(target);if(item.id&&!ids.has(item.id)&&(item.play||item.images.length||item.mediaSources?.urls.length||item.mediaSources?.candidates.length)){ids.add(item.id);found.push(item);}return;
+      }
+      for(const [key,child]of Object.entries(value).slice(0,160))if(!['author','user','music','statistics','video'].includes(key))visit(child,depth+1);
+    };visit(payload);return found;
+  };
   const works=list=>(Array.isArray(list)?list:[]).filter(Boolean).map(item=>work(item.aweme_info||item.aweme||item)).filter(item=>item.id&&(item.play||item.images.length||item.mediaSources?.urls.length||item.mediaSources?.candidates.length));
   const musicWorks=(list,identifier,scoped=false)=>works(list).flatMap(item=>{
     if(item.musicID)return item.musicID===identifier?[item]:[];
@@ -216,10 +230,10 @@
         const list=(data.followings||data.user_list||[]).map(user).filter(value=>value.sec);return {items:list,cursor:data.cursor==null?String(Number(cursor)+list.length):String(data.cursor),more:!!data.has_more};
       }
       if(operation==='search'){
-        const data=await get('/aweme/v1/web/search/item/',{search_channel:'aweme_video_web',keyword:params.kw||'',search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset:cursor,count:'24',need_filter_settings:cursor==='0'?'1':'0',list_type:'single'});return page(data,data.data||data.aweme_list,data.cursor,data.has_more);
+        const data=await get('/aweme/v1/web/general/search/single/',{search_channel:'aweme_general',keyword:params.kw||'',search_source:'normal_search',query_correct_type:'1',is_filter_search:'0',from_group_id:'',offset:cursor,count:'24',need_filter_settings:cursor==='0'?'1':'0',list_type:'single'});const items=generalWorks(data.data||data.aweme_list||[]),proposed=Number(data.cursor??data.offset??0),next=proposed>Number(cursor)?proposed:Number(cursor)+(Array.isArray(data.data)?data.data.length:items.length);return {items,cursor:String(next),more:!!data.has_more&&next>Number(cursor)};
       }
       if(operation==='suggest'){
-        const data=await get('/aweme/v1/web/search/sug/',{keyword:params.kw||'',source:'aweme_video_web',from_group_id:''});
+        const data=await get('/aweme/v1/web/search/sug/',{keyword:params.kw||'',source:'aweme_general',from_group_id:''});
         return {items:(data.sug_list||[]).map(value=>({word:value.content||''})).filter(value=>value.word)};
       }
       if(operation==='searchUsers'){

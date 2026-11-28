@@ -23,7 +23,7 @@
  self.navigationItem.rightBarButtonItems=@[[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(loadSearch)],[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];
  if(self.musicID.length){UIBarButtonItem *original=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"music.note"] style:UIBarButtonItemStylePlain target:self action:@selector(loadMusicOriginal)];original.accessibilityLabel=@"打开官方原声页";self.navigationItem.rightBarButtonItems=@[original,[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] style:UIBarButtonItemStylePlain target:self action:@selector(webBack)]];}
  _tools=[UIView new];_tools.backgroundColor=UIColor.secondarySystemBackgroundColor;[self.view addSubview:_tools];
- _hint=Label(12,UIFontWeightRegular);_hint.numberOfLines=2;_hint.textColor=UIColor.secondaryLabelColor;_hint.text=self.musicID.length?@"当前打开这首原声的官网页面。作品出现后可导回；官网未返回作品时无法导入。":@"手动翻页或下滑加载，再导回结果；再次进入会保留网页位置。";[_tools addSubview:_hint];
+ _hint=Label(12,UIFontWeightRegular);_hint.numberOfLines=2;_hint.textColor=UIColor.secondaryLabelColor;_hint.text=self.musicID.length?@"当前打开这首原声的官网页面。作品出现后可导回；官网未返回作品时无法导入。":@"默认打开综合搜索，手动翻页或下滑加载，再导回视频与图文。";[_tools addSubview:_hint];
  _import=[UIButton buttonWithType:UIButtonTypeSystem];[_import setTitle:@"导入已加载结果并返回" forState:UIControlStateNormal];_import.titleLabel.font=[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];[_import addTarget:self action:@selector(importResults) forControlEvents:UIControlEventTouchUpInside];[_tools addSubview:_import];
  _reload=Symbol(@"arrow.clockwise",self,@selector(reload));_reload.accessibilityLabel=@"重新加载官方搜索页";[_tools addSubview:_reload];
  _spinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_spinner.hidesWhenStopped=YES;[_tools addSubview:_spinner];
@@ -36,7 +36,7 @@
 - (void)loadSearch{
  NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"];
  if(self.musicID.length){[self loadMusicOriginal];return;}
- NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"video"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
+ NSString *keyword=[self.keyword stringByAddingPercentEncodingWithAllowedCharacters:allowed];NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://www.douyin.com/search/" stringByAppendingString:keyword?:@""]];url.queryItems=@[[NSURLQueryItem queryItemWithName:@"type" value:self.users?@"user":@"general"]];if(url.URL)[_web loadRequest:[NSURLRequest requestWithURL:url.URL]];
 }
 - (void)loadMusicOriginal{
  NSURL *url=[NSURL URLWithString:self.musicURL?:@""];NSString *path=url.path;BOOL matching=[path isEqualToString:[@"/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[@"/share/music/" stringByAppendingString:self.musicID]]||[path isEqualToString:[NSString stringWithFormat:@"/share/music/%@/",self.musicID]];

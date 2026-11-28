@@ -9,6 +9,7 @@
 #import "DGAmbient.h"
 #import "DGTimeline.h"
 #import "DGDanmaku.h"
+#include "InteractionState.hpp"
 #import <QuartzCore/QuartzCore.h>
 static void DGFreezeLayer(CALayer *layer,BOOL freeze){
  if(freeze){if(layer.speed==0)return;CFTimeInterval time=[layer convertTime:CACurrentMediaTime() fromLayer:nil];layer.speed=0;layer.timeOffset=time;}
@@ -75,7 +76,12 @@ static NSHashTable<DGFeedCell *> *MediaCells() {
 @interface DGFeedCell (MediaCleanup)
 - (void)discardInactiveMedia;
 - (void)resetPlaybackForWork:(NSString *)identifier;
+- (BOOL)keepsDisplayAwake;
 @end
+static void DGUpdateGalleryWake(){
+ BOOL awake=NO;for(DGFeedCell *cell in MediaCells().allObjects)if(cell.window&&[cell keepsDisplayAwake]){awake=YES;break;}
+ if(UIApplication.sharedApplication.idleTimerDisabled!=awake)UIApplication.sharedApplication.idleTimerDisabled=awake;
+}
 static NSMutableDictionary<NSString *,DGPrepared *> *Pool(){static NSMutableDictionary *pool;static dispatch_once_t once;dispatch_once(&once,^{pool=[NSMutableDictionary dictionary];});return pool;}
 void DGSuspendPrerolls(void){DGPrewarmAllowed=NO;for(DGPrepared *prepared in Pool().allValues)[prepared suspendWarm];}
 static NSString *PlayerURL(const Work &work){NSString *identifier=Text(work.id);NSURL *file=DGCacheLocalVideo(identifier)?:DGPlaybackResumeLocalVideo(identifier);return file.absoluteString?:Text(work.play);}
@@ -118,7 +124,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  [MediaCells()addObject:self];
  self.contentView.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.contentView.backgroundColor=UIColor.blackColor;_loadingSpinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_loadingSpinner.color=UIColor.whiteColor;_loadingSpinner.hidesWhenStopped=YES;_ambient=[DGAmbient new];[self.contentView addSubview:_ambient];_cachedTimes=[NSMutableArray array];_frameCache=[NSCache new];_frameCache.countLimit=32;_frameCache.totalCostLimit=4*1024*1024;_rate=1;_danmakuWindow=-1;_images=[NSMutableArray array];_locked=[NSMutableArray array];_emitted=[NSMutableSet set];
  _cover=[DGImage new];_cover.contentMode=UIViewContentModeScaleAspectFit;_cover.clipsToBounds=YES;[self.contentView addSubview:_cover];_playerLayer=[AVPlayerLayer playerLayerWithPlayer:nil];_playerLayer.videoGravity=AVLayerVideoGravityResizeAspect;_playerLayer.masksToBounds=YES;[self.contentView.layer addSublayer:_playerLayer];[_playerLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionNew context:NULL];
- _photos=[UIScrollView new];_photos.pagingEnabled=YES;_photos.scrollsToTop=NO;_photos.clipsToBounds=YES;_photos.directionalLockEnabled=YES;_photos.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_photos.alwaysBounceVertical=NO;_photos.showsHorizontalScrollIndicator=NO;_photos.delegate=self;[self.contentView addSubview:_photos];_photoNavigator=[DGPhotoNavigator new];__weak DGFeedCell *photoCell=self;_photoNavigator.onSelect=^(NSInteger index){DGFeedCell *self=photoCell;if(!self)return;[self->_photos setContentOffset:CGPointMake(index*self->_photos.bounds.size.width,0) animated:NO];[self loadPhotos];};_photoNavigator.onScrub=^(double position,BOOL finished){DGFeedCell *self=photoCell;if(!self)return;[self->_photos setContentOffset:CGPointMake(position*self->_photos.bounds.size.width,0) animated:NO];if(finished)[self loadPhotos];};_photoNavigator.onBrowsingChanged=^(BOOL browsing){DGFeedCell *self=photoCell;if(!self)return;[self setNeedsLayout];DGAnimate(.18,^{[self layoutIfNeeded];},nil);};[self.contentView addSubview:_photoNavigator];
+ _photos=[UIScrollView new];_photos.pagingEnabled=YES;_photos.scrollsToTop=NO;_photos.clipsToBounds=YES;_photos.directionalLockEnabled=YES;_photos.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_photos.alwaysBounceVertical=NO;_photos.showsHorizontalScrollIndicator=NO;_photos.delegate=self;[self.contentView addSubview:_photos];_photoNavigator=[DGPhotoNavigator new];__weak DGFeedCell *photoCell=self;_photoNavigator.onSelect=^(NSInteger index){DGFeedCell *self=photoCell;if(!self)return;[self->_photos setContentOffset:CGPointMake(index*self->_photos.bounds.size.width,0) animated:NO];[self loadPhotos];};_photoNavigator.onBrowsingChanged=^(BOOL browsing){DGFeedCell *self=photoCell;if(!self)return;[self setNeedsLayout];DGAnimate(.18,^{[self layoutIfNeeded];},nil);};[self.contentView addSubview:_photoNavigator];
  _danmaku=[DGDanmakuOverlay new];__weak DGDanmakuOverlay *contrastOverlay=_danmaku;__weak DGAmbient *contrastAmbient=_ambient;_danmaku.samplingChanged=^(BOOL enabled){[contrastAmbient adaptive:enabled];};_ambient.contrastReady=^(UIImage *white,UIImage *black){[contrastOverlay whiteMask:white blackMask:black];};_danmaku.clipsToBounds=YES;_danmakuTap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(copyDanmaku:)];_danmakuTap.delegate=self;[_danmaku addGestureRecognizer:_danmakuTap];[self.contentView addSubview:_danmaku];_shade=[UIView new];_shade.userInteractionEnabled=NO;_gradient=[CAGradientLayer layer];_gradient.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.75].CGColor];[_shade.layer addSublayer:_gradient];[self.contentView addSubview:_shade];
  _author=Label(17,UIFontWeightSemibold);_author.userInteractionEnabled=NO;_following=Label(11,UIFontWeightMedium);_following.text=@"正在关注";_following.textColor=[UIColor colorWithWhite:1 alpha:.78];_following.hidden=YES;[self.contentView addSubview:_following];
  _caption=Label(14,UIFontWeightRegular);_caption.numberOfLines=3;_caption.userInteractionEnabled=YES;[_caption addGestureRecognizer:[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(copyCaption:)]];
@@ -154,7 +160,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 
 - (void)enterBackgroundKeepingPlayback:(BOOL)keep audioOnly:(BOOL)audioOnly {
  if(_backgroundMode)return;
- _backgroundMode=YES;[self syncDanmakuPlayback];[_slider stopFollowing];
+ _backgroundMode=YES;DGUpdateGalleryWake();[self syncDanmakuPlayback];[_slider stopFollowing];
  [self stopWatchdog];[_ambient active:NO];[_ambient item:nil imageView:nil];
  if(!keep)[self active:NO];
  [self releaseUnusedResources];
@@ -163,13 +169,13 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  }
 }
 - (void)suspendForegroundWork {
- _appInactive=YES;[_photoNavigator cancelBrowsing];[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
+ _appInactive=YES;DGUpdateGalleryWake();[_photoNavigator cancelBrowsing];[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
  [self syncDanmakuPlayback];
 }
 - (void)leaveBackground {
- _appInactive=NO;
+ _appInactive=NO;DGUpdateGalleryWake();
  if(!_backgroundMode)return;
- _backgroundMode=NO;_foregroundRebind=YES;
+ _backgroundMode=NO;_foregroundRebind=YES;DGUpdateGalleryWake();
  _progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;
  if(_playerLayer.player!=_player)_playerLayer.player=_player;
 }
@@ -205,6 +211,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  return CGRectGetMaxY([_danmaku convertRect:area toView:view])+12;
 }
 - (void)detach {
+ DGUpdateGalleryWake();
  [_frameExport cancelAllCGImageGeneration];_frameExport=nil;
  [_danmaku adaptive:[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku.adaptive"] playing:NO];
  if(_seeking)[_observedItem cancelPendingSeeks];
@@ -409,6 +416,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (BOOL)isPlaybackPaused{return _paused;}
 - (BOOL)isPlaybackActive{return _active;}
+- (BOOL)keepsDisplayAwake{return douglass::keepGalleryAwake(UIApplication.sharedApplication.applicationState==UIApplicationStateActive,_active,_work.photo(),_backgroundMode||_appInactive);}
 - (void)restorePlaybackPosition:(double)seconds paused:(BOOL)paused {
     _lastPlaybackTime=_prepared.needsBeginning?0:std::max(0.,seconds);_paused=paused;_pause.hidden=!paused;
     if(_work.duration>0)_slider.value=_lastPlaybackTime/_work.duration;
@@ -425,7 +433,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)active:(BOOL)value {
  if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak active:value];});return;}
- BOOL changed=_active!=value;_active=value;if(value&&!_backgroundMode&&!_pagingMotion){if(!_work.photo()&&!_player&&!_work.id.empty())[self attach:Obtain(_work) position:_lastPlaybackTime];else if(_work.photo()&&!_musicPlayer)[self attachPhotoSound:_lastPlaybackTime];}if(value&&!_paused)[self showLoadingIndicatorIfNeeded];else [self cancelLoadingIndicator];if(!value||_backgroundMode||_pagingMotion)[_ambient item:nil imageView:nil];else if(!_work.photo())[_ambient item:_observedItem imageView:nil];[_ambient active:value&&!_paused&&!_backgroundMode&&!_pagingMotion];if((changed||_foregroundRebind)&&_work.photo()&&value&&!_backgroundMode)[self loadPhotos];if(_work.photo()&&value&&!_backgroundMode)[_ambient item:nil imageView:_images.count?_images[MIN((NSUInteger)MAX(0,_photoIndex),_images.count-1)]:_cover];[self syncDanmakuPlayback];if(![_musicAvatar.layer animationForKey:@"album-spin"]){CABasicAnimation *spin=[CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];spin.fromValue=@0;spin.toValue=@(M_PI*2);spin.duration=9;spin.repeatCount=HUGE_VALF;[_musicAvatar.layer addAnimation:spin forKey:@"album-spin"];}DGFreezeLayer(_musicAvatar.layer,!value||_paused||_backgroundMode);
+ BOOL changed=_active!=value;_active=value;DGUpdateGalleryWake();if(value&&!_backgroundMode&&!_pagingMotion){if(!_work.photo()&&!_player&&!_work.id.empty())[self attach:Obtain(_work) position:_lastPlaybackTime];else if(_work.photo()&&!_musicPlayer)[self attachPhotoSound:_lastPlaybackTime];}if(value&&!_paused)[self showLoadingIndicatorIfNeeded];else [self cancelLoadingIndicator];if(!value||_backgroundMode||_pagingMotion)[_ambient item:nil imageView:nil];else if(!_work.photo())[_ambient item:_observedItem imageView:nil];[_ambient active:value&&!_paused&&!_backgroundMode&&!_pagingMotion];if((changed||_foregroundRebind)&&_work.photo()&&value&&!_backgroundMode)[self loadPhotos];if(_work.photo()&&value&&!_backgroundMode)[_ambient item:nil imageView:_images.count?_images[MIN((NSUInteger)MAX(0,_photoIndex),_images.count-1)]:_cover];[self syncDanmakuPlayback];if(![_musicAvatar.layer animationForKey:@"album-spin"]){CABasicAnimation *spin=[CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];spin.fromValue=@0;spin.toValue=@(M_PI*2);spin.duration=9;spin.repeatCount=HUGE_VALF;[_musicAvatar.layer addAnimation:spin forKey:@"album-spin"];}DGFreezeLayer(_musicAvatar.layer,!value||_paused||_backgroundMode);
  if(value&&!_paused){
   if(_backgroundMode||_pagingMotion)return;
   if(_work.photo()&&!_reportedView&&self.viewedAction){_reportedView=YES;self.viewedAction();}
@@ -591,7 +599,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   [UIView animateWithDuration:(area+width)/speed delay:0 options:UIViewAnimationOptionCurveLinear|UIViewAnimationOptionAllowUserInteraction animations:^{label.frame=CGRectOffset(label.frame,-area-width,0);} completion:^(BOOL done){[label removeFromSuperview];}];
  }
 }
-- (void)dealloc {[_playerLayer removeObserver:self forKeyPath:@"readyForDisplay"];[NSNotificationCenter.defaultCenter removeObserver:self];[self unlock];[self detach];}
+- (void)dealloc {_active=NO;DGUpdateGalleryWake();[_playerLayer removeObserver:self forKeyPath:@"readyForDisplay"];[NSNotificationCenter.defaultCenter removeObserver:self];[self unlock];[self detach];}
 @end
 CGFloat DGFeedNotificationTop(UIViewController *host){
  CGFloat top=0;for(DGFeedCell *cell in MediaCells().allObjects)if(cell.presenter==host)top=MAX(top,[cell notificationTopInView:host.view]);return top;
