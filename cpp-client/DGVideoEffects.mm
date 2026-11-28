@@ -1,6 +1,7 @@
 #import "DGVideoEffects.h"
 #import "DGAnimation.h"
 #import "DGDiagnostics.h"
+#import "DGRife.h"
 #import <VideoToolbox/VideoToolbox.h>
 #import <objc/runtime.h>
 #include <arm_neon.h>
@@ -180,13 +181,14 @@ struct FramePair {
 };
 struct FrameResult {
     PixelBuffer current,midpoint;
-    bool supported=false,compatibility=false,upscaled=false;
+    bool supported=false,compatibility=false,upscaled=false,rife=false;
 };
 
 struct ProcessorKey {
     size_t width=0,height=0;
     OSType format=0;
     bool interpolation=false,systemInterpolation=false,resolution=false;
+    bool rife=false;
     bool operator==(const ProcessorKey &) const=default;
 };
 
@@ -202,7 +204,7 @@ public:
         if(resolutionPool_)CVPixelBufferPoolRelease(resolutionPool_);
         if(blendPool_)CVPixelBufferPoolRelease(blendPool_);
     }
-    FrameResult process(const FramePair &pair,const std::atomic_bool &cancelled) {
+    FrameResult process(const FramePair &pair,double rifeDeadline,const std::atomic_bool &cancelled) {
         if(cancelled.load(std::memory_order_relaxed))return {};
         if(!configured_){
             configured_=true;
@@ -211,7 +213,12 @@ public:
                 blendPool_=makePool(@{},key_.width,key_.height,key_.format);
         }
         FrameResult frames;
-        frames.supported=interpolationSession_||resolutionSession_||blendPool_;
+        if(key_.rife&&pair.previous){
+            if(!rife_)rife_=std::make_unique<DGRife>();
+            frames.midpoint=ownPixel(rife_->copyMidpoint(pair.previous.get(),pair.source.get(),rifeDeadline,cancelled));
+            frames.rife=bool(frames.midpoint);
+        }
+        frames.supported=interpolationSession_||resolutionSession_||blendPool_||(key_.rife&&(!rife_||!rife_->rejected()));
         if(cancelled.load(std::memory_order_relaxed)||!frames.supported)return frames;
         if(@available(iOS 26.0,*))processSystem(pair,cancelled,frames);
         if(!frames.midpoint&&pair.previous&&blendPool_){
@@ -249,7 +256,7 @@ private:
         }
     }
     void configure(const std::atomic_bool &cancelled) API_AVAILABLE(ios(26.0)) {
-        const auto [width,height,format,interpolation,systemInterpolation,resolution]=key_;
+        const auto [width,height,format,interpolation,systemInterpolation,resolution,rife]=key_;
         if(interpolation&&systemInterpolation&&supportsInterpolationSize(width,height)){
             auto *config=[[VTLowLatencyFrameInterpolationConfiguration alloc] initWithFrameWidth:width frameHeight:height numberOfInterpolatedFrames:1];
             if([config.frameSupportedPixelFormats containsObject:@(format)]){
@@ -290,19 +297,20 @@ private:
     bool configured_=false;
     VTFrameProcessor *__strong interpolationSession_=nil,*__strong resolutionSession_=nil;
     CVPixelBufferPoolRef interpolationPool_=nullptr,resolutionPool_=nullptr,blendPool_=nullptr;
+    std::unique_ptr<DGRife> rife_;
 };
 
 // All cells use one worker. Paging clears the current processor before the
 // selected cell can start another session.
 class SharedVideoProcessor {
 public:
-    FrameResult process(const ProcessorKey &key,const FramePair &pair,const std::atomic_bool &cancelled) {
+    FrameResult process(const ProcessorKey &key,const FramePair &pair,double rifeDeadline,const std::atomic_bool &cancelled) {
         if(!processor_||key_!=key){
             processor_.reset();
             key_=key;
             processor_=std::make_unique<VideoProcessor>(key);
         }
-        return processor_->process(pair,cancelled);
+        return processor_->process(pair,rifeDeadline,cancelled);
     }
     void clear(){processor_.reset();}
 private:
@@ -392,20 +400,21 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     CGSize _pixelSize;
     OSType _pixelFormat;
     NSUInteger _generation,_binding,_readyFrames,_consecutiveLate;
-    BOOL _interpolation,_resolution,_preferResolution,_unsupported,_orientationReady,_reportedDisplay,_protection;
+    BOOL _interpolation,_rife,_resolution,_preferResolution,_unsupported,_orientationReady,_reportedDisplay,_protection;
     std::shared_ptr<std::atomic_bool> _cancellation;
 }
 
 - (void)showForPlayerLayer:(AVPlayerLayer *)layer {
     NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
-    BOOL interpolation=[prefs boolForKey:@"douglass.experimental.frameInterpolation"];
+    BOOL rife=DGRifeRequested()&&DGRifeAvailable();
+    BOOL interpolation=rife||(!DGRifeRequested()&&[prefs boolForKey:@"douglass.experimental.frameInterpolation"]);
     BOOL resolution=[prefs boolForKey:@"douglass.experimental.vtSuperResolution"]&&DGVTSuperResolutionAvailable();
     BOOL protection=DGSuperResolutionTransitionProtection();
     AVPlayerItem *item=layer.player.currentItem;
-    if(item&&item==_item&&layer==_nativeLayer&&interpolation==_interpolation&&resolution==_resolution&&protection==_protection)return;
+    if(item&&item==_item&&layer==_nativeLayer&&interpolation==_interpolation&&rife==_rife&&resolution==_resolution&&protection==_protection)return;
     [self stop];
     if(!item||(!interpolation&&!resolution))return;
-    _nativeLayer=layer;_item=item;_interpolation=interpolation;_resolution=resolution;_protection=protection;
+    _nativeLayer=layer;_item=item;_interpolation=interpolation;_rife=rife;_resolution=resolution;_protection=protection;
     NSUInteger binding=++_binding;
     __weak DGVideoEffects *weak=self;
     double delay=protection?protectedSettleDelay:effectsSettleDelay;
@@ -575,17 +584,19 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         _latest={pixel,{},actual,kCMTimeInvalid};
         if(_interpolation&&!_resolution&&!pair.previous)return;
         if(processingFrame.exchange(true,std::memory_order_acq_rel))return;
+        const BOOL rife=_rife&&!_preferResolution;
         ProcessorKey key={static_cast<size_t>(size.width),static_cast<size_t>(size.height),format,
-                          _interpolation&&!_preferResolution,DGVTFSystemInterpolationAvailable(),_resolution};
+                          _interpolation&&!_preferResolution&&!_rife,DGVTFSystemInterpolationAvailable(),_resolution,bool(rife)};
         if(!_cancellation||_cancellation->load(std::memory_order_relaxed))
             _cancellation=std::make_shared<std::atomic_bool>(false);
         auto cancellation=_cancellation;
         NSUInteger generation=_generation;
         CMTime displayTime=CMTimeAdd(now,CMTimeMakeWithSeconds(renderLead,60000));
+        double rifeDeadline=CACurrentMediaTime()+renderLead-(std::isfinite(interval)?interval/2:0)-.004;
         __weak DGVideoEffects *weak=self;
         dispatch_async(effectsQueue(),^{@autoreleasepool{
             const bool deferred=DGAnimationProcessingDeferred()||cancellation->load(std::memory_order_relaxed);
-            FrameResult result=deferred?FrameResult{}:sharedVideoProcessor().process(key,pair,*cancellation);
+            FrameResult result=deferred?FrameResult{}:sharedVideoProcessor().process(key,pair,rifeDeadline,*cancellation);
             dispatch_async(dispatch_get_main_queue(),^{
                 processingFrame.store(false,std::memory_order_release);
                 DGVideoEffects *effects=weak;
@@ -620,7 +631,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                         effects->_display.hidden=NO;
                         if(!effects->_reportedDisplay){
                             effects->_reportedDisplay=YES;
-                            DGDiagnostic(@"video.vt.display",[NSString stringWithFormat:@"midpoint=%d compatibility=%d width=%zu",queuedMidpoint,result.compatibility,CVPixelBufferGetWidth(result.current.get())]);
+                            DGDiagnostic(@"video.vt.display",[NSString stringWithFormat:@"midpoint=%d compatibility=%d rife=%d width=%zu",queuedMidpoint,result.compatibility,result.rife,CVPixelBufferGetWidth(result.current.get())]);
                         }
                     }
                 }else [effects missedFrame];

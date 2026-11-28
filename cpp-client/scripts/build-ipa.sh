@@ -34,7 +34,7 @@ xcrun --sdk iphoneos clang++ \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
   "${OBJECTS[@]}" "${OBJCXX_SOURCES[@]}" \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation -framework Metal -framework MetalFX -framework MediaToolbox -framework VideoToolbox \
-  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework CoreText -framework UniformTypeIdentifiers -lz \
+  -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework Security -framework MediaPlayer -framework CoreImage -framework CoreML -framework CoreVideo -framework AVKit -framework CoreText -framework UniformTypeIdentifiers -lz \
   -o "$APP/DouGlass"
 cp "$CLIENT/bridge.js" "$APP/bridge.js"
 cp "$CLIENT/messages.js" "$APP/messages.js"
@@ -44,6 +44,11 @@ cp "$ROOT/DouDuo/DouyinPublicationRegions.json" "$APP/DouyinPublicationRegions.j
 cp "$ROOT/LICENSE" "$APP/DOUDUO-LICENSE.txt"
 cp "$CLIENT/NOTICE.txt" "$APP/NOTICE.txt"
 cp "$CLIENT/third-party/metal-cpp/LICENSE.txt" "$APP/METAL-CPP-LICENSE.txt"
+if [ -n "${DG_RIFE_PACKAGE:-}" ]; then
+  xcrun --sdk iphoneos coremlcompiler compile "$DG_RIFE_PACKAGE" "$APP"
+  test -d "$APP/RIFE425.mlmodelc"
+  cp "$CLIENT/third-party/rife/LICENSE.txt" "$APP/RIFE-LICENSE.txt"
+fi
 python3 - "$APP" "$OUTPUT/asset-info.plist" "$BUILD" <<'PY'
 import pathlib, plistlib, sys
 app=pathlib.Path(sys.argv[1])
@@ -55,7 +60,7 @@ info={
   'CFBundleInfoDictionaryVersion':'6.0',
   'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.20.24',
+  'CFBundleShortVersionString':'0.20.25',
   'UIBackgroundModes':['audio'],
   'NSPhotoLibraryAddUsageDescription':'保存你选择的视频、图集和评论图片到相册',
   'CFBundleVersion':sys.argv[3],
@@ -79,6 +84,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.20.24-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.20.24-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.20.24-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.20.25-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.20.25-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.20.25-unsigned.ipa"

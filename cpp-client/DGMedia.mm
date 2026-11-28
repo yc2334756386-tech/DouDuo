@@ -9,6 +9,7 @@
 #import "DGRefreshPiP.h"
 #import "DGAmbient.h"
 #import "DGVideoEffects.h"
+#import "DGRife.h"
 #import "DGTimeline.h"
 #import "DGDanmaku.h"
 #include "InteractionState.hpp"
@@ -516,7 +517,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  }
  DGSetMetalFXPlaybackActive(_observedItem,YES);
  NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
- if(!_videoEffects&&([prefs boolForKey:@"douglass.experimental.frameInterpolation"]||
+ if(!_videoEffects&&(DGRifeRequested()||[prefs boolForKey:@"douglass.experimental.frameInterpolation"]||
                      [prefs boolForKey:@"douglass.experimental.vtSuperResolution"]))_videoEffects=[DGVideoEffects new];
  [_videoEffects showForPlayerLayer:_playerLayer];
 }

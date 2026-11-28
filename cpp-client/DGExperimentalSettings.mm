@@ -5,6 +5,7 @@
 #import "DGAnimation.h"
 #import "DGMedia.h"
 #import "DGVideoEffects.h"
+#import "DGRife.h"
 
 @interface DGExperimentalControlCell:UITableViewCell
 @property(nonatomic,strong) UILabel *controlTitle,*controlDetail;
@@ -52,7 +53,19 @@
 - (UITableViewCell *)segments:(NSString *)title key:(NSString *)key items:(NSArray *)items{DGExperimentalControlCell *cell=[self base:title detail:nil];UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:items];control.apportionsSegmentWidthsByContent=YES;control.accessibilityIdentifier=key;control.selectedSegmentIndex=MIN((NSInteger)items.count-1,MAX(0,[NSUserDefaults.standardUserDefaults integerForKey:key]));[control addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];[cell.controlStack addArrangedSubview:control];[control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;return cell;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path{
  if(path.section==0){if(path.row==0)return [self toggle:@"MetalFX 空间超采样" key:@"douglass.experimental.metalfx" detail:@"仅处理画面，保持原比例与原视频时间线"];if(path.row==1){DGExperimentalControlCell *cell=(DGExperimentalControlCell *)[self segments:@"画面预设" key:@"douglass.experimental.picturePreset" items:@[@"原始",@"自然",@"柔和",@"鲜明",@"原画增强"]];cell.controlDetail.text=@"原画增强：提高亮度细节的质感与清晰度，保留原有色彩";cell.controlDetail.hidden=NO;return cell;}
-  if(path.row==2)return [self toggle:@"低延迟插帧" key:@"douglass.experimental.frameInterpolation" detail:DGVTFSystemInterpolationAvailable()?@"系统插帧优先，兼容模式可生成混合中间帧":@"兼容模式，在相邻原帧间生成混合中间帧"];
+  if(path.row==2){
+   DGExperimentalControlCell *cell=[self base:@"插帧方式" detail:nil];
+   UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:@[@"关闭",@"低延迟",@"RIFE 4.25"]];
+   control.selectedSegmentIndex=DGRifeRequested()?2:[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.frameInterpolation"]?1:0;
+   [control setEnabled:DGRifeAvailable() forSegmentAtIndex:2];
+   [control addTarget:self action:@selector(interpolationChanged:) forControlEvents:UIControlEventValueChanged];
+   [cell.controlStack addArrangedSubview:control];
+   [control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;
+   cell.controlDetail.hidden=NO;
+   if(control.selectedSegmentIndex==2)cell.controlDetail.text=@"实验模式。由 Core ML 检查 ANE 分配，超时回到原帧。";
+   else cell.controlDetail.text=DGVTFSystemInterpolationAvailable()?@"低延迟优先使用系统插帧。":@"低延迟使用兼容插帧，快速运动时可能出现残影。";
+   return cell;
+  }
   if(path.row==3)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
   return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"切片时释放增强资源，画面稳定后再启动增强"];
  }
@@ -61,7 +74,14 @@
  if(path.section==2){NSArray *names=@[@"60 Hz",@"150 Hz",@"400 Hz",@"1 kHz",@"2.4 kHz",@"5 kHz",@"9 kHz",@"14 kHz"];NSString *key=[NSString stringWithFormat:@"douglass.experimental.eq.%ld",(long)path.row];float value=[NSUserDefaults.standardUserDefaults floatForKey:key];DGExperimentalControlCell *cell=[self base:[NSString stringWithFormat:@"%@ · %+.1f dB",names[path.row],value] detail:nil];UISlider *slider=[UISlider new];slider.minimumValue=-12;slider.maximumValue=12;slider.value=value;slider.tag=path.row;slider.accessibilityIdentifier=key;[slider addTarget:self action:@selector(gainChanged:) forControlEvents:UIControlEventValueChanged];[cell.controlStack addArrangedSubview:slider];[slider.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;return cell;}
  return [self base:@"系统能力检测" detail:DGMediaEnhancementStatus()];
 }
-- (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.frameInterpolation"]||[key isEqualToString:@"douglass.experimental.transitionProtection"]){
+- (void)interpolationChanged:(UISegmentedControl *)control {
+ NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
+ [prefs setInteger:control.selectedSegmentIndex forKey:@"douglass.experimental.interpolationBackend"];
+ [prefs setBool:control.selectedSegmentIndex==1 forKey:@"douglass.experimental.frameInterpolation"];
+ [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];
+ [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:2 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.transitionProtection"]){
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];return;
 }
 if([key isEqualToString:@"douglass.experimental.metalfx"]||[key isEqualToString:@"douglass.experimental.vtSuperResolution"]){
