@@ -31,7 +31,7 @@
 - (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source{return [[DGPagePresentation alloc]initWithPresentedViewController:presented presentingViewController:presenting];}
 @end
 static const void *DGPageKey=&DGPageKey;
-void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;}
+void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;controller.modalPresentationCapturesStatusBarAppearance=YES;}
 // Mask the effect view itself so UIKit can keep sampling the live backdrop.
 @interface DGNavigationFade:UIView
 @end
@@ -47,12 +47,15 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
  UIVisualEffectView *_topBlur;DGNavigationFade *_fade;UIScreenEdgePanGestureRecognizer *_rootBack;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
+ [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;self.navigationBar.tintColor=UIColor.labelColor;self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
  _rootBack=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:self action:@selector(rootBack:)];_rootBack.edges=UIRectEdgeLeft;_rootBack.delegate=self;[self.view addGestureRecognizer:_rootBack];
- UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;
+ UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;appearance.titleTextAttributes=@{NSForegroundColorAttributeName:UIColor.labelColor};appearance.largeTitleTextAttributes=@{NSForegroundColorAttributeName:UIColor.labelColor};
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
  _topBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial]];_topBlur.userInteractionEnabled=NO;_fade=[[DGNavigationFade alloc]initWithFrame:CGRectZero];_topBlur.maskView=_fade;[self.view insertSubview:_topBlur belowSubview:self.navigationBar];
 }
+- (UIViewController *)childViewControllerForStatusBarStyle{return self.topViewController;}
+- (UIViewController *)childViewControllerForStatusBarHidden{return self.topViewController;}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self setNeedsStatusBarAppearanceUpdate];}
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{
  if(gesture!=self.interactivePopGestureRecognizer&&gesture!=_rootBack)return YES;
  if(self.transitionCoordinator||self.presentedViewController)return NO;

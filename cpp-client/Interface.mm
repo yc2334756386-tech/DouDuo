@@ -103,6 +103,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     knobPan.maximumNumberOfTouches=1;[_cleanKnob addGestureRecognizer:knobPan];
     [self.view addSubview:_cleanKnob];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncCleanScreen) name:@"DouGlassSettingsChanged" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(appearanceChanged) name:@"DGAppearanceChanged" object:nil];
     [self syncCleanScreen];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(willResignActive) name:UIApplicationWillResignActiveNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background) name:UIApplicationDidEnterBackgroundNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foreground) name:UIApplicationDidBecomeActiveNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGResumePlayback" object:nil];
@@ -113,6 +114,8 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 }
 - (void)dealloc{[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIStatusBarStyle)preferredStatusBarStyle{return _showingMessages?UIStatusBarStyleDefault:UIStatusBarStyleLightContent;}
+- (void)appearanceChanged{if(!self.isViewLoaded)return;self.view.backgroundColor=_showingMessages?UIColor.systemBackgroundColor:UIColor.blackColor;_bar.overrideUserInterfaceStyle=_showingMessages?UIUserInterfaceStyleUnspecified:UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self appearanceChanged];}
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(!self.presentedViewController)DGMusicStop();_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;[self activate];if(_ownsBridge&&DGRestoreNavigationResume(self,_bridge))return;DGSaveNavigationResume(self.view.window);if(_noticeComment.length&&_current<(NSInteger)_feed.works.size()&&!_comments)[self showComments:Text(_feed.works[_current].id)];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;[self finishPaging];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
@@ -569,7 +572,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)closeMessageDetail{[self dismissViewControllerAnimated:YES completion:^{DGSetEmbeddedMessagesVisible(self->_messageChannel,self->_showingMessages);[self activate];}];}
 - (void)search{[self presentPage:DGMakeSearch(_bridge)];}
 - (void)messages{
- if(_showingMessages)return;DGCacheSetIdle(NO);[self closeComments];_showingMessages=YES;_bar.overrideUserInterfaceStyle=UIUserInterfaceStyleUnspecified;[self setNeedsStatusBarAppearanceUpdate];
+ if(_showingMessages)return;DGCacheSetIdle(NO);[self closeComments];_showingMessages=YES;[self appearanceChanged];
  for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];
  _collection.hidden=YES;_empty.hidden=YES;_account.hidden=YES;_search.hidden=YES;
  __weak DGFeed *weak=self;
@@ -580,7 +583,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 }
 - (void)refreshMessages{DGRefreshEmbeddedMessages(_messageChannel);}
 - (void)hideMessages{
- if(!_showingMessages)return;_showingMessages=NO;_bar.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];
+ if(!_showingMessages)return;_showingMessages=NO;[self appearanceChanged];
  DGSetEmbeddedMessagesVisible(_messageChannel,NO);[_messageChannel willMoveToParentViewController:nil];[_messageChannel.view removeFromSuperview];[_messageChannel removeFromParentViewController];
  [_messageRefreshGlass removeFromSuperview];_messageRefreshGlass=nil;
  _collection.hidden=NO;_empty.hidden=!_feed.works.empty();_account.hidden=NO;_search.hidden=NO;

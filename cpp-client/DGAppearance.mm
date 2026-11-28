@@ -6,9 +6,15 @@ UIUserInterfaceStyle DGPreferredStyle(void) {
   default:return UIUserInterfaceStyleDark;
  }
 }
+static void DGUpdateStatusAppearance(UIViewController *controller){
+ if(!controller)return;[controller setNeedsStatusBarAppearanceUpdate];
+ for(UIViewController *child in controller.childViewControllers)DGUpdateStatusAppearance(child);
+ DGUpdateStatusAppearance(controller.presentedViewController);
+}
 void DGApplyAppearance(void) {
  for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
   if(![scene isKindOfClass:UIWindowScene.class])continue;
-  for(UIWindow *window in ((UIWindowScene *)scene).windows){window.overrideUserInterfaceStyle=DGPreferredStyle();[window.rootViewController setNeedsStatusBarAppearanceUpdate];}
+  for(UIWindow *window in ((UIWindowScene *)scene).windows){window.overrideUserInterfaceStyle=DGPreferredStyle();window.backgroundColor=UIColor.systemBackgroundColor;DGUpdateStatusAppearance(window.rootViewController);}
  }
+ [NSNotificationCenter.defaultCenter postNotificationName:@"DGAppearanceChanged" object:nil];
 }
