@@ -143,7 +143,6 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         UIBarButtonItem *find=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(toggleProfileSearch)];
         find.accessibilityLabel=@"搜索主页作品";self.navigationItem.rightBarButtonItem=find;
     }
-    if(_mode==DGExploreMusic)self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"globe"] style:UIBarButtonItemStylePlain target:self action:@selector(openSearchPage)];
     _table=[[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];_table.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     _table.backgroundColor=UIColor.clearColor;_table.dataSource=self;_table.delegate=self;_table.separatorStyle=UITableViewCellSeparatorStyleNone;
     _table.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;_table.showsVerticalScrollIndicator=NO;_table.sectionHeaderTopPadding=0;
@@ -258,12 +257,11 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
             _collectMusic=Symbol(@"star",self,@selector(collectMusic));_collectMusic.accessibilityLabel=@"收藏原声";[_musicControls.contentView addSubview:_collectMusic];
 
             _context.text=@"使用这首原声的作品";
-            _webSearch=[UIButton buttonWithType:UIButtonTypeSystem];[_webSearch setTitle:@"网页查看原声作品并导回 ↗" forState:UIControlStateNormal];_webSearch.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];[_webSearch addTarget:self action:@selector(openMusicPage) forControlEvents:UIControlEventTouchUpInside];[_header addSubview:_webSearch];
         }else{_avatar.hidden=YES;_name.text=@"关注的人";_signature.text=@"点开头像查看主页与作品";}
     }
     [self layoutHeader];_table.tableHeaderView=_header;
 }
-- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_locateGlass){CGFloat width=self.view.bounds.size.width;_locateGlass.frame=CGRectMake(MAX(16,width-188),self.view.bounds.size.height-self.view.safeAreaInsets.bottom-60,172,44);_locateButton.frame=_locateGlass.bounds;}if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height-self.view.safeAreaInsets.bottom;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}
+- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];[self layoutHeader];if(_locateGlass){CGFloat width=self.view.bounds.size.width;_locateGlass.frame=CGRectMake(MAX(16,width-188),self.view.bounds.size.height-self.view.safeAreaInsets.bottom-60,172,44);_locateButton.frame=_locateGlass.bounds;}if(_assist){CGFloat top=CGRectGetMaxY([_header convertRect:_header.bounds toView:self.view])+4,bottom=_keyboardTop>0?_keyboardTop:self.view.bounds.size.height;_assist.frame=CGRectMake(0,top,self.view.bounds.size.width,MAX(0,bottom-top));}
  if(_restoreListPosition&&_table.bounds.size.width>0){
   _restoreListPosition=NO;[_table layoutIfNeeded];CGFloat offset=[self.resumeData[@"offset"]doubleValue];NSString *anchor=DGValue(self.resumeData[@"anchorID"]);NSArray *records=[self listed];
   BOOL people=[self peopleRows];NSUInteger found=[records indexOfObjectPassingTest:^BOOL(NSDictionary *record,NSUInteger i,BOOL *stop){return anchor.length&&[DGValue(record[people?@"sec":@"id"])isEqualToString:anchor];}];
@@ -274,7 +272,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)keyboardChanged:(NSNotification *)note{CGRect frame=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboardTop=CGRectGetMinY(frame)>=self.view.bounds.size.height?0:MAX(0,CGRectGetMinY(frame));[self.view setNeedsLayout];[UIView animateWithDuration:.25 animations:^{[self.view layoutIfNeeded];}];}
 - (void)layoutHeader {
-    BOOL library=[self showsLibrarySearch];_librarySearch.hidden=!library;CGFloat width=self.view.bounds.size.width,height=_mode==DGExploreProfile?(library?326:268):_mode==DGExploreSearch?104:_mode==DGExploreMusic?250:108;
+    BOOL library=[self showsLibrarySearch];_librarySearch.hidden=!library;CGFloat width=self.view.bounds.size.width,height=_mode==DGExploreProfile?(library?326:268):_mode==DGExploreSearch?104:_mode==DGExploreMusic?202:108;
     if(_header.bounds.size.width!=width||_header.bounds.size.height!=height){_header.frame=CGRectMake(0,0,width,height);if(_table.tableHeaderView)_table.tableHeaderView=_header;}
     if(_mode==DGExploreSearch){_search.frame=CGRectMake(10,2,width-20,56);_searchTabs.frame=CGRectMake(18,64,132,32);_webSearch.frame=CGRectMake(158,62,MAX(40,width-176),36);_searchHint.frame=CGRectMake(18,104,width-36,36);return;}
     if(_mode==DGExploreFollowing){_name.frame=CGRectMake(20,10,width-40,36);_signature.frame=CGRectMake(20,52,width-40,32);return;}
@@ -476,10 +474,10 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 }
 - (void)searchBack{
  DGDiagnostic(@"search.back",_searchFlow.showingResults()?@"from=results":@"from=input");if(_searchFlow.back()==douglass::SearchBack::close){[self close];return;}
- ++_generation;_loading=NO;[_refresh endRefreshing];[_search resignFirstResponder];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:@""];[self updateSearchBackButton];[self.view setNeedsLayout];DGSaveNavigationResume(self.view.window);
+ ++_generation;_loading=NO;[_refresh endRefreshing];[_search resignFirstResponder];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:@""];[self reloadList];[self updateSearchBackButton];[self.view setNeedsLayout];DGSaveNavigationResume(self.view.window);
 }
 - (void)submitSearch:(NSString *)word{NSString *query=[word stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length)return;DGDiagnosticMemory(@"search.submit");_search.text=query;[_assist remember:query];[_search resignFirstResponder];_searchFlow.results();[self updateSearchBackButton];_assist.hidden=YES;_table.scrollEnabled=YES;_query=query;_searchPage=nil;[self resetList];}
-- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar{if(searchBar==_librarySearch)return;_searchFlow.input();[self updateSearchBackButton];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:searchBar.text];[self.view setNeedsLayout];}
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar{if(searchBar==_librarySearch)return;_searchFlow.input();[self reloadList];[self updateSearchBackButton];[_table setContentOffset:CGPointMake(0,-_table.adjustedContentInset.top) animated:NO];_assist.hidden=NO;_table.scrollEnabled=NO;[_assist keyword:searchBar.text];[self.view setNeedsLayout];}
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText{if(searchBar==_librarySearch){[self libraryChanged:searchText submit:NO];return;}_assist.hidden=NO;[_assist keyword:searchText];[self.view setNeedsLayout];}
 - (void)searchKindChanged{
     _searchKind=_searchTabs.selectedSegmentIndex;_searchPage=nil;_search.placeholder=_searchKind?@"搜索用户昵称或抖音号":@"搜索视频与图文";_query=[_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";if(_query.length){[_search resignFirstResponder];_searchFlow.results();_assist.hidden=YES;_table.scrollEnabled=YES;}else _searchFlow.input();[self updateSearchBackButton];
@@ -540,9 +538,9 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  [_bridge request:@"musicCollect" parameters:@{@"id":identifier,@"add":@(add)} completion:^(NSDictionary *result,NSString *error){DGExplore *self=weak;if(!self)return;self->_musicCollectBusy=NO;if(error||![result[@"ok"]boolValue]){DGToast(self,error?:@"平台未确认原声收藏结果");return;}NSMutableDictionary *music=[self.music mutableCopy];music[@"collected"]=@(add);self.music=music;[self updateMusicHeader];[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];DGToast(self,add?@"原声已收藏":@"已取消原声收藏");}];
 }
 - (void)reloadList{
- _displayPeople=[self peopleRows];_displayMusic=[self musicRows];_displayRecords=[[self listed]copy];[_table reloadData];
+ _displayPeople=[self peopleRows];_displayMusic=[self musicRows];_displayRecords=[[self listed]copy];_footer.hidden=_mode==DGExploreSearch&&!_searchFlow.showingResults();[_table reloadData];
 }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return _displayPeople||_displayMusic?_displayRecords.count:(_displayRecords.count+2)/3;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{if(_mode==DGExploreSearch&&!_searchFlow.showingResults())return 0;return _displayPeople||_displayMusic?_displayRecords.count:(_displayRecords.count+2)/3;}
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{return _displayPeople||_displayMusic?86:(tableView.bounds.size.width-24)/3*1.42+29;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
  NSArray *snapshot=_displayRecords?:@[];BOOL single=_displayPeople||_displayMusic;NSUInteger row=indexPath.row,base=single?row:row*3;

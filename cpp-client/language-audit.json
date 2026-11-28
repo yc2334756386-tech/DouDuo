@@ -41,7 +41,7 @@
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "per-line horizontal brightness averaging, temporal stabilization, hysteresis and feathered complementary contrast masks",
+    "wider per-line contrast and texture classification, temporal stabilization, hysteresis and feathered complementary masks",
     "gallery gesture state, fixed center rail and spaced thumbnail geometry",
     "search first appearance, input/results state and back routing",
     "gallery display-awake eligibility"

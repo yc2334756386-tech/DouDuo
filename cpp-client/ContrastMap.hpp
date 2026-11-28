@@ -15,6 +15,7 @@ private:
     std::vector<std::uint8_t> darkInk_;
     std::vector<float> light_,opacity_;
     std::vector<std::uint32_t> integral_;
+    std::vector<std::uint64_t> squared_;
     std::vector<float> opacityIntegral_;
 };
 }
