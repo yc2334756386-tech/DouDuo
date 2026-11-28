@@ -1,6 +1,5 @@
 #import "DGCommon.h"
 #include "InteractionState.hpp"
-#import "DGAnimation.h"
 #import "DGSearchAssist.h"
 #import "DGMusicIndex.h"
 #import "DGDiagnostics.h"
@@ -205,6 +204,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     if(_workCountsChanged){_workCountsChanged=NO;[self reloadList];}
     id<UIViewControllerTransitionCoordinator> transition=self.transitionCoordinator;
     if(animated&&_zoomPlayer&&[transition viewControllerForKey:UITransitionContextFromViewControllerKey]==_zoomPlayer){
+        [self sourceForReturningWork:DGCurrentWorkID(_zoomPlayer)];
         [transition animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){self->_table.transform=CGAffineTransformIdentity;}
                                   completion:^(id<UIViewControllerTransitionCoordinatorContext> context){if(!context.isCancelled)self->_zoomPlayer=nil;}];
     }else _table.transform=CGAffineTransformIdentity;
@@ -561,8 +561,15 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  UIViewController *player=DGMakeWorkPlayer(works,index,_bridge);
  if(!self.navigationController){player.modalPresentationStyle=UIModalPresentationFullScreen;[self presentViewController:player animated:YES completion:nil];return;}
  NSString *identifier=DGValue(works[index][@"id"]);__weak DGExplore *weak=self;
- __weak UIViewController *weakPlayer=player;DGConfigureWorkTransition(player,^UIView *{DGExplore *self=weak;if(!self)return nil;NSString *current=DGCurrentWorkID(weakPlayer);return [self sourceForReturningWork:current.length?current:identifier];});
- _zoomPlayer=player;
+ if(!UIAccessibilityIsReduceMotionEnabled()){
+  UIZoomTransitionOptions *options=[UIZoomTransitionOptions new];
+  options.dimmingVisualEffect=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
+  player.preferredTransition=[UIViewControllerTransition zoomWithOptions:options sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context){
+   DGExplore *self=weak;if(!self)return nil;
+   NSString *current=DGCurrentWorkID(context.zoomedViewController);return [self sourceForReturningWork:current.length?current:identifier];
+  }];
+  _zoomPlayer=player;
+ }
  [self.navigationController pushViewController:player animated:YES];
 }
 - (void)resolveWorkAtIndex:(NSUInteger)index{
