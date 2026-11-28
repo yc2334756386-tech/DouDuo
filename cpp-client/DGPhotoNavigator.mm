@@ -55,7 +55,7 @@
 }
 - (void)layoutSubviews{
  [super layoutSubviews];CGFloat width=self.bounds.size.width;BOOL resized=fabs(width-_layoutWidth)>.5;_layoutWidth=width;
- _thumbnails.bounds=CGRectMake(0,0,width,58);_thumbnails.center=CGPointMake(width/2,16);_count.frame=CGRectMake(0,49,width,21);
+ if(!CGSizeEqualToSize(_thumbnails.bounds.size,CGSizeMake(width,58)))_thumbnails.bounds=CGRectMake(_thumbnails.bounds.origin.x,_thumbnails.bounds.origin.y,width,58);_thumbnails.center=CGPointMake(width/2,16);_count.frame=CGRectMake(0,49,width,21);
  CGSize content=CGSizeMake(width+MAX(0,(NSInteger)_urls.count-1)*38,58);if(!CGSizeEqualToSize(content,_thumbnails.contentSize))_thumbnails.contentSize=content;
  for(NSUInteger i=0;i<_images.count;i++){CGFloat selected=MAX(0,1-fabs((double)i-_position)),w=30+14*selected,h=44+12*selected;DGImage *image=_images[i];image.frame=CGRectMake(width/2+i*38-w/2,(58-h)/2,w,h);image.layer.cornerRadius=4+selected*2;image.layer.borderColor=UIColor.whiteColor.CGColor;image.layer.borderWidth=i==_index?1.5:0;}
  if(resized&&!_thumbnails.dragging&&!_thumbnails.decelerating)[_thumbnails setContentOffset:CGPointMake(_position*38,0) animated:NO];
