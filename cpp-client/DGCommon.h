@@ -89,6 +89,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 
 
 @interface DGImage : UIImageView
+@property(nonatomic,copy) void (^imageReady)(UIImage *image);
 @property(nonatomic) NSUInteger maximumPixelSize;
 @property(nonatomic) BOOL showsLoadingIndicator;
 @property(nonatomic) BOOL previewLoading;
@@ -125,7 +126,7 @@ void DGConfirmAvatarSave(UIViewController *host, NSString *url);
 UIViewController *DGMakeSearchPage(NSString *keyword, BOOL users, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeMusicWebPage(NSString *identifier, NSString *shareURL, void (^imported)(NSArray<NSDictionary *> *items));
 UIViewController *DGMakeOptions(DGBridge *bridge, NSDictionary *work);
-UIViewController *DGMakeActions(DGBridge *bridge, NSDictionary *work);
+UIViewController *DGMakeActions(DGBridge *bridge, NSDictionary *work,void (^saveFrame)(void));
 BOOL DGOptionsKeepsPlayback(UIViewController *controller);
 void DGOptimisticAction(DGBridge *bridge, UIViewController *presenter, NSDictionary *snapshot, NSString *kind, BOOL add);
 void DGResetInteractions(void);

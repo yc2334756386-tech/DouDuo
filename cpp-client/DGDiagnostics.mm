@@ -2,9 +2,15 @@
 #import "DGCommon.h"
 #import <mach/mach.h>
 #include <atomic>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
+#include <ctime>
 
 namespace {
 std::atomic_bool Enabled{false};
+int ExceptionFile=-1;
+NSUncaughtExceptionHandler *PreviousExceptionHandler=nullptr;
 dispatch_queue_t LogQueue() {
     static dispatch_queue_t queue;static dispatch_once_t once;
     dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.diagnostics",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_UTILITY,0));});
@@ -14,6 +20,23 @@ NSURL *LogFolder() {
     return [[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"Diagnostics" isDirectory:YES];
 }
 NSURL *File(NSUInteger number) {return [LogFolder() URLByAppendingPathComponent:[NSString stringWithFormat:@"runtime-%lu.log",(unsigned long)number]];}
+void RecordUncaughtException(NSException *exception){
+    // Best-effort final breadcrumb only. Preserve normal process termination.
+    if(Enabled.load(std::memory_order_relaxed)&&ExceptionFile>=0){
+        char bytes[2048]={};int length=snprintf(bytes,sizeof(bytes),"exception.uncaught epoch=%lld pid=%d name=%.120s frames=",(long long)time(nullptr),getpid(),exception.name.UTF8String?:"unknown");
+        for(NSNumber *address in exception.callStackReturnAddresses){if(length<0||length>=(int)sizeof(bytes)-40)break;length+=snprintf(bytes+length,sizeof(bytes)-length,"0x%llx,",address.unsignedLongLongValue);}
+        if(length>0){length=MIN(length,(int)sizeof(bytes)-2);bytes[length++]='\n';pwrite(ExceptionFile,bytes,length,0);ftruncate(ExceptionFile,length);fsync(ExceptionFile);}
+    }
+    if(PreviousExceptionHandler)PreviousExceptionHandler(exception);
+}
+void PrepareExceptionRecord(){
+    if(ExceptionFile>=0){close(ExceptionFile);ExceptionFile=-1;}
+    [NSFileManager.defaultManager createDirectoryAtURL:LogFolder() withIntermediateDirectories:YES attributes:nil error:nil];
+    NSURL *file=[LogFolder() URLByAppendingPathComponent:@"last-exception.txt"];NSNumber *size=nil;[file getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
+    if(size.unsignedIntegerValue>0&&size.unsignedIntegerValue<=2048){NSString *previous=[NSString stringWithContentsOfURL:file encoding:NSUTF8StringEncoding error:nil];if(previous.length)DGDiagnostic(@"previous_run",previous);}
+    ExceptionFile=open(file.fileSystemRepresentation,O_CREAT|O_WRONLY|O_TRUNC,0600);
+    static dispatch_once_t once;dispatch_once(&once,^{PreviousExceptionHandler=NSGetUncaughtExceptionHandler();NSSetUncaughtExceptionHandler(RecordUncaughtException);});
+}
 void Append(NSString *message,NSDate *when) {
     static NSISO8601DateFormatter *clock;static dispatch_once_t once;
     dispatch_once(&once,^{clock=[NSISO8601DateFormatter new];clock.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;});
@@ -40,6 +63,7 @@ void Append(NSString *message,NSDate *when) {
 void DGDiagnosticStart(void) {
     Enabled.store([NSUserDefaults.standardUserDefaults boolForKey:@"douglass.diagnostics"],std::memory_order_relaxed);
     if(!Enabled.load(std::memory_order_relaxed))return;
+    PrepareExceptionRecord();
     NSDictionary *info=NSBundle.mainBundle.infoDictionary;
     DGDiagnostic(@"app.launch",[NSString stringWithFormat:@"version=%@ build=%@ os=%@",info[@"CFBundleShortVersionString"],info[@"CFBundleVersion"],UIDevice.currentDevice.systemVersion]);
     DGDiagnosticMemory(@"memory.launch");
@@ -47,6 +71,7 @@ void DGDiagnosticStart(void) {
 void DGDiagnosticEnable(BOOL enabled) {
     bool previous=Enabled.exchange(enabled,std::memory_order_relaxed);
     if(previous==enabled)return;
+    if(enabled)PrepareExceptionRecord();else if(ExceptionFile>=0){close(ExceptionFile);ExceptionFile=-1;}
     NSDate *when=NSDate.date;dispatch_async(LogQueue(),^{Append(enabled?@"logging.enabled":@"logging.disabled",when);});
 }
 BOOL DGDiagnosticEnabled(void){return Enabled.load(std::memory_order_relaxed);}
@@ -87,7 +112,7 @@ void DGDiagnosticClear(UIViewController *host) {
     [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){dispatch_async(LogQueue(),^{
         NSURL *folder=LogFolder();NSFileManager *files=NSFileManager.defaultManager;
         BOOL removed=![files fileExistsAtPath:folder.path]||[files removeItemAtURL:folder error:nil];
-        dispatch_async(dispatch_get_main_queue(),^{DGToast(weak,removed?@"日志目录已清空":@"清空日志失败");});
+        dispatch_async(dispatch_get_main_queue(),^{if(removed&&DGDiagnosticEnabled())PrepareExceptionRecord();DGToast(weak,removed?@"日志目录已清空":@"清空日志失败");});
     });}]];
     [host presentViewController:alert animated:YES completion:nil];
 }

@@ -11,7 +11,7 @@
  if(!_adaptive){[_white removeFromSuperview];[_black removeFromSuperview];_white=nil;_black=nil;_whiteMask=nil;_blackMask=nil;self.layer.shadowOpacity=shadows?.85:0;[self setNeedsDisplay];return;}
  if(!_white){_white=[UILabel new];_black=[UILabel new];_whiteMask=[CALayer layer];_blackMask=[CALayer layer];[self addSubview:_white];[self addSubview:_black];}
  NSArray<UILabel *> *copies=@[_white,_black];NSArray<UIColor *> *ink=@[UIColor.whiteColor,UIColor.blackColor],*shade=@[UIColor.blackColor,UIColor.whiteColor];
- for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=index==1?.72:shadows?.85:0;copy.layer.shadowRadius=index==1?3:2;copy.layer.shadowOffset=index==1?CGSizeZero:CGSizeMake(0,1);copy.layer.zPosition=index==1?2:1;copy.userInteractionEnabled=NO;}
+ for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=index==0&&shadows?.85:0;copy.layer.shadowRadius=2;copy.layer.shadowOffset=index==1?CGSizeZero:CGSizeMake(0,1);copy.layer.zPosition=index==1?2:1;copy.userInteractionEnabled=NO;}
  self.layer.shadowOpacity=0;[self setNeedsDisplay];[self setNeedsLayout];
 }
 - (void)layoutSubviews{[super layoutSubviews];_white.frame=self.bounds;_black.frame=self.bounds;}
@@ -36,7 +36,7 @@
 - (void)tick:(CADisplayLink *)link{DGDanmakuOverlay *overlay=_overlay;if(overlay)[overlay alignMasks];else [link invalidate];}
 @end
 @implementation DGDanmakuOverlay{
- BOOL _adaptive,_playing,_sampling;CADisplayLink *_clock;UIImage *_whiteMask,*_blackMask;
+ BOOL _adaptive,_playing,_sampling,_tearingDown;CADisplayLink *_clock;UIImage *_whiteMask,*_blackMask;
 }
 - (instancetype)initWithFrame:(CGRect)frame{if((self=[super initWithFrame:frame]))[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshRateChanged) name:@"DGRefreshRateChanged" object:nil];return self;}
 - (void)refreshRateChanged{DGApplyDisplayLinkRate(_clock,self);}
@@ -58,15 +58,21 @@
  [CATransaction begin];[CATransaction setDisableActions:YES];for(DGDanmakuLabel *label in self.subviews){CALayer *layer=label.layer.presentationLayer?:label.layer;[label alignMask:layer.frame overlaySize:self.bounds.size];}[CATransaction commit];
 }
 - (void)updateClock{
+ if(_tearingDown)return;
  BOOL run=_adaptive&&_playing&&self.window&&!self.hidden&&self.alpha>.01&&self.subviews.count>0;
  if(run&&!_clock){DGDanmakuClock *target=[DGDanmakuClock new];target.overlay=self;_clock=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];DGApplyDisplayLinkRate(_clock,self);[_clock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];}
  else if(!run&&_clock){[_clock invalidate];_clock=nil;[self alignMasks];}
  if(_sampling!=run){_sampling=run;if(self.samplingChanged)self.samplingChanged(run);}
 }
 - (void)didAddSubview:(UIView *)subview{[super didAddSubview:subview];if([subview isKindOfClass:DGDanmakuLabel.class]){DGDanmakuLabel *label=(DGDanmakuLabel *)subview;[label adaptive:_adaptive];[label whiteMask:_whiteMask blackMask:_blackMask];}[self updateClock];}
-- (void)willRemoveSubview:(UIView *)subview{[super willRemoveSubview:subview];__weak DGDanmakuOverlay *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak updateClock];});}
+- (void)willRemoveSubview:(UIView *)subview{
+ [super willRemoveSubview:subview];if(_tearingDown)return;
+ // UIView also invokes this from its destructor. Never register a new weak
+ // reference to a deallocating object or queue work from that path.
+ if(self.subviews.count<=1){[_clock invalidate];_clock=nil;if(_sampling){_sampling=NO;if(self.samplingChanged)self.samplingChanged(NO);}}
+}
 - (void)didMoveToWindow{[super didMoveToWindow];[self updateClock];}
 - (void)setHidden:(BOOL)hidden{[super setHidden:hidden];[self updateClock];}
 - (void)layoutSubviews{[super layoutSubviews];[self alignMasks];}
-- (void)dealloc{[_clock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)dealloc{_tearingDown=YES;_samplingChanged=nil;[_clock invalidate];_clock=nil;[NSNotificationCenter.defaultCenter removeObserver:self];}
 @end

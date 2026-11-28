@@ -36,14 +36,14 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     if (!url.length) return;
     NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
-    if (cached) { self.image = cached; return; }
+    if (cached) { self.image = cached;if(self.imageReady)self.imageReady(cached); return; }
     NSURL *address = [NSURL URLWithString:url];
     if (!address){_loadFailed=YES;[self updateLoadingState];return;}
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:address cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:20];
     [request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     __weak DGImage *weakSelf = self;
-    void (^finish)(UIImage *)=^(UIImage *image){dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weakSelf;if(!self||load!=self->_loadGeneration||![self->_source isEqualToString:url])return;self->_task=nil;self->_loading=NO;self->_loadFailed=image==nil;self.image=image?:self.placeholderImage;[self updateLoadingState];});};
+    void (^finish)(UIImage *)=^(UIImage *image){dispatch_async(dispatch_get_main_queue(),^{DGImage *self=weakSelf;if(!self||load!=self->_loadGeneration||![self->_source isEqualToString:url])return;self->_task=nil;self->_loading=NO;self->_loadFailed=image==nil;self.image=image?:self.placeholderImage;[self updateLoadingState];if(image&&self.imageReady)self.imageReady(image);});};
     _loading=YES;[self updateLoadingState];
     _task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (!data.length || error||([response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode>=400)){finish(nil);return;}

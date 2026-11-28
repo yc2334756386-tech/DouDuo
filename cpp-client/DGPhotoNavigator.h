@@ -3,8 +3,10 @@
 @interface DGPhotoNavigator:UIControl
 @property(nonatomic,copy) void (^onSelect)(NSInteger index);
 @property(nonatomic,copy) void (^onBrowsingChanged)(BOOL browsing);
+@property(nonatomic,copy) void (^onThumbnailReady)(UIImage *image);
 @property(nonatomic,readonly) BOOL browsing;
 - (void)images:(NSArray<NSString *> *)urls;
 - (void)page:(NSInteger)index;
 - (void)cancelBrowsing;
+- (UIImage *)selectedThumbnail;
 @end

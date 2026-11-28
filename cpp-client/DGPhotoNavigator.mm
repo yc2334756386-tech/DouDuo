@@ -5,21 +5,22 @@
 @end
 @implementation DGPhotoNavigator{
  NSArray<NSString *> *_urls;NSMutableArray<DGImage *> *_images;NSInteger _index;
- BOOL _browsing;NSUInteger _browseGeneration;douglass::GalleryScrubber _scrubber;
- UIPanGestureRecognizer *_pan;UIView *_thumbnails;UILabel *_count;
+ BOOL _browsing;NSUInteger _imageGeneration;douglass::GalleryScrubber _scrubber;
+ UIPanGestureRecognizer *_pan;UIView *_thumbnails;UILabel *_count;CALayer *_selection;
 }
 - (instancetype)initWithFrame:(CGRect)frame{
  if((self=[super initWithFrame:frame])){
   self.backgroundColor=UIColor.clearColor;self.clipsToBounds=NO;_images=[NSMutableArray array];
-  _thumbnails=[UIView new];_thumbnails.clipsToBounds=YES;_thumbnails.userInteractionEnabled=NO;_thumbnails.hidden=YES;[self addSubview:_thumbnails];
+  _thumbnails=[UIView new];_thumbnails.clipsToBounds=YES;_thumbnails.userInteractionEnabled=NO;_thumbnails.hidden=YES;[self addSubview:_thumbnails];_selection=[CALayer layer];_selection.borderColor=UIColor.whiteColor.CGColor;_selection.borderWidth=1.5;_selection.cornerRadius=5;_selection.hidden=YES;[self.layer addSublayer:_selection];
   _pan=[[UIPanGestureRecognizer alloc]initWithTarget:self action:@selector(pan:)];_pan.maximumNumberOfTouches=1;_pan.delegate=self;[self addGestureRecognizer:_pan];
   [self addGestureRecognizer:[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(tap:)]];
   _count=Label(15,UIFontWeightMedium);_count.textAlignment=NSTextAlignmentCenter;_count.hidden=YES;_count.layer.shadowColor=UIColor.blackColor.CGColor;_count.layer.shadowOpacity=.55;_count.layer.shadowRadius=2;_count.layer.shadowOffset=CGSizeMake(0,1);[self addSubview:_count];
  }return self;
 }
 - (BOOL)browsing{return _browsing;}
+- (UIImage *)selectedThumbnail{return _index>=0&&_index<(NSInteger)_images.count?_images[_index].image:nil;}
 - (void)setBrowsing:(BOOL)value{
- if(_browsing==value)return;_browsing=value;++_browseGeneration;_thumbnails.hidden=!value;_count.hidden=!value;
+ if(_browsing==value)return;_browsing=value;_thumbnails.hidden=!value;_selection.hidden=!value;_count.hidden=!value;
  if(value){_thumbnails.alpha=0;_count.alpha=0;[self loadVisibleThumbnails];}else for(DGImage *image in _images)[image remote:@""];
  [self setNeedsDisplay];[self setNeedsLayout];if(self.onBrowsingChanged)self.onBrowsingChanged(value);
  if(value)DGAnimate(.12,^{self->_thumbnails.alpha=1;self->_count.alpha=1;},nil);
@@ -28,9 +29,9 @@
  if(!_browsing)return;[self finishBrowsing];_pan.enabled=NO;_pan.enabled=YES;
 }
 - (void)images:(NSArray<NSString *> *)urls{
- [self cancelBrowsing];_urls=urls.copy;_index=0;_count.attributedText=nil;
+ [self cancelBrowsing];NSUInteger generation=++_imageGeneration;_urls=urls.copy;_index=0;_count.attributedText=nil;
  for(UIView *image in _images)[image removeFromSuperview];[_images removeAllObjects];
- for(NSString *url in urls){DGImage *image=[DGImage new];image.maximumPixelSize=160;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;[_thumbnails addSubview:image];[_images addObject:image];}
+ __weak DGPhotoNavigator *weak=self;NSUInteger position=0;for(NSString *url in urls){NSUInteger index=position++;DGImage *image=[DGImage new];image.imageReady=^(UIImage *thumbnail){DGPhotoNavigator *view=weak;if(view&&generation==view->_imageGeneration&&view->_browsing&&view->_index==(NSInteger)index&&view.onThumbnailReady)view.onThumbnailReady(thumbnail);};image.maximumPixelSize=100;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;[_thumbnails addSubview:image];[_images addObject:image];}
  [self page:0];[self setNeedsLayout];
 }
 - (void)page:(NSInteger)index{
@@ -43,9 +44,11 @@
  for(NSUInteger i=0;i<_images.count;i++){double x=_scrubber.thumbnailX(i);[_images[i]remote:x>=-70&&x<=self.bounds.size.width+70?_urls[i]:@""];}
 }
 - (void)layoutSubviews{
- [super layoutSubviews];CGFloat width=self.bounds.size.width;_thumbnails.frame=CGRectMake(0,-13,width,58);_count.frame=CGRectMake(0,49,width,21);
+ [super layoutSubviews];CGFloat width=self.bounds.size.width;_thumbnails.frame=CGRectMake(0,-7,width,44);_count.frame=CGRectMake(0,40,width,21);
  if(!_browsing)return;
- for(NSUInteger i=0;i<_images.count;i++){BOOL selected=i==_index;CGFloat w=selected?44:30,h=selected?56:44;DGImage *image=_images[i];image.frame=CGRectMake(_scrubber.thumbnailX(i)-w/2,(58-h)/2,w,h);image.layer.cornerRadius=selected?6:4;image.layer.borderColor=UIColor.whiteColor.CGColor;image.layer.borderWidth=selected?1.5:0;}
+ [CATransaction begin];[CATransaction setDisableActions:YES];_selection.frame=CGRectMake(width/2-14,-6,28,42);
+ for(NSUInteger i=0;i<_images.count;i++){CGFloat focus=MAX(0,1-fabs((double)i-_scrubber.position())),w=18+8*focus,h=30+10*focus;DGImage *image=_images[i];image.frame=CGRectMake(_scrubber.thumbnailX(i)-w/2,(44-h)/2,w,h);image.layer.cornerRadius=4;image.layer.borderWidth=0;}
+ [CATransaction commit];
 }
 - (void)drawRect:(CGRect)rect{
  CGContextClearRect(UIGraphicsGetCurrentContext(),self.bounds);if(_browsing)return;
@@ -65,17 +68,14 @@
 }
 - (void)applyScrub{
  NSInteger index=(NSInteger)llround(_scrubber.position());if(index!=_index){DGHaptic();[self page:index];if(self.onSelect)self.onSelect(index);}
- [self setNeedsLayout];[self loadVisibleThumbnails];
-}
-- (void)edgeStep:(NSUInteger)generation{
- __weak DGPhotoNavigator *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,80*NSEC_PER_MSEC),dispatch_get_main_queue(),^{DGPhotoNavigator *self=weak;if(!self||generation!=self->_browseGeneration||!self->_browsing||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;if(self->_scrubber.advanceEdge(.08))[self applyScrub];[self edgeStep:generation];});
+ [self setNeedsLayout];[self layoutIfNeeded];[self loadVisibleThumbnails];
 }
 - (void)finishBrowsing{
  if(!_browsing)return;NSInteger index=(NSInteger)_scrubber.finish();[self page:index];if(self.onSelect)self.onSelect(index);[self setBrowsing:NO];
 }
 - (void)pan:(UIPanGestureRecognizer *)gesture{
  CGPoint point=[gesture locationInView:self];
- if(gesture.state==UIGestureRecognizerStateBegan){CGPoint delta=[gesture translationInView:self];_scrubber.begin(_index,point.x-delta.x,self.bounds.size.width,_urls.count);[self setBrowsing:YES];[self edgeStep:_browseGeneration];}
+ if(gesture.state==UIGestureRecognizerStateBegan){CGPoint delta=[gesture translationInView:self];_scrubber.begin(_index,point.x-delta.x,self.bounds.size.width,_urls.count);[self setBrowsing:YES];}
  if(gesture.state==UIGestureRecognizerStateBegan||gesture.state==UIGestureRecognizerStateChanged){_scrubber.move(point.x);[self applyScrub];}
  if(gesture.state==UIGestureRecognizerStateEnded||gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)[self finishBrowsing];
 }
