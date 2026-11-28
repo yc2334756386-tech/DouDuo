@@ -468,7 +468,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)beginPaging {
  if(_pagingMotion)return;
  _pagingPriority=DGBeginAnimationPriority(30);
- _pagingMotion=YES;++_warmGeneration;DGSuspendPrerolls();
+ _pagingMotion=YES;++_warmGeneration;DGDeferPrerolls();
  if(DGDiagnosticEnabled()){
   _pagingStarted=CACurrentMediaTime();_pagingPrevious=_pagingStarted;_pagingRelease=0;_pagingMaxGap=0;_pagingSamples=0;_pagingLongFrames=0;_pagingStartIndex=_current;
   DGSwipeClock *clock=[DGSwipeClock new];__weak DGFeed *weak=self;

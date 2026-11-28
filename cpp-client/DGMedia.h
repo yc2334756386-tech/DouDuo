@@ -35,6 +35,8 @@
 @end
 void DGWarmWorks(const std::vector<Work> &works, NSInteger index);
 void DGSuspendPrerolls(void);
+void DGDeferPrerolls(void);
+void DGInvalidateAudioPreloads(void);
 void DGClearPlayers(void);
 void DGResetWorkPlayback(NSString *identifier);
 

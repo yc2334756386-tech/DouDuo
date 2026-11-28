@@ -301,8 +301,9 @@ namespace { struct DGReplyState {
  NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();
 }
 - (void)openPreview:(NSString *)url source:(UIImageView *)source{
- if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewUserMoved=NO;_previewSnapshot=[_table snapshotViewAfterScreenUpdates:NO];_previewSnapshot.userInteractionEnabled=NO;_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;_previewSnapshot=nil;}
+ if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewUserMoved=NO;_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;_previewSnapshot=nil;}
 }
+- (void)dgCapturePreviewSnapshot{_previewSnapshot=[_table snapshotViewAfterScreenUpdates:YES];_previewSnapshot.userInteractionEnabled=NO;}
 - (void)sortLoaded{
     douglass::sortComments(_comments,_sort.selectedSegmentIndex==1);
 }

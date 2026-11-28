@@ -56,18 +56,29 @@ void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefa
  }@catch(NSException *error){_busy=false;[request finishWithImage:fallback context:nil];}
 }
 @end
-void DGConfigureMediaEnhancement(AVPlayerItem *item){
- if(!item)return;NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;BOOL spatial=[prefs boolForKey:@"douglass.experimental.metalfx"]&&DGMetalFXSpatialAvailable();NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
- static const void *key=&key;id token=[NSObject new];objc_setAssociatedObject(item,key,token,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
- if(!spatial&&!preset){item.videoComposition=nil;return;}
+@interface DGPicturePreparation:NSObject
+@property(nonatomic) BOOL sealed,completed;
+@property(nonatomic,copy) dispatch_block_t completion;
+- (void)finish;
+@end
+@implementation DGPicturePreparation
+- (void)finish{if(_completed)return;_completed=YES;dispatch_block_t completion=_completion;_completion=nil;if(completion)completion();}
+@end
+static const void *DGPicturePreparationKey=&DGPicturePreparationKey;
+void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
+ if(!item){if(completion)completion();return;}NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;BOOL spatial=[prefs boolForKey:@"douglass.experimental.metalfx"]&&DGMetalFXSpatialAvailable();NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
+ DGPicturePreparation *stage=[DGPicturePreparation new];stage.completion=completion;objc_setAssociatedObject(item,DGPicturePreparationKey,stage,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+ if(!spatial&&!preset){item.videoComposition=nil;[stage finish];return;}
  DGSpatialSession *session=[DGSpatialSession new];__weak AVPlayerItem *weak=item;AVAsset *asset=item.asset;
  // Reading an unloaded AVAsset property synchronously can hold up player
  // construction. Resolve it asynchronously and keep playback independent.
  [asset loadValuesAsynchronouslyForKeys:@[@"hasProtectedContent"] completionHandler:^{
-  if([asset statusOfValueForKey:@"hasProtectedContent" error:nil]!=AVKeyValueStatusLoaded||asset.hasProtectedContent)return;
-  [AVVideoComposition videoCompositionWithAsset:asset applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request){[session filter:request preset:preset spatial:spatial];} completionHandler:^(AVVideoComposition *composition,NSError *error){dispatch_async(dispatch_get_main_queue(),^{AVPlayerItem *current=weak;if(!current||objc_getAssociatedObject(current,key)!=token||!composition)return;CGSize size=composition.renderSize;double longest=MAX(size.width,size.height);session.scale=spatial&&longest>0?MAX(1.,MIN(1.5,1920./longest)):1.;AVMutableVideoComposition *configured=[composition mutableCopy];configured.renderSize=CGSizeMake(ceil(size.width*session.scale),ceil(size.height*session.scale));current.videoComposition=configured;DGDiagnostic(@"video.enhancement.attached",[NSString stringWithFormat:@"spatial=%d scale=%.2f preset=%ld input_w=%.0f input_h=%.0f",spatial,session.scale,(long)preset,size.width,size.height]);});}];
+  if([asset statusOfValueForKey:@"hasProtectedContent" error:nil]!=AVKeyValueStatusLoaded||asset.hasProtectedContent){dispatch_async(dispatch_get_main_queue(),^{[stage finish];});return;}
+  [AVVideoComposition videoCompositionWithAsset:asset applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request){[session filter:request preset:preset spatial:spatial];} completionHandler:^(AVVideoComposition *composition,NSError *error){dispatch_async(dispatch_get_main_queue(),^{AVPlayerItem *current=weak;if(!current||objc_getAssociatedObject(current,DGPicturePreparationKey)!=stage||stage.sealed||!composition){[stage finish];return;}CGSize size=composition.renderSize;double longest=MAX(size.width,size.height);session.scale=spatial&&longest>0?MAX(1.,MIN(1.5,1920./longest)):1.;AVMutableVideoComposition *configured=[composition mutableCopy];configured.renderSize=CGSizeMake(ceil(size.width*session.scale),ceil(size.height*session.scale));current.videoComposition=configured;DGDiagnostic(@"video.enhancement.attached",[NSString stringWithFormat:@"spatial=%d scale=%.2f preset=%ld input_w=%.0f input_h=%.0f",spatial,session.scale,(long)preset,size.width,size.height]);[stage finish];});}];
  }];
 }
+void DGConfigureMediaEnhancement(AVPlayerItem *item){DGPrepareMediaEnhancement(item,nil);}
+void DGSealMediaEnhancement(AVPlayerItem *item){DGPicturePreparation *stage=objc_getAssociatedObject(item,DGPicturePreparationKey);if(!stage)return;if(!stage.completed)DGDiagnostic(@"video.enhancement.bypass",@"reason=playback_started_before_optional_processing_ready");stage.sealed=YES;[stage finish];}
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset){
  if(!image||!image.CGImage||!preset||image.images.count)return image;
  static CIContext *context;static dispatch_once_t once;dispatch_once(&once,^{context=[CIContext contextWithOptions:@{kCIContextCacheIntermediates:@NO}];});

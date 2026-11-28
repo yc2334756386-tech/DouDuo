@@ -5,7 +5,7 @@
 namespace douglass {
 AudioControls &audioControls() noexcept{static AudioControls controls;return controls;}
 double AudioEnhancer::Biquad::tick(double x,unsigned c) noexcept{double y=b0*x+z1[c];z1[c]=b1*x-a1*y+z2[c];z2[c]=b2*x-a2*y;if(!std::isfinite(y)){z1[c]=z2[c]=0;return 0;}return y;}
-void AudioEnhancer::prepare(double rate,unsigned channels) noexcept{sampleRate_=std::isfinite(rate)&&rate>8000?rate:48000;channels_=std::clamp(channels,1u,8u);reset();for(unsigned i=0;i<8;++i)configure(i,0);}
+void AudioEnhancer::prepare(double rate,unsigned channels) noexcept{sampleRate_=std::isfinite(rate)&&rate>8000?rate:48000;channels_=std::clamp(channels,1u,8u);current_.fill(0);preamp_=1;reset();for(unsigned i=0;i<8;++i)configure(i,0);}
 void AudioEnhancer::reset() noexcept{for(auto &filter:filters_){filter.z1.fill(0);filter.z2.fill(0);}low_=mid_=high_=slow_=fast_=0;analyzed_=0;}
 void AudioEnhancer::configure(unsigned band,double gain) noexcept{
  static constexpr double frequencies[]{60,150,400,1000,2400,5000,9000,14000};double omega=2*std::numbers::pi*std::min(frequencies[band],sampleRate_*.44)/sampleRate_,a=std::pow(10.,gain/40.),alpha=std::sin(omega)/(2*.8),cosine=std::cos(omega),a0=1+alpha/a;auto &f=filters_[band];f.b0=(1+alpha*a)/a0;f.b1=-2*cosine/a0;f.b2=(1-alpha*a)/a0;f.a1=-2*cosine/a0;f.a2=(1-alpha/a)/a0;

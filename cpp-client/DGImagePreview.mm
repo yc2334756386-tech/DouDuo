@@ -9,6 +9,9 @@
 @property(nonatomic,strong) UIImage *initialImage;
 @property(nonatomic,strong) UIView *backgroundSnapshot;
 @property(nonatomic,weak) UIImageView *source;
+@property(nonatomic,weak) UIImageView *originalSource;
+@property(nonatomic,strong) UIImageView *transitionSource;
+@property(nonatomic) CGFloat sourceOriginalAlpha;
 @property(nonatomic,copy) dispatch_block_t finished;
 @property(nonatomic,weak) UIViewController *reader;
 @end
@@ -55,7 +58,8 @@
 }
 - (void)save{DGConfirmImageSave(self,self.url);}
 - (void)complete{
- if(_completed)return;_completed=YES;dispatch_block_t action=self.finished;self.finished=nil;if(action)action();DGDiagnostic(@"image.preview.closed",nil);
+ if(_completed)return;_completed=YES;dispatch_block_t action=self.finished;self.finished=nil;
+ [UIView performWithoutAnimation:^{self.originalSource.alpha=self.sourceOriginalAlpha;self.originalSource=nil;[self.transitionSource removeFromSuperview];self.transitionSource=nil;if(action)action();}];DGDiagnostic(@"image.preview.closed",nil);
 }
 - (void)close{
  if(_closing)return;
@@ -65,12 +69,17 @@
 - (void)viewDidDisappear:(BOOL)animated{[super viewDidDisappear:animated];if(self.isBeingDismissed||!self.presentingViewController)[self complete];}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(self.isBeingDismissed){[self animateBackdrop:NO];if([self.reader respondsToSelector:@selector(dgPreviewWillClose)])[self.reader performSelector:@selector(dgPreviewWillClose)];}}
 - (void)presentationControllerDidDismiss:(UIPresentationController *)controller{[self complete];}
+- (void)dealloc{_originalSource.alpha=_sourceOriginalAlpha;[_transitionSource removeFromSuperview];}
 @end
 BOOL DGShowImageWithCompletion(UIViewController *host,NSString *url,UIImageView *source,dispatch_block_t completion){
  if(!host||!url.length)return NO;UIViewController *presenter=host;while(presenter.parentViewController&&![presenter.parentViewController isKindOfClass:UINavigationController.class])presenter=presenter.parentViewController;
  if(presenter.presentedViewController||!host.viewIfLoaded.window)return NO;
- DGImagePreview *page=[DGImagePreview new];page.url=url;page.source=source;page.reader=host;page.initialImage=source.image;page.backgroundSnapshot=[presenter.view snapshotViewAfterScreenUpdates:NO];page.finished=completion;page.modalPresentationStyle=UIModalPresentationFullScreen;page.modalPresentationCapturesStatusBarAppearance=YES;
- if(!UIAccessibilityIsReduceMotionEnabled()){UIZoomTransitionOptions *options=[UIZoomTransitionOptions new];options.dimmingVisualEffect=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];__weak UIImageView *weak=source;page.preferredTransition=[UIViewControllerTransition zoomWithOptions:options sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context){return weak;}];}
+ DGImagePreview *page=[DGImagePreview new];page.url=url;page.source=source;page.reader=host;page.initialImage=source.image;page.originalSource=source;page.sourceOriginalAlpha=source.alpha;page.finished=completion;page.modalPresentationStyle=UIModalPresentationFullScreen;page.modalPresentationCapturesStatusBarAppearance=YES;
+ // A dedicated source participates in UIKit Zoom. Both backdrop snapshots omit
+ // it, so the return animation never flies over a second copy of the image.
+ if(source.superview&&source.bounds.size.width>0&&source.bounds.size.height>0){UIImageView *proxy=[[UIImageView alloc]initWithImage:source.image];proxy.bounds=source.bounds;proxy.center=source.center;proxy.transform=source.transform;proxy.contentMode=source.contentMode;proxy.clipsToBounds=source.clipsToBounds;proxy.layer.cornerRadius=source.layer.cornerRadius;proxy.autoresizingMask=source.autoresizingMask;proxy.alpha=source.alpha;proxy.userInteractionEnabled=NO;proxy.accessibilityElementsHidden=YES;proxy.hidden=YES;[source.superview insertSubview:proxy aboveSubview:source];page.transitionSource=proxy;page.source=proxy;source.alpha=0;}
+ if([host respondsToSelector:@selector(dgCapturePreviewSnapshot)])[host performSelector:@selector(dgCapturePreviewSnapshot)];page.backgroundSnapshot=[presenter.view snapshotViewAfterScreenUpdates:YES];page.transitionSource.hidden=NO;
+ if(!UIAccessibilityIsReduceMotionEnabled()){UIZoomTransitionOptions *options=[UIZoomTransitionOptions new];options.dimmingVisualEffect=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];__weak UIImageView *weak=page.source;page.preferredTransition=[UIViewControllerTransition zoomWithOptions:options sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context){return weak;}];}
  uint64_t priority=DGBeginAnimationPriority(1);[presenter presentViewController:page animated:YES completion:^{DGEndAnimationPriority(priority);}];page.presentationController.delegate=page;return YES;
 }
 void DGShowImage(UIViewController *host,NSString *url,UIImageView *source){DGShowImageWithCompletion(host,url,source,nil);}
