@@ -53,14 +53,14 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 4;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?7:section==1?2:section==2?8:1;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return @[@"画面增强 · 默认关闭",@"音频增强 · 默认关闭",@"八段均衡 · ±12 dB",@"实现与限制"][section];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return section==0?@"MetalFX 为单帧空间放大，不生成原片没有的真实细节。最高 1.5×，长边不超过 1920。画面预设独立于音频。":section==1?@"首次开启调音对后续新作品生效，参数调节实时生效。处理不了的音频格式和直播 HLS 保留原声；不切换音频会话。":section==2?@"预设会覆盖八段增益，选好后可逐项调节。低延迟 IIR，无频谱可视化持续刷新。":@"AutoEq 用于生成耳机校正参数；本版没有冒用通用耳机校正。OctaEQ 仅作设计参考，不移植 VST3 或 GPL 源码。处理核心为本项目 C++，系统框架由 Objective-C++ 适配。";}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return section==0?@"MetalFX 空间放大最高 1.5×，长边不超过 2560。画面预设独立于音频。":section==1?@"首次开启调音对后续新作品生效，参数调节实时生效。处理不了的音频格式和直播 HLS 保留原声；不切换音频会话。":section==2?@"预设会覆盖八段增益，选好后可逐项调节。低延迟 IIR，无频谱可视化持续刷新。":@"AutoEq 用于生成耳机校正参数；本版没有冒用通用耳机校正。OctaEQ 仅作设计参考，不移植 VST3 或 GPL 源码。处理核心为本项目 C++，系统框架由 Objective-C++ 适配。";}
 - (DGExperimentalControlCell *)base:(NSString *)title detail:(NSString *)detail{DGExperimentalControlCell *cell=[DGExperimentalControlCell new];cell.controlTitle.text=title;cell.controlDetail.text=detail;cell.controlDetail.hidden=!detail.length;return cell;}
 - (UITableViewCell *)toggle:(NSString *)title key:(NSString *)key detail:(NSString *)detail{
  DGExperimentalControlCell *cell=[self base:title detail:detail];
  UISwitch *control=[UISwitch new];control.accessibilityIdentifier=key;
  BOOL available=YES;
  if([key isEqualToString:@"douglass.experimental.metalfx"])available=DGMetalFXSpatialAvailable();
- if([key isEqualToString:@"douglass.experimental.vtSuperResolution"])available=DGVTSuperResolutionAvailable();
+ if([key isEqualToString:@"douglass.experimental.vtSuperResolution"])available=DGVTSuperResolutionAvailable()||DGMetalFXSpatialAvailable();
  control.enabled=available;
  NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
  BOOL value=[prefs boolForKey:key];
@@ -86,7 +86,7 @@
    [cell.controlStack addArrangedSubview:control];
    [control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;
    cell.controlDetail.hidden=NO;
-   if(control.selectedSegmentIndex==2)cell.controlDetail.text=@"实验模式。由 Core ML 检查 ANE 分配，超时回到原帧。";
+   if(control.selectedSegmentIndex==2)cell.controlDetail.text=@"实验模式。等待 RIFE 初始化、运行受限或超时时优先使用兼容插帧。";
    else cell.controlDetail.text=DGVTFSystemInterpolationAvailable()?@"低延迟优先使用系统插帧。":@"低延迟使用兼容插帧，快速运动时可能出现残影。";
    [self trackEffect:DGVideoEffectInterpolation inCell:cell];
    return cell;
@@ -102,7 +102,7 @@
    return cell;
   }
   if(path.row==4)return [self toggle:@"插帧转场保护" key:DGInterpolationProtectionKey detail:@"切换作品时释放插帧资源。视频内快切和快运镜时暂用原始帧。"];
-  if(path.row==5)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
+  if(path.row==5)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"优先使用系统低延迟超分，无法处理时切换到可用的 MetalFX"];
   return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"滑动换片时提前释放超分资源。新作品有可处理的帧就启动超分。"];
  }
 

@@ -14,6 +14,8 @@ void DGEndVideoEffect(DGVideoEffect effect,id owner);
 NSString *DGVideoEffectStatusText(DGVideoEffect effect);
 void DGLogVideoEffectSnapshot(void);
 void DGConfigureMediaEnhancement(AVPlayerItem *item);
+BOOL DGUseMetalFXFallback(AVPlayerItem *item);
+BOOL DGHasMetalFXFallback(AVPlayerItem *item);
 void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion);
 void DGSealMediaEnhancement(AVPlayerItem *item);
 void DGSetMetalFXPlaybackActive(AVPlayerItem *item,BOOL active);

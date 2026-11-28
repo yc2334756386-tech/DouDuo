@@ -88,19 +88,21 @@ void DGEndVideoEffect(DGVideoEffect effect,id owner) {
 NSString *DGVideoEffectStatusText(DGVideoEffect effect) {
  if(!DGEffectRequested(effect))return @"未启用";
  if((effect==DGVideoEffectMetalFX&&!DGMetalFXSpatialAvailable())||
-    (effect==DGVideoEffectSuperResolution&&!DGVTSuperResolutionAvailable())||
-    (effect==DGVideoEffectInterpolation&&DGRifeRequested()&&!DGRifeAvailable()))return @"当前设备不支持";
+    (effect==DGVideoEffectSuperResolution&&!DGVTSuperResolutionAvailable()&&!DGMetalFXSpatialAvailable()))return @"当前设备不支持";
  DGVideoEffectStatus *status=DGEffectStatus(effect);
  if(!status.owner||[status.state isEqualToString:@"idle"])return @"等待播放视频";
  if([status.state isEqualToString:@"active"]){
-  if(effect!=DGVideoEffectInterpolation)return @"已启用";
+  if(effect!=DGVideoEffectInterpolation)
+   return [status.backend isEqualToString:@"metalfx_fallback"]?@"已启用 · MetalFX 兼容":@"已启用";
   NSString *backend=[status.backend isEqualToString:@"rife"]?@"RIFE":([status.backend isEqualToString:@"system"]?@"系统":@"兼容");
   return [NSString stringWithFormat:@"已启用 · %@ %u×%@",backend,status.multiplier,status.multiplier<DGInterpolationMultiplier()?@"（已降档）":@""];
  }
  if([status.state isEqualToString:@"protected"])return @"转场保护中 · 播放原始帧";
  if([status.state isEqualToString:@"bypassed"]){
-  NSDictionary *reasons=@{@"unsupported_source":@"当前片源不支持",
-      @"source_rate":@"原视频帧率较高",@"frame_budget":@"处理超时",@"no_output":@"暂未收到增强帧",
+  NSDictionary *reasons=@{@"protected_content":@"受保护的视频", @"hdr":@"保留 HDR 原画",
+      @"composition_error":@"视频合成初始化失败", @"interpolation_backend":@"插帧后端未能处理当前画面",
+      @"resolution_backend":@"超分后端未能处理当前画面",
+      @"source_rate":@"当前屏幕刷新率不足以翻倍",@"frame_budget":@"处理超时",@"no_output":@"暂未收到增强帧",
       @"renderer":@"渲染队列繁忙",@"gpu":@"GPU 未能完成超分",@"size_limit":@"当前画面已达到尺寸上限"};
   NSString *reason=reasons[status.reason];
   return reason.length?[NSString stringWithFormat:@"暂未启用 · %@",reason]:@"暂未启用 · 当前片源未输出增强帧";
@@ -120,6 +122,7 @@ void DGMediaEnhancementApply(void){
 @interface DGSpatialSession:NSObject
 @property(nonatomic) double scale;
 @property(nonatomic) BOOL spatialEnabled;
+@property(nonatomic) BOOL resolutionFallback;
 @property(nonatomic,copy) NSString *unavailableReason;
 - (void)publishWaitingState;
 - (void)setPlaybackActive:(BOOL)active;
@@ -146,7 +149,7 @@ void DGMediaEnhancementApply(void){
   return;
  }
  _activeAfter.store(0,std::memory_order_release);
- if(previous!=0&&_spatialEnabled)DGEndVideoEffect(DGVideoEffectMetalFX,self);
+ if(previous!=0&&_spatialEnabled)DGEndVideoEffect(_resolutionFallback?DGVideoEffectSuperResolution:DGVideoEffectMetalFX,self);
  if(previous!=0&&!_busy.exchange(true,std::memory_order_acq_rel)){
   [self releaseGPUResources];
   _busy.store(false,std::memory_order_release);
@@ -154,8 +157,10 @@ void DGMediaEnhancementApply(void){
 }
 - (void)publishWaitingState {
  if(!_spatialEnabled||_activeAfter.load()==0)return;
- if(_unavailableReason.length)DGReportVideoEffect(DGVideoEffectMetalFX,self,@"bypassed",_unavailableReason);
- else DGReportVideoEffect(DGVideoEffectMetalFX,self,@"preparing",@"waiting_for_frame");
+ const auto effect=_resolutionFallback?DGVideoEffectSuperResolution:DGVideoEffectMetalFX;
+ NSString *backend=_resolutionFallback?@"metalfx_fallback":@"metalfx";
+ if(_unavailableReason.length)DGReportVideoEffect(effect,self,@"bypassed",_unavailableReason,0,backend);
+ else DGReportVideoEffect(effect,self,@"preparing",@"waiting_for_frame",0,backend);
 }
 - (void)reportSpatialOutput:(unsigned)output activation:(double)activation {
  if(!activation||_activeAfter.load()!=activation||_reportedOutput.exchange(output)==output)return;
@@ -164,7 +169,9 @@ void DGMediaEnhancementApply(void){
   DGSpatialSession *session=weak;
   if(!session||session->_activeAfter.load()!=activation||session->_reportedOutput.load()!=output)return;
   NSString *reason=output==1?@"frame_output":@"gpu";
-  DGReportVideoEffect(DGVideoEffectMetalFX,session,output==1?@"active":@"bypassed",reason);
+  const BOOL fallback=session.resolutionFallback;
+  DGReportVideoEffect(fallback?DGVideoEffectSuperResolution:DGVideoEffectMetalFX,session,
+                      output==1?@"active":@"bypassed",reason,0,fallback?@"metalfx_fallback":@"metalfx");
  });
 }
 - (void)finishGPUWork {
@@ -208,6 +215,7 @@ void DGMediaEnhancementApply(void){
 @end
 @interface DGPicturePreparation:NSObject
 @property(nonatomic) BOOL sealed,completed;
+@property(nonatomic) BOOL retryWhenActive;
 @property(nonatomic) BOOL playbackActive;
 @property(nonatomic,strong) DGSpatialSession *session;
 @property(nonatomic,copy) dispatch_block_t completion;
@@ -217,25 +225,39 @@ void DGMediaEnhancementApply(void){
 - (void)finish{if(_completed)return;_completed=YES;dispatch_block_t completion=_completion;_completion=nil;if(completion)completion();}
 @end
 static const void *DGPicturePreparationKey=&DGPicturePreparationKey;
-void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
- if(!item){if(completion)completion();return;}NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;BOOL spatial=[prefs boolForKey:@"douglass.experimental.metalfx"]&&DGMetalFXSpatialAvailable();NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
+static void DGPreparePicture(AVPlayerItem *item,dispatch_block_t completion,BOOL resolutionFallback){
+ if(!item){if(completion)completion();return;}
+ NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
+ BOOL spatial=(resolutionFallback||[prefs boolForKey:@"douglass.experimental.metalfx"])&&DGMetalFXSpatialAvailable();
+ NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
  DGPicturePreparation *previous=objc_getAssociatedObject(item,DGPicturePreparationKey);
  DGPicturePreparation *stage=[DGPicturePreparation new];stage.completion=completion;stage.playbackActive=previous.playbackActive;
  [previous.session setPlaybackActive:NO];
  objc_setAssociatedObject(item,DGPicturePreparationKey,stage,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
  if(!spatial&&!preset){item.videoComposition=nil;[stage finish];return;}
- DGSpatialSession *session=[DGSpatialSession new];session.spatialEnabled=spatial;stage.session=session;[session setPlaybackActive:stage.playbackActive];
+ DGSpatialSession *session=[DGSpatialSession new];
+ session.spatialEnabled=spatial;
+ session.resolutionFallback=resolutionFallback;
+ stage.session=session;
+ [session setPlaybackActive:stage.playbackActive];
  __weak AVPlayerItem *weak=item;AVAsset *asset=item.asset;
  // Reading an unloaded AVAsset property synchronously can hold up player
  // construction. Resolve it asynchronously and keep playback independent.
  [asset loadValuesAsynchronouslyForKeys:@[@"hasProtectedContent"] completionHandler:^{
-  if([asset statusOfValueForKey:@"hasProtectedContent" error:nil]!=AVKeyValueStatusLoaded||asset.hasProtectedContent){dispatch_async(dispatch_get_main_queue(),^{session.unavailableReason=@"unsupported_source";[session publishWaitingState];[stage finish];});return;}
+  if([asset statusOfValueForKey:@"hasProtectedContent" error:nil]==AVKeyValueStatusLoaded&&asset.hasProtectedContent){
+   dispatch_async(dispatch_get_main_queue(),^{session.unavailableReason=@"protected_content";[session publishWaitingState];[stage finish];});
+   return;
+  }
   [AVVideoComposition videoCompositionWithAsset:asset applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request){[session filter:request preset:preset spatial:spatial];} completionHandler:^(AVVideoComposition *composition,NSError *error){dispatch_async(dispatch_get_main_queue(),^{
    AVPlayerItem *current=weak;
    if(!current||objc_getAssociatedObject(current,DGPicturePreparationKey)!=stage||stage.sealed){[stage finish];return;}
-   if(!composition){session.unavailableReason=@"unsupported_source";[session publishWaitingState];[stage finish];return;}
+   if(!composition){
+    session.unavailableReason=@"composition_error";[session publishWaitingState];
+    DGDiagnostic(@"video.enhancement.composition_error",[NSString stringWithFormat:@"code=%ld",(long)error.code]);
+    [stage finish];return;
+   }
    CGSize size=composition.renderSize;double longest=MAX(size.width,size.height);
-   session.scale=spatial&&longest>0?MAX(1.,MIN(1.5,1920./longest)):1.;
+   session.scale=spatial&&longest>0?MAX(1.,MIN(1.5,2560./longest)):1.;
    if(spatial&&session.scale<=1){session.unavailableReason=@"size_limit";[session publishWaitingState];}
    AVMutableVideoComposition *configured=[composition mutableCopy];
    configured.renderSize=CGSizeMake(ceil(size.width*session.scale),ceil(size.height*session.scale));
@@ -245,11 +267,33 @@ void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
   });}];
  }];
 }
-void DGConfigureMediaEnhancement(AVPlayerItem *item){DGPrepareMediaEnhancement(item,nil);}
+void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
+ BOOL fallback=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.vtSuperResolution"]&&
+               !DGVTSuperResolutionAvailable()&&DGMetalFXSpatialAvailable();
+ DGPreparePicture(item,completion,fallback);
+}
+void DGConfigureMediaEnhancement(AVPlayerItem *item){
+ BOOL fallback=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.vtSuperResolution"]&&
+               (DGHasMetalFXFallback(item)||!DGVTSuperResolutionAvailable())&&DGMetalFXSpatialAvailable();
+ DGPreparePicture(item,nil,fallback);
+}
+BOOL DGHasMetalFXFallback(AVPlayerItem *item){
+ DGPicturePreparation *stage=item?objc_getAssociatedObject(item,DGPicturePreparationKey):nil;
+ return stage.session.resolutionFallback;
+}
+BOOL DGUseMetalFXFallback(AVPlayerItem *item){
+ if(!item||!DGMetalFXSpatialAvailable()||![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.vtSuperResolution"])return NO;
+ if(!DGHasMetalFXFallback(item)){
+  DGDiagnostic(@"video.super_resolution.fallback",@"backend=metalfx");
+  DGPreparePicture(item,nil,YES);
+ }
+ return YES;
+}
 void DGSealMediaEnhancement(AVPlayerItem *item){
  DGPicturePreparation *stage=objc_getAssociatedObject(item,DGPicturePreparationKey);
  if(!stage)return;
  if(!stage.completed){
+  stage.retryWhenActive=stage.session.spatialEnabled;
   stage.session.unavailableReason=@"no_output";
   [stage.session publishWaitingState];
   DGDiagnostic(@"video.enhancement.bypass",@"reason=playback_started_before_optional_processing_ready");
@@ -261,6 +305,11 @@ void DGSetMetalFXPlaybackActive(AVPlayerItem *item,BOOL active){
  if(!item)return;
  DGPicturePreparation *stage=objc_getAssociatedObject(item,DGPicturePreparationKey);
  stage.playbackActive=active;
+ if(active&&stage.retryWhenActive){
+  stage.retryWhenActive=NO;
+  DGPreparePicture(item,nil,stage.session.resolutionFallback);
+  return;
+ }
  [stage.session setPlaybackActive:active];
 }
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset){

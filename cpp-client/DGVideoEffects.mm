@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <type_traits>
 
@@ -271,7 +272,7 @@ struct FrameResult {
     PixelBuffer current;
     InsertedFrames inserted;
     bool supported=false,compatibility=false,upscaled=false,rife=false;
-    bool thirds=false;
+    bool thirds=false, resolutionFallbackNeeded=false;
     douglass::InterpolationHazard interpolationHazard=douglass::InterpolationHazard::none;
 };
 
@@ -324,10 +325,14 @@ public:
             pair.previous.reset();
         }
         if(cancelled.load(std::memory_order_relaxed))return {};
-        if(!interpolationConfigured_&&pair.previous&&key_.interpolation){
+        if(!interpolationConfigured_&&pair.previous&&(key_.interpolation||key_.rife)){
             interpolationConfigured_=true;
-            if(@available(iOS 26.0,*))configureInterpolation();
-            if(std::max(key_.width,key_.height)<=2560&&key_.width*key_.height<=1920*1080)
+            if(key_.interpolation){
+                if(@available(iOS 26.0,*))configureInterpolation();
+            }
+            if((key_.format==kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange||
+                key_.format==kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)&&
+               std::max(key_.width,key_.height)<=2560&&key_.width*key_.height<=1920*1080)
                 blendPool_=makePool(@{},key_.width,key_.height,key_.format);
         }
         if(!resolutionConfigured_&&key_.resolution&&!cancelled.load(std::memory_order_relaxed)){
@@ -337,17 +342,26 @@ public:
         const auto started=CACurrentMediaTime();
         const bool requestHigher=pair.previous&&pair.allowsHigherRate&&started>=fourTimesBackoffUntil_;
         const double extraDeadline=requestHigher?quarterDeadline:0.;
-        if(key_.rife&&pair.previous){
+        if(key_.rife&&pair.previous&&started>=rifeRetryAfter_&&started<midpointDeadline){
             if(!rife_)rife_=std::make_unique<DGRife>();
             const auto pixels=rife_->copyInterpolatedFrames(pair.previous.get(),pair.source.get(),midpointDeadline,extraDeadline,key_.multiplier,cancelled);
             for(size_t i=0;i<pixels.size();++i)if(pixels[i])frames.inserted[i]=ownPixel(pixels[i]);
             frames.rife=frames.inserted[1]||frames.inserted[0];
+            if(!frames.rife){
+                rifeRetryAfter_=CACurrentMediaTime()+1.5;
+                if(rife_->rejected())rifeRetryAfter_=std::numeric_limits<double>::infinity();
+            }
         }
+        frames.resolutionFallbackNeeded=key_.resolution&&resolutionConfigured_&&!resolutionSession_;
         frames.supported=protectedFrame||interpolationSession_||resolutionSession_||blendPool_||
                          (key_.rife&&(!rife_||!rife_->rejected()))||
                          (key_.interpolation&&!interpolationConfigured_);
         if(cancelled.load(std::memory_order_relaxed)||!frames.supported)return frames;
         if(@available(iOS 26.0,*))processSystem(pair,midpointDeadline,extraDeadline,cancelled,frames);
+        if(resolutionSession_){
+            if(frames.upscaled)resolutionFailures_=0;
+            else if(++resolutionFailures_>=3)frames.resolutionFallbackNeeded=true;
+        }
         if(!frames.inserted[1]&&!frames.inserted[0]&&pair.previous&&blendPool_){
             frames.inserted=blendFrames(blendPool_,pair.previous.get(),pair.source.get(),!key_.protectInterpolation,key_.multiplier,extraDeadline,cancelled);
             frames.compatibility=bool(frames.inserted[1]);
@@ -462,6 +476,8 @@ private:
     bool interpolationConfigured_=false,resolutionConfigured_=false;
     NSInteger systemPhases_=0;
     double fourTimesBackoffUntil_=0;
+    double rifeRetryAfter_=0;
+    unsigned resolutionFailures_=0;
     douglass::InterpolationProtection transitionGuard_;
     VTFrameProcessor *__strong interpolationSession_=nil,*__strong resolutionSession_=nil;
     CVPixelBufferPoolRef interpolationPool_=nullptr,resolutionPool_=nullptr,blendPool_=nullptr;
@@ -584,12 +600,12 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
 - (void)showForPlayerLayer:(AVPlayerLayer *)layer {
     NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
     BOOL rife=DGRifeRequested()&&DGRifeAvailable();
-    BOOL interpolation=rife||(!DGRifeRequested()&&[prefs boolForKey:@"douglass.experimental.frameInterpolation"]);
-    BOOL resolution=[prefs boolForKey:@"douglass.experimental.vtSuperResolution"]&&DGVTSuperResolutionAvailable();
+    BOOL interpolation=DGRifeRequested()||[prefs boolForKey:@"douglass.experimental.frameInterpolation"];
+    AVPlayerItem *item=layer.player.currentItem;
+    BOOL resolution=[prefs boolForKey:@"douglass.experimental.vtSuperResolution"]&&DGVTSuperResolutionAvailable()&&!DGHasMetalFXFallback(item);
     BOOL protection=DGSuperResolutionTransitionProtection();
     BOOL protectInterpolation=interpolation&&DGInterpolationTransitionProtection();
     unsigned multiplier=interpolation?DGInterpolationMultiplier():2;
-    AVPlayerItem *item=layer.player.currentItem;
     if(item&&item==_item&&layer==_nativeLayer&&interpolation==_interpolation&&rife==_rife&&
        resolution==_resolution&&protection==_protection&&protectInterpolation==_protectInterpolation&&
        multiplier==_interpolationMultiplier)return;
@@ -654,7 +670,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     DGVideoEffectsClock *target=[DGVideoEffectsClock new];target.owner=self;
     _clock=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];
     _displayHz=std::clamp<double>(UIScreen.mainScreen.maximumFramesPerSecond,30,120);
-    const float preferredHz=_interpolationMultiplier>2?_displayHz:std::min(60.,_displayHz);
+    const float preferredHz=_interpolation?_displayHz:std::min(60.,_displayHz);
     _clock.preferredFrameRateRange=CAFrameRateRangeMake(30,preferredHz,preferredHz);
     [_clock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     [self layout];
@@ -720,6 +736,17 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     _pixelSize=CGSizeZero;_pixelFormat=0;
 }
 
+- (BOOL)switchToCompatibleResolution {
+    if(!_resolution||!DGUseMetalFXFallback(_item))return NO;
+    _resolution=NO;
+    _preferResolution=NO;
+    _consecutiveLate=0;
+    [self resetFrames];
+    [self releaseProcessing];
+    if(!_interpolation)_clock.paused=YES;
+    return YES;
+}
+
 - (void)missedFrame {
     ++_consecutiveLate;
     if(!_display.hidden||_readyFrames)[self resetFrames];
@@ -732,6 +759,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         DGDiagnostic(@"video.vt.bypass",@"effect=interpolation reason=frame_budget");
         return;
     }
+    if([self switchToCompatibleResolution])return;
     _unsupported=YES;
     _clock.paused=YES;
     [self releaseProcessing];
@@ -777,8 +805,8 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         if(_latest.source&&CMTimeCompare(actual,_latest.time)==0)return;
         CFTypeRef transfer=CVBufferGetAttachment(pixel.get(),kCVImageBufferTransferFunctionKey,nullptr);
         if(transfer&&(CFEqual(transfer,kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)||CFEqual(transfer,kCVImageBufferTransferFunction_ITU_R_2100_HLG))){
-            if(_interpolation)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"unsupported_source");
-            if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"bypassed",@"unsupported_source");
+            if(_interpolation)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"hdr");
+            if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"bypassed",@"hdr");
             [self resetFrames];[self releaseProcessing];_unsupported=YES;_clock.paused=YES;return;
         }
         CGSize size=CGSizeMake(CVPixelBufferGetWidth(pixel.get()),CVPixelBufferGetHeight(pixel.get()));
@@ -790,9 +818,10 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         }
         const double interval=CMTimeGetSeconds(CMTimeSubtract(actual,_latest.time));
         if(_latest.source&&(!std::isfinite(interval)||interval<=0||interval>.10))[self resetFrames];
-        const bool interpolate=_latest.source&&_interpolation&&!_preferResolution&&interval>=.025&&interval<=.10;
-        const unsigned multiplier=_interpolationMultiplier;
         const double refreshInterval=link.targetTimestamp-link.timestamp;
+        const bool displayCanDouble=interval>0&&interval*_displayHz>=1.98;
+        const bool interpolate=_latest.source&&_interpolation&&!_preferResolution&&displayCanDouble&&interval<=.10;
+        const unsigned multiplier=_interpolationMultiplier;
         const double earliestOffset=interval*(1.-1./multiplier);
         const bool allowsHigherRate=interpolate&&multiplier>2&&interval*_displayHz>=multiplier*.99&&refreshInterval>0&&
             interval>=refreshInterval*multiplier*.975&&earliestOffset+interpolationHeadroom<renderLead&&
@@ -802,7 +831,10 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                         interpolate?CMTimeSubtract(now,CMTimeMakeWithSeconds(interval,60000)):kCMTimeInvalid,allowsHigherRate};
         _latest={pixel,{},actual,kCMTimeInvalid};
         if(_interpolation&&!_resolution&&!pair.previous){
-            if(interval>0&&interval<.025)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"source_rate");
+            if(interval>0&&!displayCanDouble){
+                if(CMTIME_IS_VALID(_lastQueued))[self discardRenderedFrames];
+                DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"source_rate");
+            }
             return;
         }
         if(processingFrame.exchange(true,std::memory_order_acq_rel))return;
@@ -829,6 +861,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                 if(deferred||cancellation->load(std::memory_order_relaxed)||effects->_generation!=generation||!effects->_display||DGAnimationProcessingDeferred())return;
                 const auto hazard=result.interpolationHazard;
                 const BOOL protectedFrame=hazard!=douglass::InterpolationHazard::none;
+                if(result.resolutionFallbackNeeded&&[effects switchToCompatibleResolution])return;
                 if(protectedFrame!=effects->_interpolationProtected){
                     effects->_interpolationProtected=protectedFrame;
                     if(protectedFrame){
@@ -845,8 +878,8 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                     }
                 }
                 if(!result.supported){
-                    if(effects->_interpolation&&!effects->_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",@"unsupported_source");
-                    if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,@"bypassed",@"unsupported_source");
+                    if(effects->_interpolation&&!effects->_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",@"interpolation_backend");
+                    if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,@"bypassed",@"resolution_backend");
                     [effects resetFrames];[effects releaseProcessing];effects->_unsupported=YES;effects->_clock.paused=YES;
                     return;
                 }
@@ -920,7 +953,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                             }
                         }else if(effects->_interpolation&&!effects->_preferResolution&&!protectedFrame){
                             effects->_reportedMultiplier=0;
-                            DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",interval>0&&interval<.025?@"source_rate":@"no_output");
+                            DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",interval>0&&!displayCanDouble?@"source_rate":@"no_output");
                         }
                         if(!effects->_reportedDisplay){
                             effects->_reportedDisplay=YES;
