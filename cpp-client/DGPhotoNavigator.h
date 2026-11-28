@@ -2,6 +2,7 @@
 #import "DGCommon.h"
 @interface DGPhotoNavigator:UIControl
 @property(nonatomic,copy) void (^onSelect)(NSInteger index);
+@property(nonatomic,copy) void (^onScrub)(double position,BOOL finished);
 @property(nonatomic,copy) void (^onBrowsingChanged)(BOOL browsing);
 @property(nonatomic,readonly) BOOL browsing;
 - (void)images:(NSArray<NSString *> *)urls;

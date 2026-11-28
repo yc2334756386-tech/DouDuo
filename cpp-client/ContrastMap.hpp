@@ -1,0 +1,16 @@
+#pragma once
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace douglass {
+// A small screen-space map shared by all visible comments, never a video-sized buffer.
+class ContrastMap {
+public:
+    void makeMasks(const std::uint8_t *rgba,std::size_t width,std::size_t height,
+                   std::size_t stride,std::uint8_t *white,std::uint8_t *black);
+private:
+    std::size_t width_=0,height_=0;
+    std::vector<std::uint8_t> darkInk_;
+};
+}

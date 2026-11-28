@@ -1,19 +1,19 @@
 {
-  "version": "0.20.9",
+  "version": "0.20.10",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
   "standard": "C++20",
   "active_source_counts": {
-    ".cpp": 4,
-    ".hpp": 4,
-    ".h": 21,
-    ".mm": 37,
+    ".cpp": 5,
+    ".hpp": 5,
+    ".h": 22,
+    ".mm": 38,
     ".js": 4
   },
   "compiled_translation_units": {
-    "C++20": 4,
-    "Objective-C++": 37,
+    "C++20": 5,
+    "Objective-C++": 38,
     "Swift": 0
   },
   "runtime_webkit_scripts": [
@@ -24,7 +24,8 @@
   ],
   "new_pure_cpp_modules": [
     "ClientPolicy.cpp",
-    "ChannelState.cpp"
+    "ChannelState.cpp",
+    "ContrastMap.cpp"
   ],
   "existing_pure_cpp_modules": [
     "Core.cpp",
@@ -38,7 +39,8 @@
     "portrait fill eligibility",
     "following state and author matching",
     "statistics parsing and validation",
-    "gallery scrubbing position and bounds"
+    "gallery scrubbing position and bounds",
+    "per-pixel luminance classification, hysteresis and complementary contrast masks"
   ],
   "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
   "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",

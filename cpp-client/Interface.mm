@@ -73,7 +73,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;_foreground=YES;_refreshIndex=1;_locationRequested=[NSMutableSet set];
     UICollectionViewFlowLayout *layout=[UICollectionViewFlowLayout new];layout.minimumLineSpacing=0;layout.minimumInteritemSpacing=0;
-    _collection=[[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:layout];_collection.backgroundColor=UIColor.blackColor;_collection.pagingEnabled=YES;_collection.showsVerticalScrollIndicator=NO;_collection.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_collection.dataSource=self;_collection.delegate=self;_collection.alwaysBounceVertical=YES;
+    _collection=[[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:layout];_collection.backgroundColor=UIColor.blackColor;_collection.pagingEnabled=YES;_collection.showsVerticalScrollIndicator=NO;_collection.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_collection.dataSource=self;_collection.delegate=self;_collection.alwaysBounceVertical=YES;[_collection.panGestureRecognizer addTarget:self action:@selector(feedPanState:)];
     _departingCells=[NSHashTable weakObjectsHashTable];[_collection registerClass:DGFeedCell.class forCellWithReuseIdentifier:@"work"];[self.view addSubview:_collection];
     if(!_staticFeed){_pull=[UIRefreshControl new];_pull.tintColor=UIColor.whiteColor;[_pull addTarget:self action:@selector(refreshFeed) forControlEvents:UIControlEventValueChanged];_collection.refreshControl=_pull;}
     if(_ownsBridge){_bridge=[DGBridge new];[_bridge mount:self.view];}
@@ -504,6 +504,10 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  if(_comments||_commentTransition||self.presentedViewController||_pagingMotion)return NO;
  NSInteger next=_current+1;if(next>=(NSInteger)_feed.works.size()){if(_feed.more)[self loadFeed:NO];return NO;}
  [self beginPaging];[_collection scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:next inSection:0] atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:YES];return YES;
+}
+- (void)feedPanState:(UIPanGestureRecognizer *)gesture{
+ if(gesture.state!=UIGestureRecognizerStateEnded&&gesture.state!=UIGestureRecognizerStateCancelled&&gesture.state!=UIGestureRecognizerStateFailed)return;
+ NSUInteger generation=_generation;__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGFeed *self=weak;if(self&&generation==self->_generation&&self->_pagingMotion&&!self->_collection.dragging&&!self->_collection.decelerating){[self finishPaging];if(self->_visible&&self->_foreground&&!self->_inactive)[self activate];}});
 }
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{[self beginPaging];}
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
