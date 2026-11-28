@@ -14,7 +14,7 @@ public:
 private:
     std::size_t width_=0,height_=0;
     double lineHeight_=0;
-    std::vector<std::uint8_t> darkInk_;
+    std::vector<std::uint8_t> darkInk_,candidate_,votes_;
     std::vector<float> light_,opacity_;
     std::vector<double> integral_,squared_;
     std::vector<float> opacityIntegral_;

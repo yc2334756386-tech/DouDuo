@@ -1,5 +1,6 @@
 #import "DGCommon.h"
 #import <MediaPlayer/MediaPlayer.h>
+#import "DGAudioEnhancement.h"
 @interface DGMusicSession:NSObject
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) NSDictionary *music;
@@ -35,7 +36,7 @@ static DGMusicSession *DGMusicShared(void){static DGMusicSession *session;static
  NSString *url=Text(String(music[@"url"]));if(!url.length)return;
  [[AVAudioSession sharedInstance]setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:nil];[[AVAudioSession sharedInstance]setActive:YES error:nil];
  BOOL same=[Text(String(self.music[@"id"]))isEqualToString:Text(String(music[@"id"]))]&&[Text(String(self.music[@"url"]))isEqualToString:url];
- if(!same||!_player){if(_clock&&_player)[_player removeTimeObserver:_clock];if(_endToken)[NSNotificationCenter.defaultCenter removeObserver:_endToken];[_player pause];_music=music.copy;_artwork=nil;_player=[AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:Asset(url)]];__weak DGMusicSession *weak=self;
+ if(!same||!_player){if(_clock&&_player)[_player removeTimeObserver:_clock];if(_endToken)[NSNotificationCenter.defaultCenter removeObserver:_endToken];[_player pause];_music=music.copy;_artwork=nil;_player=[AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:Asset(url)]];DGConfigureAudioEnhancement(_player.currentItem);__weak DGMusicSession *weak=self;
   _clock=[_player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(1,600) queue:dispatch_get_main_queue() usingBlock:^(CMTime time){[weak publish];}];
   _endToken=[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:_player.currentItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){DGMusicSession *s=weak;if(s.queue.count)[s advance:1];else{[s.player seekToTime:kCMTimeZero];[s pause];}}];
   NSString *cover=Text(String(music[@"cover"]));NSURL *address=[NSURL URLWithString:cover];if(address){NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:address];[request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];NSString *identifier=Text(String(music[@"id"]));[[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){UIImage *image=data?[UIImage imageWithData:data]:nil;if(!image)return;dispatch_async(dispatch_get_main_queue(),^{DGMusicSession *s=weak;if([Text(String(s.music[@"id"]))isEqualToString:identifier]){s.artwork=image;[s publish];}});}]resume];}

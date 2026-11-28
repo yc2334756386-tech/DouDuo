@@ -1,10 +1,12 @@
 #import "DGCommon.h"
 #import "DGAnimation.h"
+#import "DGMediaEnhancement.h"
 void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInterval last=0;CFTimeInterval now=CACurrentMediaTime();if(now-last<.08)return;last=now;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];});}
 @implementation DGImage {
     NSURLSessionDataTask *_task;
     NSString *_source;
     NSUInteger _loadGeneration;
+    unsigned _preset;
     BOOL _loading,_loadFailed,_showsLoadingIndicator,_previewLoading;
     UIActivityIndicatorView *_loadingSpinner;
     UILabel *_failureLabel;
@@ -37,10 +39,11 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
 }
 + (void)purgeCache{[DGImage.cache removeAllObjects];}
 - (void)remote:(NSString *)url {
-    if ([_source isEqualToString:url]) return;
+    unsigned preset=self.experimentalPicture?(unsigned)[NSUserDefaults.standardUserDefaults integerForKey:@"douglass.experimental.picturePreset"]:0;
+    if ([_source isEqualToString:url]&&_preset==preset) return;_preset=preset;
     NSUInteger load=++_loadGeneration;[_task cancel];_task=nil; _source = url.copy;self.image = self.placeholderImage;_loading=NO;_loadFailed=NO;[self updateLoadingState];
     if (!url.length) return;
-    NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
+    NSUInteger maxPixels=self.maximumPixelSize?:1200;NSString *cacheKey=preset?[NSString stringWithFormat:@"%@|%lu|preset%u",url,(unsigned long)maxPixels,preset]:[NSString stringWithFormat:@"%@|%lu",url,(unsigned long)maxPixels];
     UIImage *cached = [DGImage.cache objectForKey:cacheKey];
     if (cached) { self.image = cached;if(self.imageReady)self.imageReady(cached); return; }
     if(maxPixels>480){UIImage *preview=[DGImage.cache objectForKey:[NSString stringWithFormat:@"%@|480",url]];if(preview)self.image=preview;}
@@ -81,7 +84,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         }
         if (thumbnail) CGImageRelease(thumbnail);
         CFRelease(source);
-        if (!image){finish(nil);return;}
+        if (!image){finish(nil);return;}image=DGApplyPicturePreset(image,preset);
         [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
         finish(image);
     }];

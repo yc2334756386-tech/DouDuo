@@ -42,11 +42,12 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     UIRefreshControl *_pull;
     DGComments *_comments,*_retainedComments;NSString *_retainedCommentWorkID;
     UIView *_commentHost;CGFloat _commentDragOffset;
+    UIViewPropertyAnimator *_commentAnimator,*_feedSnapAnimator;NSUInteger _commentRevision,_feedSnapRevision;BOOL _feedSnapPending;
     UIVisualEffectView *_cleanKnob;UIButton *_cleanKnobButton;BOOL _cleanScreen;UIViewController *_messageChannel;BOOL _showingMessages;UIVisualEffectView *_messageRefreshGlass;
     NSDictionary *_profile;NSString *_messageScope;
     BOOL _profileLoading;NSUInteger _accountGeneration,_profileFailures;CFTimeInterval _profileCheckedAt;
     NSString *_operation,*_cursor;
-    BOOL _pendingClose,_pendingCommentClose,_loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
+    BOOL _pendingClose,_loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation,_warmGeneration,_feedRequest,_refreshFeedback;
     BOOL _pagingMotion,_cachedBootstrap,_manualRecommendationRefresh;
@@ -513,18 +514,29 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (BOOL)advanceWork {
  if(_comments||_commentTransition||self.presentedViewController||_pagingMotion)return NO;
  NSInteger next=_current+1;if(next>=(NSInteger)_feed.works.size()){if(_feed.more)[self loadFeed:NO];return NO;}
- [self beginPaging];[_collection scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:next inSection:0] atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:YES];return YES;
+ [self beginPaging];[self animateFeedSnap:CGPointMake(0,next*_collection.bounds.size.height)];return YES;
+}
+- (void)cancelFeedSnap{
+ if(!_feedSnapAnimator)return;CGPoint visible=(_collection.layer.presentationLayer?:_collection.layer).bounds.origin;++_feedSnapRevision;[_feedSnapAnimator stopAnimation:YES];_feedSnapAnimator=nil;_feedSnapPending=NO;[_collection setContentOffset:visible animated:NO];
+}
+- (void)animateFeedSnap:(CGPoint)target{
+ [self cancelFeedSnap];_feedSnapPending=YES;NSUInteger revision=++_feedSnapRevision;
+ _feedSnapAnimator=DGAnimate(.24,^{self->_collection.contentOffset=target;},^(BOOL done){if(revision!=self->_feedSnapRevision)return;self->_feedSnapAnimator=nil;self->_feedSnapPending=NO;[self finishPaging];[self activate];});
+}
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView withVelocity:(CGPoint)velocity targetContentOffset:(inout CGPoint *)targetContentOffset{
+ if(scrollView!=_collection||_comments)return;CGFloat height=_collection.bounds.size.height;if(height<=0)return;NSInteger page=MAX(0,MIN((NSInteger)_feed.works.size()-1,(NSInteger)llround(targetContentOffset->y/height)));CGPoint target=CGPointMake(0,page*height);*targetContentOffset=scrollView.contentOffset;_feedSnapPending=YES;NSUInteger revision=++_feedSnapRevision;__weak DGFeed *weak=self;
+ dispatch_async(dispatch_get_main_queue(),^{DGFeed *page=weak;if(!page||revision!=page->_feedSnapRevision||page->_collection.tracking)return;[page->_collection setContentOffset:page->_collection.contentOffset animated:NO];[page animateFeedSnap:target];});
 }
 - (void)feedPanState:(UIPanGestureRecognizer *)gesture{
  if(gesture.state!=UIGestureRecognizerStateEnded&&gesture.state!=UIGestureRecognizerStateCancelled&&gesture.state!=UIGestureRecognizerStateFailed)return;
- NSUInteger generation=_generation;__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGFeed *self=weak;if(self&&generation==self->_generation&&self->_pagingMotion&&!self->_collection.dragging&&!self->_collection.decelerating){[self finishPaging];if(self->_visible&&self->_foreground&&!self->_inactive)[self activate];}});
+ NSUInteger generation=_generation;__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGFeed *self=weak;if(self&&generation==self->_generation&&self->_pagingMotion&&!self->_feedSnapPending&&!self->_collection.dragging&&!self->_collection.decelerating){[self finishPaging];if(self->_visible&&self->_foreground&&!self->_inactive)[self activate];}});
 }
 - (BOOL)scrollViewShouldScrollToTop:(UIScrollView *)scrollView{return NO;}
-- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{[self beginPaging];}
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{[self cancelFeedSnap];[self beginPaging];}
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{if(_feedSnapPending)return;[self finishPaging];[self activate];}
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
  if(_pagingStarted>0){_pagingRelease=CACurrentMediaTime();DGDiagnostic(@"swipe.release",[NSString stringWithFormat:@"decelerates=%d",decelerate]);}
- if(!decelerate){[self finishPaging];[self activate];}
+ if(!decelerate&&!_feedSnapPending){[self finishPaging];[self activate];}
 }
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{[self finishPaging];[self activate];}
 - (void)warmAfterSettling {
@@ -558,16 +570,17 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 }
 - (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{if(_pagingMotion)[_departingCells addObject:(DGFeedCell *)cell];else [(DGFeedCell *)cell active:NO];}
 - (void)showComments:(NSString *)workID {
- if(_commentTransition)return;_closingComments=NO;if(_comments){[self closeComments];return;}_commentTransition=YES;
+ if(_comments){if(_closingComments){[self interruptCommentAnimation];_closingComments=NO;_commentTransition=YES;[self.view setNeedsLayout];[self.view layoutIfNeeded];NSUInteger revision=++_commentRevision;_commentAnimator=DGAnimate(.3,^{self->_commentHost.transform=CGAffineTransformIdentity;},^(BOOL done){if(revision!=self->_commentRevision)return;self->_commentTransition=NO;self->_commentAnimator=nil;[self syncCleanScreen];[self activate];});}else [self closeComments];return;}_closingComments=NO;_commentTransition=YES;
  _comments=[_retainedCommentWorkID isEqualToString:workID]?_retainedComments:nil;if(!_comments)_comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];_retainedComments=_comments;_retainedCommentWorkID=workID.copy;if(_noticeComment.length){[_comments focusComment:_noticeComment parent:_noticeParent];_noticeComment=nil;_noticeParent=nil;}if(_current<(NSInteger)_records.count){NSDictionary *record=_records[_current];_comments.coverURL=Text(String(record[@"cover"]));if(!_comments.coverURL.length)_comments.coverURL=Text(String(Array(record[@"images"]).firstObject));}__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.dragAction=^(CGFloat offset,NSInteger phase){[weak commentDragged:offset phase:phase];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
  [self addChildViewController:_comments];_commentHost=[UIView new];_commentHost.layer.cornerRadius=30;_commentHost.clipsToBounds=YES;[self.view addSubview:_commentHost];[_commentHost addSubview:_comments.view];[_comments didMoveToParentViewController:self];_collection.scrollEnabled=NO;
  [UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];[self->_comments restorePosition];}];_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentHost.bounds.size.height+10);
- DGAnimate(.3,^{self->_commentHost.transform=CGAffineTransformIdentity;},^(BOOL done){self->_commentTransition=NO;if(self->_pendingCommentClose){self->_pendingCommentClose=NO;[self closeComments];return;}[self syncCleanScreen];[self activate];});
+ NSUInteger revision=++_commentRevision;_commentAnimator=DGAnimate(.3,^{self->_commentHost.transform=CGAffineTransformIdentity;},^(BOOL done){if(revision!=self->_commentRevision)return;self->_commentTransition=NO;self->_commentAnimator=nil;[self syncCleanScreen];[self activate];});
 }
-- (void)commentDragged:(CGFloat)offset phase:(NSInteger)phase{if(_commentTransition||!_comments)return;_commentDragOffset=MIN(offset,_commentHost.bounds.size.height);if(phase==0){_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentDragOffset);CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height+_commentDragOffset;for(DGFeedCell *cell in _collection.visibleCells)[cell interactiveMediaHeight:media];}else if(phase==1){[self closeComments];}else{_commentDragOffset=0;CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height;for(DGFeedCell *cell in _collection.visibleCells)[cell mediaHeight:media];DGAnimate(.25,^{self->_commentHost.transform=CGAffineTransformIdentity;},nil);}}
+- (void)interruptCommentAnimation{if(!_commentAnimator)return;CGAffineTransform visible=(_commentHost.layer.presentationLayer?:_commentHost.layer).affineTransform;++_commentRevision;[_commentAnimator stopAnimation:YES];_commentAnimator=nil;_commentHost.transform=visible;_commentTransition=NO;}
+- (void)commentDragged:(CGFloat)offset phase:(NSInteger)phase{if(!_comments)return;if(_commentAnimator)[self interruptCommentAnimation];_closingComments=NO;_commentDragOffset=MIN(offset,_commentHost.bounds.size.height);if(phase==0){_commentHost.transform=CGAffineTransformMakeTranslation(0,_commentDragOffset);CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height+_commentDragOffset;for(DGFeedCell *cell in _collection.visibleCells)[cell interactiveMediaHeight:media];}else if(phase==1){[self closeComments];}else{_commentDragOffset=0;CGFloat media=self.view.bounds.size.height-_commentHost.bounds.size.height;for(DGFeedCell *cell in _collection.visibleCells)[cell mediaHeight:media];DGAnimate(.25,^{self->_commentHost.transform=CGAffineTransformIdentity;},nil);}}
 - (void)closeComments {
- if(!_comments)return;if(_commentTransition){if(!_closingComments)_pendingCommentClose=YES;return;}_pendingCommentClose=NO;[_comments rememberPosition];_commentTransition=YES;_closingComments=YES;_commentDragOffset=0;[self.view setNeedsLayout];[self.view layoutIfNeeded];UIView *panel=_commentHost;
- DGAnimate(.3,^{panel.transform=CGAffineTransformMakeTranslation(0,panel.bounds.size.height+10);},^(BOOL done){[self->_comments willMoveToParentViewController:nil];[self->_comments.view removeFromSuperview];[self->_comments removeFromParentViewController];self->_comments=nil;[panel removeFromSuperview];self->_commentHost=nil;self->_collection.scrollEnabled=YES;self->_commentTransition=NO;self->_closingComments=NO;[self syncCleanScreen];[UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];[self activate];});
+ if(!_comments||_closingComments)return;[self interruptCommentAnimation];[_comments rememberPosition];_commentTransition=YES;_closingComments=YES;_commentDragOffset=0;[self.view setNeedsLayout];[self.view layoutIfNeeded];UIView *panel=_commentHost;NSUInteger revision=++_commentRevision;
+ _commentAnimator=DGAnimate(.3,^{panel.transform=CGAffineTransformMakeTranslation(0,panel.bounds.size.height+10);},^(BOOL done){if(revision!=self->_commentRevision)return;self->_commentAnimator=nil;[self->_comments willMoveToParentViewController:nil];[self->_comments.view removeFromSuperview];[self->_comments removeFromParentViewController];self->_comments=nil;[panel removeFromSuperview];self->_commentHost=nil;self->_collection.scrollEnabled=YES;self->_commentTransition=NO;self->_closingComments=NO;[self syncCleanScreen];[UIView performWithoutAnimation:^{[self.view setNeedsLayout];[self.view layoutIfNeeded];}];[self activate];});
 }
 - (void)verificationCompleted:(NSNotification *)note{if(!_ownsBridge)return;_failed=NO;[self loadProfile];if([note.userInfo[@"operation"]isEqualToString:_operation]&&!_loading)[self loadFeed:YES];}
 - (void)accountChanged{[self sessionChanged:NO];}

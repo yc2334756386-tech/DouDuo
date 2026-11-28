@@ -10,25 +10,29 @@ static UIColor *DGCharcoalInk(CGFloat lineHeight){
 @implementation DGDanmakuLabel{
  BOOL _adaptive;UILabel *_white,*_black;CALayer *_whiteMask,*_blackMask;
 }
-- (void)drawTextInRect:(CGRect)rect{if(!_adaptive)[super drawTextInRect:rect];}
+- (BOOL)adaptiveEligible{
+ NSString *text=[self.plain stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+ return text.length>=2;
+}
+- (void)drawTextInRect:(CGRect)rect{if(!_adaptive||![self adaptiveEligible])[super drawTextInRect:rect];}
 - (void)adaptive:(BOOL)enabled{if(_adaptive==enabled)return;_adaptive=enabled;[self refreshAppearance];}
 - (void)refreshAppearance{
  id shadow=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku.shadow"];BOOL shadows=!shadow||[shadow boolValue];
- if(!_adaptive){[_white removeFromSuperview];[_black removeFromSuperview];_white=nil;_black=nil;_whiteMask=nil;_blackMask=nil;self.layer.shadowOpacity=shadows?.85:0;[self setNeedsDisplay];return;}
+ if(!_adaptive||![self adaptiveEligible]){[_white removeFromSuperview];[_black removeFromSuperview];_white=nil;_black=nil;_whiteMask=nil;_blackMask=nil;self.layer.shadowOpacity=shadows?.85:0;[self setNeedsDisplay];return;}
  if(!_white){_white=[UILabel new];_black=[UILabel new];_whiteMask=[CALayer layer];_blackMask=[CALayer layer];[self addSubview:_white];[self addSubview:_black];}
  NSArray<UILabel *> *copies=@[_white,_black];NSArray<UIColor *> *ink=@[[UIColor colorWithWhite:.98 alpha:1],DGCharcoalInk(self.font.lineHeight)],*shade=@[UIColor.blackColor,UIColor.whiteColor];
- for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];if(index==1&&text.length)[text addAttributes:@{NSStrokeColorAttributeName:[UIColor colorWithWhite:1 alpha:.38],NSStrokeWidthAttributeName:@(-1.7)} range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=index==0&&shadows?.85:0;copy.layer.shadowRadius=2;copy.layer.shadowOffset=index==1?CGSizeZero:CGSizeMake(0,1);copy.layer.zPosition=index==1?2:1;copy.userInteractionEnabled=NO;}
+ for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];if(index==1&&text.length)[text addAttributes:@{NSStrokeColorAttributeName:[UIColor colorWithWhite:1 alpha:.58],NSStrokeWidthAttributeName:@(-2.2)} range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=(index==1?[UIColor colorWithWhite:1 alpha:.65]:shade[index]).CGColor;copy.layer.shadowOpacity=index==0&&shadows?.85:index==1?.45:0;copy.layer.shadowRadius=index==1?1.2:2;copy.layer.shadowOffset=index==1?CGSizeZero:CGSizeMake(0,1);copy.layer.zPosition=index==1?2:1;copy.userInteractionEnabled=NO;}
  self.layer.shadowOpacity=0;[self setNeedsDisplay];[self setNeedsLayout];
 }
 - (void)layoutSubviews{[super layoutSubviews];_white.frame=self.bounds;_black.frame=self.bounds;}
 - (void)whiteMask:(UIImage *)white blackMask:(UIImage *)black{
- if(!_adaptive)return;
+ if(!_adaptive||![self adaptiveEligible]){_white.layer.mask=nil;_black.layer.mask=nil;return;}
  NSArray<CALayer *> *layers=@[_whiteMask,_blackMask];NSArray *images=@[white?(id)white.CGImage:NSNull.null,black?(id)black.CGImage:NSNull.null];
  for(NSUInteger index=0;index<2;++index){CALayer *layer=layers[index];id next=images[index]==NSNull.null?nil:images[index],previous=layer.contents;layer.contents=next;if(previous&&next&&previous!=next){CABasicAnimation *fade=[CABasicAnimation animationWithKeyPath:@"contents"];fade.fromValue=previous;fade.toValue=next;fade.duration=1./12;fade.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];[layer addAnimation:fade forKey:@"contrast-fade"];}else [layer removeAnimationForKey:@"contrast-fade"];}
  _white.layer.mask=white?_whiteMask:nil;_black.layer.mask=black?_blackMask:nil;_black.hidden=!black;
 }
 - (void)alignMask:(CGRect)frame overlaySize:(CGSize)size{
- if(!_adaptive)return;CGRect region=CGRectMake(-frame.origin.x,-frame.origin.y,size.width,size.height);_whiteMask.frame=region;_blackMask.frame=region;
+ if(!_adaptive||![self adaptiveEligible])return;CGRect region=CGRectMake(-frame.origin.x,-frame.origin.y,size.width,size.height);_whiteMask.frame=region;_blackMask.frame=region;
 }
 @end
 @interface DGDanmakuClock:NSObject

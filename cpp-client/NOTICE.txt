@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.20.17
+抖音极简版 / DouGlass 0.20.18
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -35,3 +35,14 @@ https://github.com/bgrins/TinyColor
 BackgroundCheck — Kenneth Cachia, MIT
 https://github.com/kennethcachia/background-check
 Linear-sRGB contrast and local texture concepts are independently implemented in C++.
+
+Apple metal-cpp headers (Foundation/Metal/MetalFX):
+Copyright 2020-2025 Apple Inc. Licensed under Apache License 2.0.
+https://github.com/apple/metal-cpp
+The full license is included as METAL-CPP-LICENSE.txt.
+
+Experimental media research references, no source copied:
+https://github.com/Atang0406/-fpga-
+https://github.com/jaakkopasanen/AutoEq (MIT; headphone equalizer settings generation)
+https://github.com/AmeHanare/OctaEQ (GPL-3.0 desktop VST3; design reference only)
+The eight-band DSP and adaptive controls are independently implemented in C++.

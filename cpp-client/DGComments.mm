@@ -218,7 +218,7 @@ namespace { struct DGReplyState {
     UIButton *_close,*_footer;
     UITableView *_table;
     BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
-    BOOL _previewOpen;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
+    BOOL _previewOpen,_previewReturning;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
     std::vector<Comment> _comments;
     std::unordered_set<std::string> _ids;
     std::unordered_map<std::string,DGReplyState> _replyStates;
@@ -266,9 +266,10 @@ namespace { struct DGReplyState {
     _separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5);
     _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
+    if(_previewOpen&&!_table.dragging&&!_table.decelerating)[self restorePreviewPosition];
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{if(![gesture isKindOfClass:UIPanGestureRecognizer.class])return YES;CGPoint velocity=[(UIPanGestureRecognizer *)gesture velocityInView:self.view];return velocity.y>0&&velocity.y>fabs(velocity.x)&&self.view.superview.layer.animationKeys.count==0;}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{if(![gesture isKindOfClass:UIPanGestureRecognizer.class])return YES;CGPoint velocity=[(UIPanGestureRecognizer *)gesture velocityInView:self.view];return velocity.y>0&&velocity.y>fabs(velocity.x);}
 - (void)dragHandle:(UIPanGestureRecognizer *)gesture{CGFloat y=MAX(0,[gesture translationInView:self.view.superview.superview].y);if(gesture.state==UIGestureRecognizerStateChanged&&self.dragAction)self.dragAction(y,0);if(gesture.state==UIGestureRecognizerStateEnded&&self.dragAction)self.dragAction(y,(y>70||[gesture velocityInView:self.view].y>650)?1:2);if((gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)&&self.dragAction)self.dragAction(y,2);}
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
 - (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
@@ -278,13 +279,20 @@ namespace { struct DGReplyState {
  _previewPosition.capture(std::move(parent),std::move(row),inset,_table.contentOffset.y);[_table setContentOffset:_table.contentOffset animated:NO];
 }
 - (void)restorePreviewPosition{
- if(!_previewPosition.valid())return;[_table layoutIfNeeded];NSInteger section=[self indexOfComment:Text(_previewPosition.parent())],row=0;BOOL found=section!=NSNotFound;
+ if(!_previewPosition.valid())return;NSInteger section=[self indexOfComment:Text(_previewPosition.parent())],row=0;BOOL found=section!=NSNotFound;
  if(found&&_previewPosition.row()!=_previewPosition.parent()){found=NO;auto state=_replyStates.find(_previewPosition.parent());if(state!=_replyStates.end()&&state->second.expanded){if(_previewPosition.row()=="#footer"){row=state->second.items.size()+1;found=YES;}else for(std::size_t i=0;i<state->second.items.size();++i)if(state->second.items[i].id==_previewPosition.row()){row=i+1;found=YES;break;}}}
  found=found&&row<[_table numberOfRowsInSection:section];CGFloat y=found?CGRectGetMinY([_table rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:section]]):0,minimum=-_table.adjustedContentInset.top,maximum=MAX(minimum,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);double target=_previewPosition.offset(y,found,minimum,maximum);if(fabs(target-_table.contentOffset.y)>.5)[_table setContentOffset:CGPointMake(0,target) animated:NO];_savedOffset=_table.contentOffset;_remembered=YES;
 }
 - (BOOL)deferPreviewUpdate:(NSString *)key action:(dispatch_block_t)action{if(!_previewOpen)return NO;if(!_previewUpdates)_previewUpdates=[NSMutableDictionary dictionary];_previewUpdates[key]=[action copy];return YES;}
 - (void)previewClosed{
- _previewOpen=NO;_table.scrollEnabled=YES;[self restorePreviewPosition];NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();[self restorePreviewPosition];
+ _previewOpen=NO;_previewReturning=NO;_table.scrollEnabled=YES;
+ // Do not publish a queued page into the return animation. It is consumed only
+ // when the reader deliberately scrolls to the loaded list's end.
+}
+- (void)dgPreviewWillClose{_previewReturning=YES;[self restorePreviewPosition];_table.scrollEnabled=YES;}
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView{
+ if(_previewOpen||_previewReturning||!_previewUpdates.count||!scrollView.dragging||scrollView.contentOffset.y+scrollView.bounds.size.height<scrollView.contentSize.height-80)return;
+ NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();
 }
 - (void)openPreview:(NSString *)url source:(UIImageView *)source{
  if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;}
@@ -321,7 +329,7 @@ namespace { struct DGReplyState {
  [self finishFocus:nil];
 }
 - (void)loadMore {
-    if(_previewOpen||_loading||!_more)return; _loading=YES; _failed=NO;
+    if(_previewOpen||_previewReturning||_loading||!_more)return; _loading=YES; _failed=NO;
     [_footer setTitle:@"正在读取评论…" forState:UIControlStateNormal]; _footer.enabled=NO;
     if(_comments.empty())_empty.text=@"正在读取评论"; NSString *oldCursor=_cursor.copy;
     __weak DGComments *weakSelf=self;

@@ -9,6 +9,7 @@
 @property(nonatomic,strong) UIImage *initialImage;
 @property(nonatomic,weak) UIImageView *source;
 @property(nonatomic,copy) dispatch_block_t finished;
+@property(nonatomic,weak) UIViewController *reader;
 @end
 @implementation DGImagePreview{
  UIScrollView *_scroll;DGImage *_image;UIVisualEffectView *_closeGlass,*_saveGlass;UIButton *_close,*_save;
@@ -41,20 +42,23 @@
 }
 - (void)save{DGConfirmImageSave(self,self.url);}
 - (void)complete{
- if(_completed)return;_completed=YES;dispatch_block_t action=self.finished;self.finished=nil;if(action)action();DGDiagnostic(@"image.preview.closed",nil);[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];
+ if(_completed)return;_completed=YES;dispatch_block_t action=self.finished;self.finished=nil;if(action)action();DGDiagnostic(@"image.preview.closed",nil);
 }
 - (void)close{
  if(_closing)return;
- _closing=YES;uint64_t priority=DGBeginAnimationPriority(1);[self dismissViewControllerAnimated:YES completion:^{DGEndAnimationPriority(priority);[self complete];}];
+ if([self.reader respondsToSelector:@selector(dgPreviewWillClose)])[self.reader performSelector:@selector(dgPreviewWillClose)];
+ _closing=YES;self.view.userInteractionEnabled=NO;self.presentationController.containerView.userInteractionEnabled=NO;uint64_t priority=DGBeginAnimationPriority(1);[self dismissViewControllerAnimated:YES completion:^{DGEndAnimationPriority(priority);[self complete];}];
 }
 - (void)viewDidDisappear:(BOOL)animated{[super viewDidDisappear:animated];if(self.isBeingDismissed||!self.presentingViewController)[self complete];}
+- (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(self.isBeingDismissed&&[self.reader respondsToSelector:@selector(dgPreviewWillClose)])[self.reader performSelector:@selector(dgPreviewWillClose)];}
 - (void)presentationControllerDidDismiss:(UIPresentationController *)controller{[self complete];}
 @end
 BOOL DGShowImageWithCompletion(UIViewController *host,NSString *url,UIImageView *source,dispatch_block_t completion){
  if(!host||!url.length)return NO;UIViewController *presenter=host;while(presenter.parentViewController&&![presenter.parentViewController isKindOfClass:UINavigationController.class])presenter=presenter.parentViewController;
  if(presenter.presentedViewController||!host.viewIfLoaded.window)return NO;
- DGImagePreview *page=[DGImagePreview new];page.url=url;page.source=source;page.initialImage=source.image;page.finished=completion;page.modalPresentationStyle=UIModalPresentationFullScreen;page.modalPresentationCapturesStatusBarAppearance=YES;
+ DGImagePreview *page=[DGImagePreview new];page.url=url;page.source=source;page.reader=host;page.initialImage=source.image;page.finished=completion;page.modalPresentationStyle=UIModalPresentationFullScreen;page.modalPresentationCapturesStatusBarAppearance=YES;
  if(!UIAccessibilityIsReduceMotionEnabled()){UIZoomTransitionOptions *options=[UIZoomTransitionOptions new];options.dimmingVisualEffect=[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];__weak UIImageView *weak=source;page.preferredTransition=[UIViewControllerTransition zoomWithOptions:options sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context){return weak;}];}
  uint64_t priority=DGBeginAnimationPriority(1);[presenter presentViewController:page animated:YES completion:^{DGEndAnimationPriority(priority);}];page.presentationController.delegate=page;return YES;
 }
 void DGShowImage(UIViewController *host,NSString *url,UIImageView *source){DGShowImageWithCompletion(host,url,source,nil);}
+BOOL DGImagePreviewKeepsPlayback(UIViewController *controller){return [controller isKindOfClass:DGImagePreview.class];}

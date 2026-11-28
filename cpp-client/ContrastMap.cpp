@@ -20,7 +20,7 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
     if(!std::isfinite(lineHeight)||lineHeight<1)lineHeight=0;
     const bool fresh=width!=width_||height!=height_||std::abs(lineHeight-lineHeight_)>.01;
     const std::size_t pixels=width*height,pitch=width+1;
-    if(fresh){width_=width;height_=height;lineHeight_=lineHeight;darkInk_.assign(pixels,0);light_.assign(pixels,0);opacity_.assign(pixels,0);}
+    if(fresh){width_=width;height_=height;lineHeight_=lineHeight;darkInk_.assign(pixels,0);candidate_.assign(pixels,0);votes_.assign(pixels,0);light_.assign(pixels,0);opacity_.assign(pixels,0);}
     integral_.assign(pitch*(height+1),0);squared_.assign(pitch*(height+1),0);opacityIntegral_.assign(pitch*(height+1),0);
     const auto &linear=linearComponents();
     for(std::size_t y=0;y<height;++y){
@@ -35,7 +35,6 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
     // strokes, so texture/noise does not split text into rapidly flashing specks.
     const std::size_t radius=std::max<std::size_t>(3,width/16);
     for(std::size_t y=0;y<height;++y){
-        float row=0;
         for(std::size_t x=0;x<width;++x){
             const auto left=x>radius?x-radius:0,right=std::min(width,x+radius+1);
             const std::size_t top=lineHeight?std::min(height-1,static_cast<std::size_t>(std::floor(std::floor(y/lineHeight)*lineHeight))):(y>radius?y-radius:0);
@@ -48,11 +47,24 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
             if(fresh)light_[i]=average;else light_[i]=std::abs(average-light_[i])>.10f?average:light_[i]+(average-light_[i])*.75f;
             // Compare the actual near-white and charcoal inks in linear sRGB.
             // Texture widens the dead band; it never unconditionally forces white.
-            const float blackContrast=(light_[i]+.05f)/(.015f+.05f),whiteContrast=(.955f+.05f)/(light_[i]+.05f),ratio=blackContrast/whiteContrast,margin=variance>.06f?1.22f:1.13f;
-            if(fresh){dark=ratio>=1.f;opacity_[i]=dark?1.f:0.f;}
-            else{if(ratio>margin)dark=1;else if(ratio<1.f/margin)dark=0;opacity_[i]+=((dark?1.f:0.f)-opacity_[i])*.72f;}
-            row+=opacity_[i];opacityIntegral_[(y+1)*pitch+x+1]=opacityIntegral_[y*pitch+x+1]+row;
+            const float blackContrast=(light_[i]+.05f)/(.015f+.05f),whiteContrast=(.955f+.05f)/(light_[i]+.05f),margin=variance>.06f?1.26f:1.16f;
+            const bool blackReadable=blackContrast>=3.6f,whiteReadable=whiteContrast>=3.0f;
+            const bool preferBlack=blackReadable&&(!whiteReadable||blackContrast>whiteContrast*margin);
+            const bool preferWhite=whiteReadable&&(!blackReadable||whiteContrast>blackContrast*margin);
+            candidate_[i]=preferBlack?1:preferWhite?0:dark;
         }
+    }
+    // A color patch must cover at least two font advances, then remain eligible
+    // across three samples. A window edge or one narrow stroke cannot flip ink.
+    const auto minimumRun=std::max<std::size_t>(4,static_cast<std::size_t>(std::ceil(lineHeight?lineHeight*1.15:width/12.)));
+    for(std::size_t y=0;y<height;++y){
+        for(std::size_t x=0;x<width;){const std::size_t start=x;const auto ink=candidate_[y*width+x];while(x<width&&candidate_[y*width+x]==ink)++x;
+            for(std::size_t p=start;p<x;++p){const std::size_t i=y*width+p;
+                if(x-start>=minimumRun&&ink!=darkInk_[i]){if(++votes_[i]>=3){darkInk_[i]=ink;votes_[i]=0;}}else votes_[i]=0;
+                opacity_[i]+=((darkInk_[i]?1.f:0.f)-opacity_[i])*.38f;
+            }
+        }
+        float row=0;for(std::size_t x=0;x<width;++x){row+=opacity_[y*width+x];opacityIntegral_[(y+1)*pitch+x+1]=opacityIntegral_[y*pitch+x+1]+row;}
     }
     const std::size_t feather=std::max<std::size_t>(2,width/40);
     for(std::size_t y=0;y<height;++y)for(std::size_t x=0;x<width;++x){
