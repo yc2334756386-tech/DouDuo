@@ -9,3 +9,4 @@ void DGRefreshRateApply(void);
 void DGRefreshRateSuspend(void);
 void DGApplyDisplayLinkRate(CADisplayLink *link,UIView *view);
 NSString *DGRefreshRateStatus(void);
+void DGConfigureWorkTransition(UIViewController *player,UIView *(^source)(void));

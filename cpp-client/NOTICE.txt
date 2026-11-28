@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.20.13
+抖音极简版 / DouGlass 0.20.14
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -17,3 +17,12 @@ Comment sorting applies only to the comments already loaded in the client.
 Messages use the official
 website transport with the same local login session, rendered by native UI.
 Comments are read-only. Danmaku in the app is read-only.
+
+High-refresh PiP approach inspired by:
+CaiWanFeng/PiP — original project and author CaiWanFeng
+https://github.com/CaiWanFeng/PiP
+Yoroin/GlobalRefresh-PiP — maintained by Yoroin
+https://github.com/Yoroin/GlobalRefresh-PiP
+Reference revision: 7e8f8d6eda86794ee9daebed171d3ca53530e893
+Reimplemented in Objective-C++ using public AVKit VideoCall content APIs.
+No source from this project is compiled as Swift in this application.

@@ -1,5 +1,5 @@
 {
-  "version": "0.20.13",
+  "version": "0.20.14",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
@@ -7,13 +7,13 @@
   "active_source_counts": {
     ".cpp": 6,
     ".hpp": 6,
-    ".h": 22,
-    ".mm": 38,
+    ".h": 23,
+    ".mm": 39,
     ".js": 4
   },
   "compiled_translation_units": {
     "C++20": 6,
-    "Objective-C++": 38,
+    "Objective-C++": 39,
     "Swift": 0
   },
   "runtime_webkit_scripts": [
@@ -41,7 +41,7 @@
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "local brightness averaging, temporal stabilization, hysteresis and feathered complementary contrast masks",
+    "per-line horizontal brightness averaging, temporal stabilization, hysteresis and feathered complementary contrast masks",
     "gallery gesture state, fixed center rail and spaced thumbnail geometry",
     "search first appearance, input/results state and back routing",
     "gallery display-awake eligibility"
@@ -57,5 +57,12 @@
     "automated": false,
     "device": false
   },
-  "pure_cpp_only": false
+  "pure_cpp_only": false,
+  "reference_implementations": [
+    {
+      "project": "GlobalRefresh-PiP",
+      "revision": "7e8f8d6eda86794ee9daebed171d3ca53530e893",
+      "scope": "Public VideoCall PiP content update concept reimplemented in DGRefreshPiP.mm; upstream Swift and private hooks are not compiled"
+    }
+  ]
 }

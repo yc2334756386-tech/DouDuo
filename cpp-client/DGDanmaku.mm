@@ -1,6 +1,12 @@
 #import "DGDanmaku.h"
 #import "DGAnimation.h"
 #import <QuartzCore/QuartzCore.h>
+static UIColor *DGCharcoalInk(CGFloat lineHeight){
+ static NSCache<NSNumber *,UIColor *> *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=32;});NSNumber *key=@(ceil(lineHeight+8));UIColor *ink=[cache objectForKey:key];if(ink)return ink;
+ UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=1;format.opaque=YES;CGSize size=CGSizeMake(1,key.doubleValue);
+ UIImage *image=[[[UIGraphicsImageRenderer alloc]initWithSize:size format:format]imageWithActions:^(UIGraphicsImageRendererContext *renderer){CGContextRef context=renderer.CGContext;CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGFloat colors[]={.14,.15,.17,1,.055,.065,.08,1,.09,.10,.12,1},stops[]={0,.48,1};CGGradientRef gradient=CGGradientCreateWithColorComponents(space,colors,stops,3);CGContextDrawLinearGradient(context,gradient,CGPointZero,CGPointMake(0,size.height),0);CGGradientRelease(gradient);CGColorSpaceRelease(space);}];
+ ink=[UIColor colorWithPatternImage:image];[cache setObject:ink forKey:key];return ink;
+}
 @implementation DGDanmakuLabel{
  BOOL _adaptive;UILabel *_white,*_black;CALayer *_whiteMask,*_blackMask;
 }
@@ -10,7 +16,7 @@
  id shadow=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku.shadow"];BOOL shadows=!shadow||[shadow boolValue];
  if(!_adaptive){[_white removeFromSuperview];[_black removeFromSuperview];_white=nil;_black=nil;_whiteMask=nil;_blackMask=nil;self.layer.shadowOpacity=shadows?.85:0;[self setNeedsDisplay];return;}
  if(!_white){_white=[UILabel new];_black=[UILabel new];_whiteMask=[CALayer layer];_blackMask=[CALayer layer];[self addSubview:_white];[self addSubview:_black];}
- NSArray<UILabel *> *copies=@[_white,_black];NSArray<UIColor *> *ink=@[UIColor.whiteColor,UIColor.blackColor],*shade=@[UIColor.blackColor,UIColor.whiteColor];
+ NSArray<UILabel *> *copies=@[_white,_black];NSArray<UIColor *> *ink=@[[UIColor colorWithWhite:.98 alpha:1],DGCharcoalInk(self.font.lineHeight)],*shade=@[UIColor.blackColor,UIColor.whiteColor];
  for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=index==0&&shadows?.85:0;copy.layer.shadowRadius=2;copy.layer.shadowOffset=index==1?CGSizeZero:CGSizeMake(0,1);copy.layer.zPosition=index==1?2:1;copy.userInteractionEnabled=NO;}
  self.layer.shadowOpacity=0;[self setNeedsDisplay];[self setNeedsLayout];
 }

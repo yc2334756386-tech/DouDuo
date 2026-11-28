@@ -1,5 +1,6 @@
 #import "DGAnimation.h"
 #import "DGDiagnostics.h"
+#import "DGRefreshPiP.h"
 static NSArray *Points(){NSArray *points=[NSUserDefaults.standardUserDefaults arrayForKey:@"douglass.animation.points"];return points.count==4?points:@[@.16,@1,@.3,@1];}
 NSTimeInterval DGDuration(NSTimeInterval base){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.animation.speed"];return base/(speed>=.2&&speed<=4?speed:.8);}
 CAMediaTimingFunction *DGTiming(void){NSArray *p=Points();return [CAMediaTimingFunction functionWithControlPoints:[p[0]floatValue]:[p[1]floatValue]:[p[2]floatValue]:[p[3]floatValue]];}
@@ -66,7 +67,7 @@ NSString *DGRefreshRateStatus(void){
  if(maximum<120)return [NSString stringWithFormat:@"此屏幕上限 %ldHz，无法请求 120Hz",(long)maximum];
  if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"])return @"关闭时跟随系统 ProMotion；开启持续请求高刷";
  NSString *rate=refresh.observedFPS>0?[NSString stringWithFormat:@"界面回调约 %.0ffps",refresh.observedFPS]:@"界面回调测量中";
- return [rate stringByAppendingString:NSProcessInfo.processInfo.lowPowerModeEnabled?@" · 低电量模式可能限制刷新率":@" · 系统可降频，视频片源帧率不变"];
+ return [NSString stringWithFormat:@"%@ · %@%@",rate,DGRefreshPiPStatus(),NSProcessInfo.processInfo.lowPowerModeEnabled?@" · 省电模式可能限频":@""];
 }
 void DGRefreshRateApply(void){
  static dispatch_once_t once;dispatch_once(&once,^{refresh=[DGRefreshRate new];});
@@ -79,5 +80,5 @@ void DGRefreshRateApply(void){
   DGApplyDisplayLinkRate(refresh.link,refresh.pulse);
   if(DGDiagnosticEnabled())DGDiagnostic(@"refresh.request",[NSString stringWithFormat:@"maximum=%ld foreground_surface=%d low_power=%d",(long)(window.windowScene.screen?:UIScreen.mainScreen).maximumFramesPerSecond,refresh.pulse.window!=nil,NSProcessInfo.processInfo.lowPowerModeEnabled]);
  }
- [NSNotificationCenter.defaultCenter postNotificationName:@"DGRefreshRateChanged" object:nil];
+ DGRefreshPiPApply();[NSNotificationCenter.defaultCenter postNotificationName:@"DGRefreshRateChanged" object:nil];
 }

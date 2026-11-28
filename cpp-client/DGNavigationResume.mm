@@ -6,6 +6,8 @@
 namespace {
 constexpr NSUInteger Limit=2*1024*1024;
 BOOL Consumed=NO,Restoring=NO;
+NSUInteger SaveGeneration=0;
+dispatch_queue_t SaveQueue(){static dispatch_queue_t queue;static dispatch_once_t once;dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.navigation-save",DISPATCH_QUEUE_SERIAL);});return queue;}
 NSURL *File(){return [[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"NavigationResume.json"];}
 void Present(UIViewController *host,NSArray *groups,NSUInteger index,DGBridge *bridge){
  if(index>=groups.count){Restoring=NO;return;}
@@ -37,13 +39,15 @@ void DGSaveNavigationResume(UIWindow *window){
  }
  if(!groups.count){DGClearNavigationResume();return;}
  NSDictionary *save=@{@"schema":@1,@"scope":DGCurrentFeedScope(),@"time":@(NSDate.date.timeIntervalSince1970),@"groups":groups};
- NSData *data=[NSJSONSerialization dataWithJSONObject:save options:0 error:nil];
- if(!data.length||data.length>Limit){DGDiagnostic(@"navigation.checkpoint.failed",@"reason=size");return;}
- NSFileManager *files=NSFileManager.defaultManager;NSURL *file=File();
- [files createDirectoryAtURL:file.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
- BOOL ok=[data writeToURL:file options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:nil];
- if(ok)[file setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
- DGDiagnostic(ok?@"navigation.checkpoint.saved":@"navigation.checkpoint.failed",[NSString stringWithFormat:@"groups=%lu bytes=%lu",(unsigned long)groups.count,(unsigned long)data.length]);
+ NSURL *file=File();NSUInteger generation=++SaveGeneration;
+ dispatch_async(SaveQueue(),^{@autoreleasepool{
+  NSData *data=[NSJSONSerialization dataWithJSONObject:save options:0 error:nil];
+  if(!data.length||data.length>Limit){DGDiagnostic(@"navigation.checkpoint.failed",@"reason=size");return;}
+  NSFileManager *files=NSFileManager.defaultManager;[files createDirectoryAtURL:file.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+  BOOL ok=[data writeToURL:file options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:nil];
+  if(ok)[file setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+  DGDiagnostic(ok?@"navigation.checkpoint.saved":@"navigation.checkpoint.failed",[NSString stringWithFormat:@"groups=%lu bytes=%lu generation=%lu async=1",(unsigned long)groups.count,(unsigned long)data.length,(unsigned long)generation]);
+ }});
 }
 BOOL DGRestoreNavigationResume(UIViewController *root,DGBridge *bridge){
  if(Consumed||root.presentedViewController)return NO;Consumed=YES;
@@ -57,4 +61,4 @@ BOOL DGRestoreNavigationResume(UIViewController *root,DGBridge *bridge){
  Restoring=YES;DGDiagnostic(@"navigation.checkpoint.restore",[NSString stringWithFormat:@"groups=%lu age_seconds=%.1f",(unsigned long)groups.count,age]);
  Present(root,groups,0,bridge);return YES;
 }
-void DGClearNavigationResume(void){[NSFileManager.defaultManager removeItemAtURL:File() error:nil];}
+void DGClearNavigationResume(void){NSURL *file=File();++SaveGeneration;dispatch_async(SaveQueue(),^{[NSFileManager.defaultManager removeItemAtURL:file error:nil];});}

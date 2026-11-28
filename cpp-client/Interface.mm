@@ -46,7 +46,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     NSDictionary *_profile;NSString *_messageScope;
     BOOL _profileLoading;NSUInteger _accountGeneration,_profileFailures;CFTimeInterval _profileCheckedAt;
     NSString *_operation,*_cursor;
-    BOOL _loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
+    BOOL _pendingClose,_loading,_foreground,_inactive,_failed,_ownsBridge,_staticFeed,_positioned,_relayout,_visible,_commentTransition,_closingComments;
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation,_warmGeneration,_feedRequest,_refreshFeedback;
     BOOL _pagingMotion,_cachedBootstrap,_manualRecommendationRefresh;
@@ -264,7 +264,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
   [self requestCurrentMusicArtwork];
  }];
 }
-- (void)close{if(self.navigationController&&self.navigationController.viewControllers.firstObject!=self){[self.navigationController popViewControllerAnimated:YES];return;}[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
+- (void)close{if(self.navigationController&&self.navigationController.viewControllers.firstObject!=self){id<UIViewControllerTransitionCoordinator> transition=self.navigationController.transitionCoordinator;if(transition){if(_pendingClose)return;_pendingClose=YES;__weak DGFeed *weak=self;[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){DGFeed *self=weak;if(!self)return;self->_pendingClose=NO;dispatch_async(dispatch_get_main_queue(),^{if(self.navigationController.topViewController==self)[self.navigationController popViewControllerAnimated:YES];});}];return;}[self.navigationController popViewControllerAnimated:YES];return;}[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (void)updateEmpty:(NSString *)message {[self syncCleanScreen];_empty.hidden=_showingMessages||!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_state.hidden=_loading;_subtitle.hidden=_loading;_retry.hidden=_loading;_login.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
 - (void)navigationChanged:(UISegmentedControl *)tabs{if(tabs.selectedSegmentIndex==0)[self followFeed];else if(tabs.selectedSegmentIndex==1)[self recommend];else [self messages];}
 - (void)navigationHold:(UILongPressGestureRecognizer *)gesture{if([gesture locationInView:_navigationTabs].x<_navigationTabs.bounds.size.width/3)[self followList:gesture];}

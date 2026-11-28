@@ -31,7 +31,7 @@
 - (void)images:(NSArray<NSString *> *)urls{
  [self cancelBrowsing];NSUInteger generation=++_imageGeneration;_urls=urls.copy;_index=0;_count.attributedText=nil;
  for(UIView *image in _images)[image removeFromSuperview];[_images removeAllObjects];
- __weak DGPhotoNavigator *weak=self;NSUInteger position=0;for(NSString *url in urls){NSUInteger index=position++;DGImage *image=[DGImage new];image.imageReady=^(UIImage *thumbnail){DGPhotoNavigator *view=weak;if(view&&generation==view->_imageGeneration&&view->_browsing&&view->_index==(NSInteger)index&&view.onThumbnailReady)view.onThumbnailReady(thumbnail);};image.maximumPixelSize=100;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;[_thumbnails addSubview:image];[_images addObject:image];}
+ __weak DGPhotoNavigator *weak=self;NSUInteger position=0;for(NSString *url in urls){NSUInteger index=position++;DGImage *image=[DGImage new];image.imageReady=^(UIImage *thumbnail){DGPhotoNavigator *view=weak;if(view&&generation==view->_imageGeneration&&view->_browsing&&view->_index==(NSInteger)index&&view.onThumbnailReady)view.onThumbnailReady(thumbnail);};image.maximumPixelSize=144;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;[_thumbnails addSubview:image];[_images addObject:image];}
  [self page:0];[self setNeedsLayout];
 }
 - (void)page:(NSInteger)index{
@@ -44,10 +44,10 @@
  for(NSUInteger i=0;i<_images.count;i++){double x=_scrubber.thumbnailX(i);[_images[i]remote:x>=-70&&x<=self.bounds.size.width+70?_urls[i]:@""];}
 }
 - (void)layoutSubviews{
- [super layoutSubviews];CGFloat width=self.bounds.size.width;_thumbnails.frame=CGRectMake(0,-7,width,44);_count.frame=CGRectMake(0,40,width,21);
+ [super layoutSubviews];CGFloat width=self.bounds.size.width;_thumbnails.frame=CGRectMake(0,-14,width,58);_count.frame=CGRectMake(0,48,width,21);
  if(!_browsing)return;
- [CATransaction begin];[CATransaction setDisableActions:YES];_selection.frame=CGRectMake(width/2-14,-6,28,42);
- for(NSUInteger i=0;i<_images.count;i++){CGFloat focus=MAX(0,1-fabs((double)i-_scrubber.position())),w=18+8*focus,h=30+10*focus;DGImage *image=_images[i];image.frame=CGRectMake(_scrubber.thumbnailX(i)-w/2,(44-h)/2,w,h);image.layer.cornerRadius=4;image.layer.borderWidth=0;}
+ [CATransaction begin];[CATransaction setDisableActions:YES];_selection.frame=CGRectMake(width/2-18,-12,36,54);
+ for(NSUInteger i=0;i<_images.count;i++){CGFloat focus=MAX(0,1-fabs((double)i-_scrubber.position())),w=24+10*focus,h=38+14*focus;DGImage *image=_images[i];image.frame=CGRectMake(_scrubber.thumbnailX(i)-w/2,(58-h)/2,w,h);image.layer.cornerRadius=4;image.layer.borderWidth=0;}
  [CATransaction commit];
 }
 - (void)drawRect:(CGRect)rect{

@@ -6,6 +6,7 @@
 #import "DGAnimation.h"
 #import "DGPhotoNavigator.h"
 #import <AVKit/AVKit.h>
+#import "DGRefreshPiP.h"
 #import "DGAmbient.h"
 #import "DGTimeline.h"
 #import "DGDanmaku.h"
@@ -189,6 +190,9 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)configurePiP{BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.pip"]&&[AVPictureInPictureController isPictureInPictureSupported]&&!_work.photo();if(enabled&&_player&&!_pip){_pip=[[AVPictureInPictureController alloc]initWithPlayerLayer:_playerLayer];_pip.delegate=self;_pip.canStartPictureInPictureAutomaticallyFromInline=YES;}if(!enabled&&_pip){[_pip stopPictureInPicture];_pip.delegate=nil;_pip=nil;}}
 - (void)startPiP{if(!_active||_work.photo())return;[self configurePiP];if(_pip.pictureInPicturePossible)[_pip startPictureInPicture];else if(self.presenter)DGToast(self.presenter,@"当前视频尚不能进入画中画，请稍后再试");}
+- (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)controller{if(controller==_pip)DGRefreshPiPPreferVideo(YES);}
+- (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)controller{if(controller==_pip)DGRefreshPiPPreferVideo(NO);}
+- (void)pictureInPictureController:(AVPictureInPictureController *)controller failedToStartPictureInPictureWithError:(NSError *)error{if(controller==_pip)DGRefreshPiPPreferVideo(NO);}
 - (void)pictureInPictureController:(AVPictureInPictureController *)controller restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL))completion{completion(self.window!=nil);[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}
 - (void)cleanScreen:(BOOL)clean {
  if(_cleanScreen==clean)return;
@@ -218,7 +222,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  if(_seeking)[_observedItem cancelPendingSeeks];
  _seeking=NO;++_restartToken;_slider.userInteractionEnabled=YES;[_slider stopFollowing];[self cancelLoadingIndicator];
 
- [self stopWatchdog];[_pip stopPictureInPicture];_pip.delegate=nil;_pip=nil;[_ambient active:NO];[_ambient item:nil imageView:nil];_previewBusy=NO;
+ [self stopWatchdog];BOOL wasPiP=_pip.pictureInPictureActive;[_pip stopPictureInPicture];_pip.delegate=nil;_pip=nil;if(wasPiP)DGRefreshPiPPreferVideo(NO);[_ambient active:NO];[_ambient item:nil imageView:nil];_previewBusy=NO;
  ++_previewGeneration;[_generator cancelAllCGImageGeneration];_generator=nil;if(_observedItem){[_observedItem removeObserver:self forKeyPath:@"status"];_observedItem=nil;}if(_clock&&_player){[_player removeTimeObserver:_clock];_clock=nil;}if(_loopToken){[NSNotificationCenter.defaultCenter removeObserver:_loopToken];_loopToken=nil;}
  if(_stallToken){[NSNotificationCenter.defaultCenter removeObserver:_stallToken];_stallToken=nil;}
  if(_accessToken){[NSNotificationCenter.defaultCenter removeObserver:_accessToken];_accessToken=nil;}

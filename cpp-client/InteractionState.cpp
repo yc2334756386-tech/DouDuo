@@ -11,7 +11,7 @@ void GalleryScrubber::begin(std::size_t index,double x,double width,std::size_t 
     start_=position_=bounded(static_cast<double>(index));
     anchor_=std::isfinite(x)?x:width_/2;
     // A direct displacement mapping has no timer, velocity cap or easing lag.
-    stride_=22.;
+    stride_=28.;
 }
 void GalleryScrubber::move(double x) noexcept{
     if(std::isfinite(x))position_=bounded(start_+(x-anchor_)/stride_);
@@ -22,7 +22,7 @@ std::size_t GalleryScrubber::finish() noexcept{
 double GalleryScrubber::thumbnailX(std::size_t index) const noexcept{
     // The selection aperture stays in the middle. Only its underlying rail moves.
     const double delta=static_cast<double>(index)-position_;
-    const double gap=std::clamp(delta,-1.,1.)*5.;
+    const double gap=std::clamp(delta,-1.,1.)*7.;
     return width_/2+delta*stride_+gap;
 }
 std::size_t GalleryScrubber::indexAt(double x) const noexcept{

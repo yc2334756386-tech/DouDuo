@@ -13,7 +13,7 @@ public:
 private:
     double bounded(double value) const noexcept;
     std::size_t count_=0;
-    double start_=0,position_=0,anchor_=0,width_=0,stride_=22;
+    double start_=0,position_=0,anchor_=0,width_=0,stride_=28;
 };
 
 enum class SearchBack { input,close };

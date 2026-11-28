@@ -1,5 +1,6 @@
 #import "DGAnimation.h"
 #import "DGCommon.h"
+#import "DGDiagnostics.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 @interface DGPagePresentation:UIPresentationController
@@ -31,6 +32,28 @@
 - (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source{return [[DGPagePresentation alloc]initWithPresentedViewController:presented presentingViewController:presenting];}
 @end
 static const void *DGPageKey=&DGPageKey;
+static const void *DGWorkKey=&DGWorkKey;
+void DGConfigureWorkTransition(UIViewController *player,UIView *(^source)(void)){objc_setAssociatedObject(player,DGWorkKey,source,OBJC_ASSOCIATION_COPY_NONATOMIC);}
+@interface DGWorkAnimator:NSObject<UIViewControllerAnimatedTransitioning>
+@property(nonatomic) BOOL opening;
+@property(nonatomic,copy) UIView *(^source)(void);
+@end
+@implementation DGWorkAnimator
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context{return MIN(.30,MAX(.16,DGDuration(.20)));}
+- (void)animateTransition:(id<UIViewControllerContextTransitioning>)context{
+ CFTimeInterval started=CACurrentMediaTime();DGDiagnostic(@"transition.work_begin",self.opening?@"direction=open":@"direction=close");
+ UIView *container=context.containerView,*from=[context viewForKey:UITransitionContextFromViewKey],*to=[context viewForKey:UITransitionContextToViewKey];
+ UIViewController *destination=[context viewControllerForKey:UITransitionContextToViewControllerKey];if(!to)to=destination.view;to.frame=[context finalFrameForViewController:destination];
+ if(self.opening)[container addSubview:to];else [container insertSubview:to belowSubview:from];
+ UIView *source=self.source?self.source():nil;CGRect anchor=source.window?[source convertRect:source.bounds toView:container]:CGRectInset(container.bounds,container.bounds.size.width*.3,container.bounds.size.height*.35);
+ UIView *cover=[source snapshotViewAfterScreenUpdates:NO];cover.userInteractionEnabled=NO;cover.layer.cornerRadius=8;cover.clipsToBounds=YES;
+ if(cover){cover.frame=self.opening?anchor:container.bounds;[container addSubview:cover];}
+ to.alpha=self.opening?0:1;to.transform=self.opening?CGAffineTransformMakeScale(.96,.96):CGAffineTransformIdentity;
+ [UIView animateWithDuration:[self transitionDuration:context] delay:0 options:UIViewAnimationOptionCurveEaseOut|UIViewAnimationOptionAllowUserInteraction|UIViewAnimationOptionBeginFromCurrentState animations:^{
+  to.alpha=1;to.transform=CGAffineTransformIdentity;if(!self.opening){from.alpha=0;from.transform=CGAffineTransformMakeScale(.96,.96);}if(cover){cover.frame=self.opening?container.bounds:anchor;cover.alpha=0;}
+ } completion:^(BOOL finished){BOOL complete=!context.transitionWasCancelled;from.alpha=1;from.transform=CGAffineTransformIdentity;to.alpha=1;to.transform=CGAffineTransformIdentity;[cover removeFromSuperview];[context completeTransition:complete];DGDiagnostic(@"transition.work_end",[NSString stringWithFormat:@"direction=%@ ms=%.0f complete=%d",self.opening?@"open":@"close",(CACurrentMediaTime()-started)*1000,complete]);}];
+}
+@end
 void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *transition=[DGPageTransition new];objc_setAssociatedObject(controller,DGPageKey,transition,OBJC_ASSOCIATION_RETAIN_NONATOMIC);controller.transitioningDelegate=transition;controller.modalPresentationStyle=UIModalPresentationCustom;controller.modalPresentationCapturesStatusBarAppearance=YES;}
 // Mask the effect view itself so UIKit can keep sampling the live backdrop.
 @interface DGNavigationFade:UIView
@@ -41,13 +64,13 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
  if((self=[super initWithFrame:frame])){CAGradientLayer *gradient=(CAGradientLayer *)self.layer;gradient.colors=@[(id)UIColor.blackColor.CGColor,(id)UIColor.blackColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.72].CGColor,(id)[UIColor colorWithWhite:0 alpha:.28].CGColor,(id)UIColor.clearColor.CGColor];gradient.locations=@[@0,@.42,@.64,@.82,@1];gradient.startPoint=CGPointMake(.5,0);gradient.endPoint=CGPointMake(.5,1);}return self;
 }
 @end
-@interface DGNavigationController()<UIGestureRecognizerDelegate>
+@interface DGNavigationController()<UIGestureRecognizerDelegate,UINavigationControllerDelegate>
 @end
 @implementation DGNavigationController{
  UIVisualEffectView *_topBlur;DGNavigationFade *_fade;UIScreenEdgePanGestureRecognizer *_rootBack;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;self.navigationBar.tintColor=UIColor.labelColor;self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
+ [super viewDidLoad];self.delegate=self;self.view.backgroundColor=UIColor.systemBackgroundColor;self.navigationBar.tintColor=UIColor.labelColor;self.interactivePopGestureRecognizer.enabled=YES;self.interactivePopGestureRecognizer.delegate=self;
  _rootBack=[[UIScreenEdgePanGestureRecognizer alloc]initWithTarget:self action:@selector(rootBack:)];_rootBack.edges=UIRectEdgeLeft;_rootBack.delegate=self;[self.view addGestureRecognizer:_rootBack];
  UINavigationBarAppearance *appearance=[UINavigationBarAppearance new];[appearance configureWithTransparentBackground];appearance.backgroundEffect=nil;appearance.backgroundColor=UIColor.clearColor;appearance.shadowColor=UIColor.clearColor;appearance.titleTextAttributes=@{NSForegroundColorAttributeName:UIColor.labelColor};appearance.largeTitleTextAttributes=@{NSForegroundColorAttributeName:UIColor.labelColor};
  self.navigationBar.standardAppearance=appearance;self.navigationBar.scrollEdgeAppearance=appearance;self.navigationBar.compactAppearance=appearance;self.navigationBar.compactScrollEdgeAppearance=appearance;self.navigationBar.translucent=YES;
@@ -55,6 +78,10 @@ void DGConfigurePageTransition(UIViewController *controller){DGPageTransition *t
 }
 - (UIViewController *)childViewControllerForStatusBarStyle{return self.topViewController;}
 - (UIViewController *)childViewControllerForStatusBarHidden{return self.topViewController;}
+- (id<UIViewControllerAnimatedTransitioning>)navigationController:(UINavigationController *)navigation animationControllerForOperation:(UINavigationControllerOperation)operation fromViewController:(UIViewController *)from toViewController:(UIViewController *)to{
+ UIViewController *player=operation==UINavigationControllerOperationPush?to:from;id source=objc_getAssociatedObject(player,DGWorkKey);if(!source||UIAccessibilityIsReduceMotionEnabled())return nil;
+ DGWorkAnimator *animation=[DGWorkAnimator new];animation.opening=operation==UINavigationControllerOperationPush;animation.source=source;return animation;
+}
 - (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self setNeedsStatusBarAppearanceUpdate];}
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{
  if(gesture!=self.interactivePopGestureRecognizer&&gesture!=_rootBack)return YES;
