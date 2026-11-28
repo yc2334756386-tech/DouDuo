@@ -36,7 +36,7 @@ int ContrastFrame::inkFor(MediaRect region) const noexcept {
     }
     // Each whole character needs a broadly consistent background. Small corners
     // and narrow strokes do not classify a character, much less a two-glyph group.
-    return total>0&&blackArea/total>=.82?1:total>0&&whiteArea/total>=.82?0:-1;
+    return total>0&&blackArea/total>=.60?1:total>0&&whiteArea/total>=.60?0:-1;
 }
 void GroupedInk::setGlyphs(std::vector<InkGlyph> glyphs){
     glyphs_=std::move(glyphs);groups_.clear();if(glyphs_.size()<2)return;
@@ -46,8 +46,14 @@ void GroupedInk::setGlyphs(std::vector<InkGlyph> glyphs){
 bool GroupedInk::update(const ContrastFrame &frame,MediaRect text,double overlayWidth,double overlayHeight) noexcept {
     if(!std::isfinite(overlayWidth)||!std::isfinite(overlayHeight)||overlayWidth<=0||overlayHeight<=0)return false;
     const double sx=frame.width/overlayWidth,sy=frame.height/overlayHeight;bool changed=false;
-    for(auto &group:groups_){int wanted=-1;
-        for(auto i=group.begin;i<group.end;++i){const auto &glyph=glyphs_[i];const auto ink=frame.inkFor({(text.x+glyph.x)*sx,text.y*sy,glyph.width*sx,text.height*sy});if(ink<0||(wanted>=0&&ink!=wanted)){wanted=-1;break;}wanted=ink;}
+    for(auto &group:groups_){
+        unsigned votes[2]{};
+        for(auto i=group.begin;i<group.end;++i){
+            const auto &glyph=glyphs_[i];
+            const auto ink=frame.inkFor({(text.x+glyph.x)*sx,text.y*sy,glyph.width*sx,text.height*sy});
+            if(ink>=0)++votes[ink];
+        }
+        const int wanted=votes[1]>=2&&!votes[0]?1:votes[0]>=2&&!votes[1]?0:-1;
         if(wanted<0||wanted==int(group.dark)){group.pending=-1;group.votes=0;continue;}
         if(group.pending!=wanted){group.pending=wanted;group.votes=1;}else ++group.votes;
         if(group.votes>=2){group.dark=wanted==1;group.votes=0;group.pending=-1;changed=true;}

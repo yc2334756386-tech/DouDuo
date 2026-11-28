@@ -35,10 +35,14 @@ static CGImageRef DGGroupMask(NSData *bytes,size_t width){
 - (void)rebuildInkGroups{
  _inkLayoutSize=self.bounds.size;if(!_adaptive||!_eligible)return;
  NSAttributedString *text=self.attributedText;std::vector<douglass::InkGlyph> glyphs;
- CGRect rect=[self textRectForBounds:self.bounds limitedToNumberOfLines:1];_inkTop=rect.origin.y;_inkHeight=MIN(self.font.lineHeight,rect.size.height);
+ CGRect rect=[self textRectForBounds:self.bounds limitedToNumberOfLines:1];
+ // A suppressed UILabel may report an empty draw rect before its sublabels have
+ // laid out. Sampling still needs the actual lane and font height.
+ _inkHeight=MIN(self.font.lineHeight,self.bounds.size.height);
+ _inkTop=MAX(0,(self.bounds.size.height-_inkHeight)/2);
  if(text.length){NSTextStorage *storage=[[NSTextStorage alloc]initWithAttributedString:text];NSLayoutManager *layout=[NSLayoutManager new];[storage addLayoutManager:layout];NSTextContainer *container=[[NSTextContainer alloc]initWithSize:CGSizeMake(MAX(4096,self.bounds.size.width),CGFLOAT_MAX)];container.lineFragmentPadding=0;container.maximumNumberOfLines=1;[layout addTextContainer:container];[layout ensureLayoutForTextContainer:container];NSString *string=text.string;
   // TextKit includes NSTextAttachment advances used by custom emoticons.
-  for(NSUInteger i=0;i<string.length;){NSRange range=[string rangeOfComposedCharacterSequenceAtIndex:i];i=NSMaxRange(range);if(![[string substringWithRange:range]stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length)continue;NSRange glyphRange=[layout glyphRangeForCharacterRange:range actualCharacterRange:NULL];CGRect glyph=[layout boundingRectForGlyphRange:glyphRange inTextContainer:container];if(std::isfinite(glyph.origin.x)&&std::isfinite(glyph.size.width)&&glyph.size.width>.25)glyphs.push_back({rect.origin.x+glyph.origin.x,glyph.size.width});}
+  for(NSUInteger i=0;i<string.length;){NSRange range=[string rangeOfComposedCharacterSequenceAtIndex:i];i=NSMaxRange(range);if(![[string substringWithRange:range]stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length)continue;NSRange glyphRange=[layout glyphRangeForCharacterRange:range actualCharacterRange:NULL];CGRect glyph=[layout boundingRectForGlyphRange:glyphRange inTextContainer:container];if(std::isfinite(glyph.origin.x)&&std::isfinite(glyph.size.width)&&glyph.size.width>.25)glyphs.push_back({MAX(0,rect.origin.x)+glyph.origin.x,glyph.size.width});}
  }
  _ink.setGlyphs(std::move(glyphs));[self renderGroupMasks:NO];
 }

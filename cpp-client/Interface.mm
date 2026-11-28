@@ -36,7 +36,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     DGImage *_accountImage;UIActivityIndicatorView *_accountSpinner;
     UILabel *_state,*_subtitle;
     UIStackView *_empty;
-    UIButton *_retry,*_login;
+    UIButton *_retry;
     UIActivityIndicatorView *_spinner,*_recommendRefreshSpinner;
     UIVisualEffectView *_recommendRefreshGlass;
     UIRefreshControl *_pull;
@@ -50,6 +50,8 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     NSInteger _refreshIndex,_emptyPages,_selected,_current;
     NSUInteger _generation,_warmGeneration,_feedRequest,_refreshFeedback;
     BOOL _pagingMotion,_cachedBootstrap,_manualRecommendationRefresh;
+    NSInteger _pagingOrigin;
+    __weak DGFeedCell *_pagingPlaybackCell;
     uint64_t _pagingPriority;
     NSHashTable<DGFeedCell *> *_departingCells;
     CADisplayLink *_pagingClock;
@@ -94,9 +96,9 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
       [_recommendRefreshGlass.contentView addSubview:_recommendRefreshSpinner];[self.view addSubview:_recommendRefreshGlass];
     }
     _spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];_spinner.color=UIColor.secondaryLabelColor;_state=Label(20,UIFontWeightSemibold);_state.textAlignment=NSTextAlignmentCenter;_state.textColor=UIColor.whiteColor;_subtitle=Label(14,UIFontWeightRegular);_subtitle.numberOfLines=0;_subtitle.textAlignment=NSTextAlignmentCenter;_subtitle.textColor=[UIColor colorWithWhite:1 alpha:.65];
-    _retry=[UIButton buttonWithType:UIButtonTypeSystem];[_retry setTitle:@"重新加载" forState:UIControlStateNormal];[_retry addTarget:self action:@selector(refreshFeed) forControlEvents:UIControlEventTouchUpInside];_login=[UIButton buttonWithType:UIButtonTypeSystem];[_login setTitle:@"登录 / 网页验证" forState:UIControlStateNormal];[_login addTarget:self action:@selector(openLogin) forControlEvents:UIControlEventTouchUpInside];
+    _retry=[UIButton buttonWithType:UIButtonTypeSystem];[_retry setTitle:@"重新加载" forState:UIControlStateNormal];[_retry addTarget:self action:@selector(refreshFeed) forControlEvents:UIControlEventTouchUpInside];
     UIButton *moreSettings=[UIButton buttonWithType:UIButtonTypeSystem];[moreSettings setTitle:@"更多设置" forState:UIControlStateNormal];[moreSettings addTarget:self action:@selector(emptySettings) forControlEvents:UIControlEventTouchUpInside];
-    _empty=[[UIStackView alloc] initWithArrangedSubviews:@[_spinner,_state,_subtitle,_retry,_login,moreSettings]];_empty.axis=UILayoutConstraintAxisVertical;_empty.spacing=18;_empty.alignment=UIStackViewAlignmentCenter;[self.view addSubview:_empty];
+    _empty=[[UIStackView alloc] initWithArrangedSubviews:@[_spinner,_state,_subtitle,_retry,moreSettings]];_empty.axis=UILayoutConstraintAxisVertical;_empty.spacing=18;_empty.alignment=UIStackViewAlignmentCenter;[self.view addSubview:_empty];
     _cleanKnob=Glass(23);_cleanKnob.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;_cleanKnob.bounds=CGRectMake(0,0,46,46);
     _cleanKnobButton=Symbol(@"circle.dotted.circle",self,@selector(toggleCleanScreen));
     _cleanKnobButton.accessibilityLabel=@"一键清屏";_cleanKnobButton.accessibilityHint=@"轻点清屏或恢复，拖动可调整位置";
@@ -119,6 +121,15 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)appearanceChanged{if(!self.isViewLoaded)return;self.view.backgroundColor=_showingMessages?UIColor.systemBackgroundColor:UIColor.blackColor;_bar.overrideUserInterfaceStyle=_showingMessages?UIUserInterfaceStyleUnspecified:UIUserInterfaceStyleDark;[self setNeedsStatusBarAppearanceUpdate];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previous{[super traitCollectionDidChange:previous];if([previous hasDifferentColorAppearanceComparedToTraitCollection:self.traitCollection])[self appearanceChanged];}
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_staticFeed)[self.navigationController setNavigationBarHidden:YES animated:animated];}
+- (void)viewIsAppearing:(BOOL)animated {
+ [super viewIsAppearing:animated];
+ if(!_staticFeed||!_foreground||_inactive)return;
+ _visible=YES;
+ if(DGMusicPlayer())DGMusicStop();
+ [self.view layoutIfNeeded];
+ [_collection layoutIfNeeded];
+ [self activate];
+}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGFeed *page=weak;if(!page||!page->_visible||!page.viewIfLoaded.window||(page.navigationController&&page.navigationController.topViewController!=page)||page.presentedViewController)return;DGMusicStop();[page activate];if(page->_ownsBridge&&DGRestoreNavigationResume(page,page->_bridge))return;DGSaveNavigationResume(page.view.window);if(page->_noticeComment.length&&page->_current<(NSInteger)page->_feed.works.size()&&!page->_comments)[page showComments:Text(page->_feed.works[page->_current].id)];});}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController?:self.navigationController.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;[self finishPaging];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
 - (void)viewDidLayoutSubviews {
@@ -267,7 +278,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  }];
 }
 - (void)close{if(self.navigationController&&self.navigationController.viewControllers.firstObject!=self){if(self.preferredTransition){[self.navigationController popViewControllerAnimated:YES];return;}id<UIViewControllerTransitionCoordinator> transition=self.navigationController.transitionCoordinator;if(transition){if(_pendingClose)return;_pendingClose=YES;__weak DGFeed *weak=self;[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){DGFeed *self=weak;if(!self)return;self->_pendingClose=NO;dispatch_async(dispatch_get_main_queue(),^{if(self.navigationController.topViewController==self)[self.navigationController popViewControllerAnimated:YES];});}];return;}[self.navigationController popViewControllerAnimated:YES];return;}[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
-- (void)updateEmpty:(NSString *)message {[self syncCleanScreen];_empty.hidden=_showingMessages||!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_state.hidden=_loading;_subtitle.hidden=_loading;_retry.hidden=_loading;_login.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
+- (void)updateEmpty:(NSString *)message {[self syncCleanScreen];_empty.hidden=_showingMessages||!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_state.hidden=_loading;_subtitle.hidden=_loading;_retry.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
 - (void)navigationChanged:(UISegmentedControl *)tabs{if(tabs.selectedSegmentIndex==0)[self followFeed];else if(tabs.selectedSegmentIndex==1)[self recommend];else [self messages];}
 - (void)navigationHold:(UILongPressGestureRecognizer *)gesture{if([gesture locationInView:_navigationTabs].x<_navigationTabs.bounds.size.width/3)[self followList:gesture];}
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
@@ -468,7 +479,9 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)beginPaging {
  if(_pagingMotion)return;
  _pagingPriority=DGBeginAnimationPriority(30);
- _pagingMotion=YES;++_warmGeneration;DGDeferPrerolls();
+ _pagingMotion=YES;_pagingOrigin=_current;
+ _pagingPlaybackCell=(DGFeedCell *)[_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:_current inSection:0]];
+ ++_warmGeneration;DGDeferPrerolls();
  if(DGDiagnosticEnabled()){
   _pagingStarted=CACurrentMediaTime();_pagingPrevious=_pagingStarted;_pagingRelease=0;_pagingMaxGap=0;_pagingSamples=0;_pagingLongFrames=0;_pagingStartIndex=_current;
   DGSwipeClock *clock=[DGSwipeClock new];__weak DGFeed *weak=self;
@@ -479,6 +492,23 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  }
  DGCacheSetIdle(NO);
  for(DGFeedCell *cell in _collection.visibleCells)[cell pagingInMotion:YES];
+}
+- (void)playDominantPage {
+ if(!_pagingMotion||_relayout||!_foreground||_inactive||!_visible||_showingMessages||_comments||self.presentedViewController||DGMusicPlayer())return;
+ const CGFloat height=_collection.bounds.size.height;
+ if(height<=0)return;
+ const double page=_collection.contentOffset.y/height;
+ NSInteger target=llround(page);
+ if(target<0||target>=(NSInteger)_feed.works.size()||fabs(page-target)>.45)return;
+ DGFeedCell *cell=(DGFeedCell *)[_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:target inSection:0]];
+ if(!cell||cell==_pagingPlaybackCell)return;
+ [_pagingPlaybackCell active:NO];
+ _pagingPlaybackCell=cell;
+ [cell active:YES];
+ if(DGDiagnosticEnabled())DGDiagnostic(@"swipe.play_during_motion",[NSString stringWithFormat:@"page=%ld",(long)target]);
+}
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+ if(scrollView==_collection)[self playDominantPage];
 }
 - (void)samplePagingFrame:(CADisplayLink *)link {
  if(!_pagingMotion||!DGDiagnosticEnabled()){[_pagingClock invalidate];_pagingClock=nil;return;}
@@ -497,13 +527,13 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
   NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
   DGDiagnostic(@"swipe.settled",[NSString stringWithFormat:@"from=%ld to=%ld total_ms=%.0f coast_ms=%.0f frames=%lu long_gaps=%lu max_gap_ms=%.1f",(long)_pagingStartIndex,(long)target,(end-_pagingStarted)*1000,_pagingRelease>0?(end-_pagingRelease)*1000:0,(unsigned long)_pagingSamples,(unsigned long)_pagingLongFrames,_pagingMaxGap*1000]);
  }
- if(_pagingMotion&&_foreground&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.autoScroll"]&&_current>=0&&_current<(NSInteger)_feed.works.size()){
+ if(_pagingMotion&&_foreground&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.autoScroll"]&&_pagingOrigin>=0&&_pagingOrigin<(NSInteger)_feed.works.size()){
   CGFloat height=_collection.bounds.size.height;
   NSInteger target=height>0?MAX(0,(NSInteger)llround(_collection.contentOffset.y/height)):_current;
-  const Work &previous=_feed.works[_current];
-  if(target!=_current&&!previous.photo()&&!previous.isLive)DGResetWorkPlayback(Text(previous.id));
+  const Work &previous=_feed.works[_pagingOrigin];
+  if(target!=_pagingOrigin&&!previous.photo()&&!previous.isLive)DGResetWorkPlayback(Text(previous.id));
  }
- _pagingStarted=0;[_pagingClock invalidate];_pagingClock=nil;_pagingMotion=NO;
+ _pagingStarted=0;[_pagingClock invalidate];_pagingClock=nil;_pagingMotion=NO;_pagingPlaybackCell=nil;
  NSArray *visible=_collection.visibleCells;
  for(DGFeedCell *cell in _departingCells.allObjects)if(![visible containsObject:cell])[cell active:NO];
  [_departingCells removeAllObjects];
@@ -555,9 +585,10 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 }
 - (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path {
  if(_foreground&&!_inactive)[(DGFeedCell *)cell stagePreparedVideo];
+ if(_pagingMotion)[self playDominantPage];
  if(path.item==_current&&!_pagingMotion){__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak activate];});}
 }
-- (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{if(_pagingMotion)[_departingCells addObject:(DGFeedCell *)cell];else [(DGFeedCell *)cell active:NO];}
+- (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path{if(_pagingMotion)[_departingCells addObject:(DGFeedCell *)cell];[(DGFeedCell *)cell active:NO];if(cell==_pagingPlaybackCell)_pagingPlaybackCell=nil;}
 - (void)showComments:(NSString *)workID {
  if(_commentTransition)return;_closingComments=NO;if(_comments){[self closeComments];return;}_commentTransition=YES;
  _comments=[_retainedCommentWorkID isEqualToString:workID]?_retainedComments:nil;if(!_comments)_comments=[[DGComments alloc]initWithBridge:_bridge work:workID parent:nil];_retainedComments=_comments;_retainedCommentWorkID=workID.copy;if(_noticeComment.length){[_comments focusComment:_noticeComment parent:_noticeParent];_noticeComment=nil;_noticeParent=nil;}if(_current<(NSInteger)_records.count){NSDictionary *record=_records[_current];_comments.coverURL=Text(String(record[@"cover"]));if(!_comments.coverURL.length)_comments.coverURL=Text(String(Array(record[@"images"]).firstObject));}__weak DGFeed *weak=self;_comments.closeAction=^{[weak closeComments];};_comments.dragAction=^(CGFloat offset,NSInteger phase){[weak commentDragged:offset phase:phase];};_comments.profileAction=^(NSString *sec,NSString *name){DGFeed *self=weak;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,@"")];};
@@ -606,7 +637,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
 - (void)settings {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"澄流 · 设置" message:@"长按视频固定 2×，松手恢复 1×\n长按关注可查看关注列表" preferredStyle:UIAlertControllerStyleActionSheet];BOOL enabled=[NSUserDefaults.standardUserDefaults objectForKey:@"douglass.danmaku"]?[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku"]:YES;
     [menu addAction:[UIAlertAction actionWithTitle:enabled?@"关闭视频弹幕":@"开启视频弹幕" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[NSUserDefaults.standardUserDefaults setBool:!enabled forKey:@"douglass.danmaku"];[NSNotificationCenter.defaultCenter postNotificationName:@"DouGlassSettingsChanged" object:nil];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
+    [menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
 - (void)openLogin{if(self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];DGLogin *login=[DGLogin new];__weak DGFeed *weakSelf=self;login.finished=^{[weakSelf sessionChanged:YES];};UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:login];DGConfigurePageTransition(nav);[self presentViewController:nav animated:YES completion:nil];}
 - (void)sessionChanged:(BOOL)reload{[_musicCoverRequests removeAllObjects];[_channelStates removeAllObjects];_channelSessions.clear();++_accountGeneration;_profileLoading=NO;_profileFailures=0;_profileCheckedAt=0;DGClearNavigationResume();[_detailRequested removeAllObjects];[_resolvedDetails removeAllObjects];_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}

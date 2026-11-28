@@ -46,7 +46,7 @@
  if(CGRectEqualToRect(region,_contrastRect)&&layer==_videoLayer)return;_contrastRect=region;_videoLayer=layer;[self resetContrast];
 }
 - (void)sample{
- NSInteger level=[self level];BOOL adaptive=_adaptive&&_transformReady&&(_item||_image.image)&&_contrastRect.size.width>0&&_contrastRect.size.height>0;
+ NSInteger level=[self level];BOOL adaptive=_adaptive&&(_item||_image.image)&&_contrastRect.size.width>0&&_contrastRect.size.height>0;
  if(!_active||_busy||DGAnimationPriorityActive()||(level==4&&!adaptive)||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious)return;
  CIImage *input=nil;
  if(_output){CMTime time=[_output itemTimeForHostTime:CACurrentMediaTime()];if([_output hasNewPixelBufferForItemTime:time]){CVPixelBufferRef buffer=[_output copyPixelBufferForItemTime:time itemTimeForDisplay:NULL];if(buffer){input=[CIImage imageWithCVPixelBuffer:buffer];CVPixelBufferRelease(buffer);}}}
@@ -59,6 +59,10 @@
  if(CGRectIsEmpty(videoRect))adaptive=NO;
  BOOL average=level!=4&&CACurrentMediaTime()-_lastAmbient>=.6;if(!average&&!adaptive)return;if(average)_lastAmbient=CACurrentMediaTime();
  _busy=YES;CFTimeInterval captured=CACurrentMediaTime();NSUInteger generation=_generation;__weak DGAmbient *weak=self;CIImage *inputFrame=input;CGRect bounds=self.bounds,region=_contrastRect;CGAffineTransform transform=_trackTransform;NSArray *background=((CAGradientLayer *)_gradient.presentationLayer).colors?:_gradient.colors;background=background.copy;auto contrastMap=_contrastMap;
+ if(fabs(transform.b)>.5||fabs(transform.c)>.5){
+  const BOOL matchesDisplayOrientation=(input.extent.size.width>input.extent.size.height)==(source.width>source.height);
+  if(matchesDisplayOrientation&&source.width>0&&source.height>0)transform=CGAffineTransformIdentity;
+ }
  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{@autoreleasepool{
   static CIContext *context;static dispatch_once_t once;dispatch_once(&once,^{context=[CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer:@NO,kCIContextWorkingColorSpace:NSNull.null,kCIContextCacheIntermediates:@NO}];});
   CIImage *frame=[inputFrame imageByApplyingTransform:transform];CGRect extent=frame.extent;NSMutableArray *colors=nil;CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);

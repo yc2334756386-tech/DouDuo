@@ -1,4 +1,5 @@
 #import "DGMediaEnhancement.h"
+#import "DGVideoEffects.h"
 #import "DGDiagnostics.h"
 #import <Metal/Metal.h>
 #import <VideoToolbox/VideoToolbox.h>
@@ -23,10 +24,16 @@ static CIImage *DGFilterPicture(CIImage *image,unsigned preset,BOOL details){
 }
 static BOOL DGSupports(Class cls,id device){if(!cls||!device)return NO;SEL selector=NSSelectorFromString(@"supportsDevice:");if(![cls respondsToSelector:selector])return NO;BOOL(*message)(id,SEL,id)=(BOOL(*)(id,SEL,id))objc_msgSend;return message(cls,selector,device);}
 BOOL DGMetalFXSpatialAvailable(void){return DGSupports(NSClassFromString(@"MTLFXSpatialScalerDescriptor"),MTLCreateSystemDefaultDevice());}
-BOOL DGMetalFXFrameInterpolationAvailable(void){return DGSupports(NSClassFromString(@"MTLFXFrameInterpolatorDescriptor"),MTLCreateSystemDefaultDevice());}
-BOOL DGVTLowLatencySuperResolutionAvailable(void){return NSClassFromString(@"VTLowLatencySuperResolutionScalerConfiguration")!=Nil&&NSClassFromString(@"VTFrameProcessor")!=Nil;}
-NSString *DGMediaEnhancementStatus(void){return [NSString stringWithFormat:@"MetalFX 空间放大 %@；插帧接口 %@（尚未接入视频）；VT 低延迟超分 API %@（未接入）",DGMetalFXSpatialAvailable()?@"支持":@"不支持",DGMetalFXFrameInterpolationAvailable()?@"支持":@"不支持",DGVTLowLatencySuperResolutionAvailable()?@"存在":@"不存在"];}
-void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.metalfx"],interpolation=[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.frameInterpolation"];if(spatial&&!DGMetalFXSpatialAvailable())[NSUserDefaults.standardUserDefaults setBool:NO forKey:@"douglass.experimental.metalfx"];if(interpolation&&!DGMetalFXFrameInterpolationAvailable())[NSUserDefaults.standardUserDefaults setBool:NO forKey:@"douglass.experimental.frameInterpolation"];DGDiagnostic(@"experimental.media.settings",[NSString stringWithFormat:@"metalfx=%d interpolation=%d status=%@",[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.metalfx"],[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.experimental.frameInterpolation"],DGMediaEnhancementStatus()]);[NSNotificationCenter.defaultCenter postNotificationName:@"DGMediaEnhancementChanged" object:nil];}
+NSString *DGMediaEnhancementStatus(void){
+ return [NSString stringWithFormat:@"MetalFX 空间放大 %@ · VideoToolbox 插帧 %@ · 低延迟超分 %@",
+         DGMetalFXSpatialAvailable()?@"支持":@"不支持",
+         DGVTFInterpolationAvailable()?@"支持":@"不支持",
+         DGVTSuperResolutionAvailable()?@"支持":@"不支持"];
+}
+void DGMediaEnhancementApply(void){
+ DGDiagnostic(@"experimental.media.settings",DGMediaEnhancementStatus());
+ [NSNotificationCenter.defaultCenter postNotificationName:@"DGMediaEnhancementChanged" object:nil];
+}
 @interface DGSpatialSession:NSObject
 @property(nonatomic) double scale;
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial;

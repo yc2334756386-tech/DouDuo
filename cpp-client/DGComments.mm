@@ -269,7 +269,7 @@ namespace { struct DGReplyState {
     _separator.frame=CGRectMake(20,header-4,MAX(0,width-40),.5);
     _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
-    if(_previewOpen&&!_table.dragging&&!_table.decelerating)[self restorePreviewPosition];
+    if(_previewOpen&&!_previewUserMoved&&!_table.dragging&&!_table.decelerating)[self restorePreviewPosition];
     _previewSnapshot.frame=_table.frame;
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
@@ -301,7 +301,9 @@ namespace { struct DGReplyState {
  NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();
 }
 - (void)openPreview:(NSString *)url source:(UIImageView *)source{
- if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewUserMoved=NO;_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;_previewSnapshot=nil;}
+ if(!url.length)return;
+ if(_previewOpen&&(!_previewReturning||!DGFinishClosingImagePreview(self)))return;
+ [self capturePreviewPosition];_previewUserMoved=NO;_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;_previewSnapshot=nil;}
 }
 - (void)dgCapturePreviewSnapshot{_previewSnapshot=[_table snapshotViewAfterScreenUpdates:YES];_previewSnapshot.userInteractionEnabled=NO;}
 - (void)sortLoaded{

@@ -143,6 +143,7 @@ BOOL DGMusicMatches(NSString *identifier);
 NSString *DGCurrentMusicID(void);
 void DGShowImage(UIViewController *host, NSString *url, UIImageView *source);
 BOOL DGShowImageWithCompletion(UIViewController *host,NSString *url,UIImageView *source,dispatch_block_t completion);
+BOOL DGFinishClosingImagePreview(UIViewController *host);
 BOOL DGImagePreviewKeepsPlayback(UIViewController *controller);
 UIViewController *DGMakeFeedController(void);
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works, NSInteger selected, DGBridge *bridge);
