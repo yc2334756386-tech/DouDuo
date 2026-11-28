@@ -69,10 +69,14 @@ static const void *DGInlinePreviewKey=&DGInlinePreviewKey;
  if(!source.window||!image||CGRectIsEmpty(_scroll.bounds))return CGAffineTransformMakeScale(.88,.88);
  CGRect target=[source convertRect:source.bounds toView:self.view];
  if(CGRectIsEmpty(target))return CGAffineTransformMakeScale(.88,.88);
- auto fit=douglass::fittedMedia(image.size.width,image.size.height,{0,0,_scroll.bounds.size.width,_scroll.bounds.size.height},false);
+ auto fit=douglass::fittedMedia(image.size.width,image.size.height,{0,0,_image.bounds.size.width,_image.bounds.size.height},false);
  if(fit.width<=0||fit.height<=0)return CGAffineTransformIdentity;
- CGFloat scale=MIN(target.size.width/fit.width,target.size.height/fit.height);
- return CGAffineTransformMake(scale,0,0,scale,CGRectGetMidX(target)-_scroll.center.x,CGRectGetMidY(target)-_scroll.center.y);
+ CGRect content=[_image convertRect:CGRectMake(fit.x,fit.y,fit.width,fit.height) toView:_scroll];
+ if(CGRectIsEmpty(content))return CGAffineTransformIdentity;
+ CGFloat scale=MIN(target.size.width/content.size.width,target.size.height/content.size.height);
+ CGFloat x=CGRectGetMidX(target)-_scroll.center.x-scale*(CGRectGetMidX(content)-CGRectGetMidX(_scroll.bounds));
+ CGFloat y=CGRectGetMidY(target)-_scroll.center.y-scale*(CGRectGetMidY(content)-CGRectGetMidY(_scroll.bounds));
+ return CGAffineTransformMake(scale,0,0,scale,x,y);
 }
 - (void)showInlineIn:(UIViewController *)presenter {
  [presenter addChildViewController:self];

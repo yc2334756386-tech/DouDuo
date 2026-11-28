@@ -27,6 +27,7 @@
 - (void)pagingInMotion:(BOOL)inMotion;
 - (BOOL)hasRenderedMedia;
 - (void)stagePreparedVideo;
+- (void)prepareVisibleVideo;
 - (double)currentPlaybackPosition;
 - (BOOL)isPlaybackPaused;
 - (BOOL)isPlaybackActive;

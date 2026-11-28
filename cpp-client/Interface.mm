@@ -129,6 +129,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  [self.view layoutIfNeeded];
  [_collection layoutIfNeeded];
  [self activate];
+ DGDiagnostic(@"playback.work_entry",nil);
 }
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];_visible=YES;if(_showingMessages)DGSetEmbeddedMessagesVisible(_messageChannel,YES);_navigationTabs.selectedSegmentIndex=_showingMessages?2:[_operation isEqualToString:@"followFeed"]?0:1;__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGFeed *page=weak;if(!page||!page->_visible||!page.viewIfLoaded.window||(page.navigationController&&page.navigationController.topViewController!=page)||page.presentedViewController)return;DGMusicStop();[page activate];if(page->_ownsBridge&&DGRestoreNavigationResume(page,page->_bridge))return;DGSaveNavigationResume(page.view.window);if(page->_noticeComment.length&&page->_current<(NSInteger)page->_feed.works.size()&&!page->_comments)[page showComments:Text(page->_feed.works[page->_current].id)];});}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];if(!_staticFeed)DGCacheSetIdle(NO);if(DGOptionsKeepsPlayback(self.presentedViewController?:self.navigationController.presentedViewController))return;if(_staticFeed)[self.navigationController setNavigationBarHidden:NO animated:animated];_visible=NO;[self finishPaging];for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];}
@@ -584,7 +585,10 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  });
 }
 - (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)path {
- if(_foreground&&!_inactive)[(DGFeedCell *)cell stagePreparedVideo];
+ if(_foreground&&!_inactive){
+  [(DGFeedCell *)cell stagePreparedVideo];
+  if(_pagingMotion&&_visible)[(DGFeedCell *)cell prepareVisibleVideo];
+ }
  if(_pagingMotion)[self playDominantPage];
  if(path.item==_current&&!_pagingMotion){__weak DGFeed *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak activate];});}
 }

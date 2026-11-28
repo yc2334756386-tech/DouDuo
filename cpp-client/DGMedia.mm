@@ -390,6 +390,10 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  [self attach:prepared position:0];
 }
 - (void)preparedVideoWarmed{if(self.window&&!_active&&!_backgroundMode&&!_appInactive)[self stagePreparedVideo];}
+- (void)prepareVisibleVideo {
+ if(_active||_player||_work.photo()||_work.isLive||_work.play.empty()||_appInactive||_backgroundMode)return;
+ if(!PreparedForWork(_work))Obtain(_work);
+}
 - (void)recover {
  if(!NSThread.isMainThread){__weak DGFeedCell *weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak recover];});return;}
  if(!_active||_paused||_work.photo()||_backgroundMode||_appInactive||_pagingMotion)return;

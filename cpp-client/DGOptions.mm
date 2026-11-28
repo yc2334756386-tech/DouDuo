@@ -77,7 +77,7 @@ static NSDictionary *Action(NSString *title,NSString *action,NSString *detail){r
  @[Action(@"全局动画曲线与速率",@"animation",@"拖动控制点或填写贝塞尔曲线数值"),Switch(@"强制 120Hz",@"douglass.force120",@"微型 VideoCall PiP 持续更新，关闭恢复系统策略；系统仍可限频",NO)],
  @[Segments(@"外观",@"douglass.appearance",@[@"深色",@"浅色",@"自动"],0,@"自动跟随手机的深色模式")],
  @[Switch(@"启用日志",@"douglass.diagnostics",@"持续记录本应用的运行与内存诊断",NO),Action(@"查看日志",@"logsView",@"在应用内查看最近记录"),Action(@"导出日志",@"logsExport",@"通过系统分享面板保存到文件"),Action(@"清空日志目录",@"logsClear",@"")],
- @[Action(@"登录 / 安全验证",@"login",@""),Action(@"退出当前账号",@"logout",@"")]
+ @[Action(@"退出当前账号",@"logout",@"")]
  ];return _rows;}
 - (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat h=self.view.bounds.size.height,panel=self.actions?MIN(h*.68,460):h*.82;_glass.bounds=CGRectMake(0,0,self.view.bounds.size.width,panel);_glass.center=CGPointMake(self.view.bounds.size.width/2,h-panel/2);_title.frame=CGRectMake(24,18,self.view.bounds.size.width-92,34);_close.frame=CGRectMake(self.view.bounds.size.width-62,12,44,44);_table.frame=CGRectMake(0,60,self.view.bounds.size.width,panel-60);_table.contentInset=UIEdgeInsetsMake(0,0,self.view.safeAreaInsets.bottom,0);}
 - (void)viewDidDisappear:(BOOL)animated{[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}
@@ -123,7 +123,6 @@ static NSDictionary *Action(NSString *title,NSString *action,NSString *detail){r
  if([action isEqualToString:@"logsClear"]){DGDiagnosticClear(self);return;}
  if([action isEqualToString:@"rgb"])[self rgb];
  if([action isEqualToString:@"animation"]){[self finish:^(UIViewController *host){DGNavigationController *nav=[[DGNavigationController alloc]initWithRootViewController:DGMakeAnimationSettings()];DGConfigurePageTransition(nav);[host presentViewController:nav animated:YES completion:nil];}];}
- if([action isEqualToString:@"login"])[self finish:^(UIViewController *host){if([host respondsToSelector:@selector(openLogin)])[host performSelector:@selector(openLogin)];}];
  if([action isEqualToString:@"logout"]){DGBridge *bridge=self.bridge;[self finish:^(UIViewController *host){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"退出当前账号？" message:@"这会清除本机保存的当前登录信息" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[bridge signOut:^{DGMusicStop();[NSNotificationCenter.defaultCenter postNotificationName:@"DGAccountChanged" object:nil];}];}]];[host presentViewController:alert animated:YES completion:nil];}];}
 }
 @end

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <type_traits>
 
 BOOL DGVTFInterpolationAvailable(void) {
     if(@available(iOS 26.0,*))return [VTLowLatencyFrameInterpolationConfiguration isSupported];
@@ -158,7 +159,7 @@ private:
     CGSize _pixelSize;
     OSType _pixelFormat;
     NSUInteger _generation,_consecutiveLate;
-    BOOL _interpolation,_resolution,_busy,_unsupported,_orientationReady;
+    BOOL _interpolation,_resolution,_busy,_unsupported,_orientationReady,_reportedDisplay;
 }
 
 - (void)showForPlayerLayer:(AVPlayerLayer *)layer {
@@ -175,6 +176,7 @@ private:
     [item addOutput:_output];
     _display=[AVSampleBufferDisplayLayer layer];
     _display.hidden=YES;
+    _display.masksToBounds=YES;
     _display.videoGravity=layer.videoGravity;
     [layer addSublayer:_display];
     CMTimebaseRef timebase=nullptr;
@@ -236,13 +238,14 @@ private:
     if(_output&&_item)[_item removeOutput:_output];
     [self resetFrames];
     [_display removeFromSuperlayer];_display=nil;_output=nil;_item=nil;_nativeLayer=nil;
-    _unsupported=NO;_pixelSize=CGSizeZero;_pixelFormat=0;
+    _unsupported=NO;_reportedDisplay=NO;_pixelSize=CGSizeZero;_pixelFormat=0;
     auto previous=std::move(_processor);
     if(previous)dispatch_async(_processing,^{(void)previous;});
 }
 
 - (BOOL)queuePixel:(CVPixelBufferRef)pixel atHostTime:(CMTime)time {
-    if(!pixel||!_display.readyForMoreMediaData||CMTIME_IS_VALID(_lastQueued)&&CMTimeCompare(time,_lastQueued)<=0)return NO;
+    if(!pixel||!_display.readyForMoreMediaData||
+       (CMTIME_IS_VALID(_lastQueued)&&CMTimeCompare(time,_lastQueued)<=0))return NO;
     CMVideoFormatDescriptionRef format=nullptr;
     if(CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault,pixel,&format)!=noErr)return NO;
     CMSampleTimingInfo timing={kCMTimeInvalid,time,kCMTimeInvalid};
@@ -288,6 +291,7 @@ private:
         if(_latest.source&&(!std::isfinite(interval)||interval<=0||interval>.10))[self resetFrames];
         FramePair pair={pixel,interval>=.025&&interval<=.10?_latest.source:PixelBuffer{},actual,_latest.time};
         _latest={pixel,{},actual,kCMTimeInvalid};
+        if(_interpolation&&!_resolution&&!pair.previous)return;
         if(!_processor)_processor=std::make_shared<VideoProcessor>(_interpolation,_resolution);
         auto processor=_processor;
         _busy=YES;
@@ -307,13 +311,21 @@ private:
                     if(++effects->_consecutiveLate>=3||effects->_display.status==AVQueuedSampleBufferRenderingStatusFailed)[effects resetFrames];
                     return;
                 }
+                BOOL queuedMidpoint=NO;
                 if(result.midpoint){
                     CMTime midpoint=CMTimeSubtract(displayTime,CMTimeMakeWithSeconds(interval/2,60000));
-                    if(CMTimeCompare(midpoint,now)>0)[effects queuePixel:result.midpoint.get() atHostTime:midpoint];
+                    if(CMTimeCompare(midpoint,now)>0)queuedMidpoint=[effects queuePixel:result.midpoint.get() atHostTime:midpoint];
                 }
+                if(!effects->_resolution&&!queuedMidpoint)return;
                 if([effects queuePixel:result.current.get() atHostTime:displayTime]){
                     effects->_lastResult=CACurrentMediaTime();effects->_consecutiveLate=0;
-                    if(effects->_display.readyForDisplay)effects->_display.hidden=NO;
+                    if(effects->_display.readyForDisplay){
+                        effects->_display.hidden=NO;
+                        if(!effects->_reportedDisplay){
+                            effects->_reportedDisplay=YES;
+                            DGDiagnostic(@"video.vt.display",[NSString stringWithFormat:@"midpoint=%d width=%zu",queuedMidpoint,CVPixelBufferGetWidth(result.current.get())]);
+                        }
+                    }
                 }
             });
         }});
