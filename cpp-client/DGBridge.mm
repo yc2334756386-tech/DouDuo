@@ -12,11 +12,14 @@ NSString *DGUserAgent(void) {
     BOOL _ready, _started, _webReloadPending;
     NSUInteger _generation;
     NSMutableArray *_waiters;
+    NSMutableArray *_profileWaiters;
+    NSUInteger _profileToken;
     NSString *_script, *_failure;
 }
 - (instancetype)init {
     if ((self = [super init])) {
         _waiters = [NSMutableArray array];
+        _profileWaiters=[NSMutableArray array];
         NSString *path = [NSBundle.mainBundle pathForResource:@"bridge" ofType:@"js"];
         _script = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
         NSString *regions=[NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"DouyinPublicationRegions" ofType:@"json"] encoding:NSUTF8StringEncoding error:nil];
@@ -68,11 +71,12 @@ NSString *DGUserAgent(void) {
 }
 - (void)reload {
     ++_generation;
+    [self finishProfile:nil error:@"账号连接正在恢复，请稍后重试"];
     [_web stopLoading];
     [self flush:@"登录状态已更新，请刷新重试"];
     _ready = NO; _failure = nil;
     NSUInteger generation = _generation;
-    DGSessionRestore(^{DGSessionPrepare(self->_web,YES,^{if(generation==self->_generation)[self->_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/jingxuan"] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:25]];});});
+    DGSessionRestore(^{if(generation!=self->_generation)return;DGSessionPrepare(self->_web,YES,^{if(generation==self->_generation)[self->_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/jingxuan"] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:25]];});});
     __weak DGBridge *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 28 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         DGBridge *self = weakSelf;
@@ -109,7 +113,32 @@ NSString *DGUserAgent(void) {
     NSString *scheme = action.request.URL.scheme.lowercaseString;
     decisionHandler(([@[@"http", @"https", @"about"] containsObject:scheme]) ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
 }
+- (void)finishProfile:(NSDictionary *)result error:(NSString *)error{
+    ++_profileToken;NSArray *callbacks=_profileWaiters.copy;[_profileWaiters removeAllObjects];
+    for(DGResult callback in callbacks)callback(result,error);
+}
+- (void)readProfile:(DGResult)completion{
+    if(_failure)[self reload];
+    [_profileWaiters addObject:[completion copy]];if(_profileWaiters.count>1)return;
+    NSUInteger token=++_profileToken;__weak DGBridge *weak=self;
+    DGSessionRestore(^{DGBridge *self=weak;if(self&&token==self->_profileToken)[self lookupProfile:token attempt:0];});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{DGBridge *self=weak;if(self&&token==self->_profileToken)[self finishProfile:nil error:@"账号状态暂未确认，请稍后重试"];});
+}
+- (void)lookupProfile:(NSUInteger)token attempt:(NSUInteger)attempt{
+    if(token!=_profileToken)return;__weak DGBridge *weak=self;
+    [self request:@"profile" parameters:@{@"_profileRaw":@YES} completion:^(NSDictionary *result,NSString *error){
+        DGBridge *self=weak;if(!self||token!=self->_profileToken)return;
+        BOOL authenticated=!error&&[result[@"loggedIn"]boolValue]&&String(result[@"uid"]).size()&&String(result[@"uid"])!="0";
+        if(authenticated){DGDiagnostic(@"session.profile",@"state=authenticated");[self finishProfile:result error:nil];return;}
+        if([result[@"authenticationExpired"]boolValue]){DGDiagnostic(@"session.profile",@"state=expired");[self finishProfile:@{@"loggedIn":@NO,@"authConfirmed":@YES} error:nil];return;}
+        if(!error&&attempt>=2&&!DGSessionMayBeSignedIn()){DGDiagnostic(@"session.profile",@"state=signed_out");NSMutableDictionary *confirmed=[result mutableCopy];confirmed[@"authConfirmed"]=@YES;[self finishProfile:confirmed error:nil];return;}
+        DGDiagnostic(@"session.profile",[NSString stringWithFormat:@"state=unconfirmed attempt=%lu",(unsigned long)attempt]);
+        if(attempt<2){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)((attempt+1)*NSEC_PER_SEC)),dispatch_get_main_queue(),^{DGBridge *self=weak;if(!self||token!=self->_profileToken)return;DGSessionRestore(^{DGBridge *self=weak;if(self&&token==self->_profileToken)[self lookupProfile:token attempt:attempt+1];});});}
+        else [self finishProfile:nil error:@"账号状态暂未确认，请稍后重试或打开安全验证"];
+    }];
+}
 - (void)request:(NSString *)operation parameters:(NSDictionary *)parameters completion:(DGResult)completion {
+    if([operation isEqualToString:@"profile"]&&![parameters[@"_profileRaw"]boolValue]){[self readProfile:completion];return;}
     if([operation isEqualToString:@"musicWorks"]||[operation isEqualToString:@"musicDetail"]){DGReadMobileMusic(self,operation,parameters,completion);return;}
     if (_failure) { completion(nil, _failure); return; }
     NSUInteger generation = _generation;
@@ -146,6 +175,7 @@ NSString *DGUserAgent(void) {
 - (void)signOut:(void (^)(void))completion {
     DGSessionForget();
     ++_generation; _ready = NO;
+    [self finishProfile:nil error:@"已退出当前账号"];
     [_web stopLoading];
     [self flush:@"已退出当前账号"];
     [WKWebsiteDataStore.defaultDataStore removeDataOfTypes:WKWebsiteDataStore.allWebsiteDataTypes modifiedSince:NSDate.distantPast completionHandler:^{

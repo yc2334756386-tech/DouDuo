@@ -51,7 +51,7 @@
       xhr.send(body==null?null:body);
     });
     const data=parse(response.body);
-    if(data && Number(data.status_code)===8) throw new Error('登录已失效，请重新登录');
+    if(data && Number(data.status_code)===8) {const error=new Error('登录已失效，请重新登录');error.authenticationExpired=true;throw error;}
     const accepted=data && response.status>=200 && response.status<300 && (options.strict?data.status_code===0:data.status_code==null||Number(data.status_code)===0);
     const actualContent=data&&((Array.isArray(data.aweme_list)&&data.aweme_list.length)||(Array.isArray(data.comments)&&data.comments.length)||data.user||data.user_info||(Array.isArray(data.data)&&data.data.length));
     if(accepted&&(!(data.verify_info||data.verify_data||data.captcha)||actualContent)) return data;
@@ -252,7 +252,7 @@
         const data=await get('/aweme/v1/web/emoji/list/',{});return {items:(data.emoji_list||[]).filter(value=>value&&value.display_name&&!value.hide).map(value=>({name:value.display_name,url:first(value.emoji_url)})).filter(value=>value.url)};
       }
       return {error:'暂不支持此操作'};
-    }catch(error){return {error:String(error.message||'请求失败'),verificationRequired:!!error.verificationRequired};}
+    }catch(error){return {error:String(error.message||'请求失败'),verificationRequired:!!error.verificationRequired,authenticationExpired:!!error.authenticationExpired};}
   }};
 })();
 
