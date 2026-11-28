@@ -459,7 +459,15 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)hold:(UILongPressGestureRecognizer*)g {
  if(_cleanScreen)return;
  CGPoint point=[g locationInView:self.contentView];BOOL edge=point.x<56||point.x>self.contentView.bounds.size.width-80;
- if(g.state==UIGestureRecognizerStateBegan){if(edge&&!_work.photo()&&_player){if(DGMusicPlayer()){DGMusicStop();_paused=NO;[self active:YES];}_boosting=YES;_boostRate=1.5;_holdY=point.y;[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"1.5× · 上滑换档，松手恢复";_player.currentItem.preferredForwardBufferDuration=8;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_boostRate;}else if(self.actionMenuAction)self.actionMenuAction(point);}
+ if(g.state==UIGestureRecognizerStateBegan){
+  if(edge&&!_work.photo()&&_player){
+   BOOL wasPaused=_paused;_boosting=YES;_boostRate=1.5;_holdY=point.y;_paused=NO;_pause.hidden=YES;
+   if(wasPaused){_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}
+   if(DGMusicPlayer())DGMusicStop();
+   [[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleMedium]impactOccurred];[self lock];_speedGlass.hidden=NO;_speedText.text=@"1.5× · 上滑换档，松手恢复";_player.currentItem.preferredForwardBufferDuration=8;
+   [self active:_active];if(_active&&!_prepared.needsBeginning&&!_seeking&&!_dragging&&fabs(_player.rate-_boostRate)>.01)_player.rate=_boostRate;
+  }else if(self.actionMenuAction)self.actionMenuAction(point);
+ }
  else if(g.state==UIGestureRecognizerStateChanged&&_boosting){double upward=MAX(0.,_holdY-point.y),speed=upward<28?1.5:upward<64?2.:DGHoldSpeed();if(fabs(speed-_boostRate)>.01){_boostRate=speed;DGHaptic();_speedText.text=[NSString stringWithFormat:@"%.1f× · 上滑换档，松手恢复",speed];if(_active&&!_paused&&!_prepared.needsBeginning&&!_seeking)_player.rate=speed;}}
  else if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){[self unlock];_boosting=NO;_speedGlass.hidden=YES;_player.currentItem.preferredForwardBufferDuration=4;if(_active&&!_paused&&!_prepared.needsBeginning)_player.rate=_rate;}
  [self syncDanmakuPlayback];
