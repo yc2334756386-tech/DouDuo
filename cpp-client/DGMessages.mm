@@ -48,10 +48,11 @@
 @property(nonatomic) BOOL embedded;
 @property(nonatomic,copy) void (^navigate)(UIViewController *);
 @end
-@implementation DGMessages{UITableView *_table;NSArray *_rows;NSTimer *_timer;UILabel *_empty;UIRefreshControl *_refresh;UIVisualEffectView *_composer;UITextView *_input;UIButton *_send;BOOL _busy,_sending,_opened,_visible,_positioned,_noticeBusy;CGFloat _keyboard;NSArray<UIView *> *_noticeDots;CFTimeInterval _noticeCheckedAt;}
+@implementation DGMessages{UITableView *_table;NSArray *_rows;NSTimer *_timer;UILabel *_empty,*_syncLabel;UIStackView *_syncStatus;UIActivityIndicatorView *_syncSpinner;NSDate *_lastSynced;NSString *_syncError,*_noticeError;UIRefreshControl *_refresh;UIVisualEffectView *_composer;UITextView *_input;UIButton *_send;BOOL _busy,_sending,_opened,_visible,_positioned,_noticeBusy,_waitingForInbox;CGFloat _keyboard;NSArray<UIView *> *_noticeDots;CFTimeInterval _noticeCheckedAt;}
 - (void)viewDidLoad{
  [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;if(!_service)_service=[DGChatService new];_rows=Array(DGReadInboxCache([self cacheKey])[@"items"]);self.title=self.conversation?Text(String(self.conversation[@"name"])):@"信息";
  _table=[[UITableView alloc]initWithFrame:self.view.bounds style:UITableViewStylePlain];_table.backgroundColor=UIColor.clearColor;_table.separatorStyle=UITableViewCellSeparatorStyleNone;_table.rowHeight=self.conversation?UITableViewAutomaticDimension:82;_table.estimatedRowHeight=72;_table.dataSource=self;_table.delegate=self;_table.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[_table registerClass:DGConversationCell.class forCellReuseIdentifier:@"conversation"];[_table registerClass:DGChatBubble.class forCellReuseIdentifier:@"message"];[self.view addSubview:_table];
+ _table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_syncSpinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_syncSpinner.color=UIColor.secondaryLabelColor;_syncSpinner.hidesWhenStopped=YES;_syncLabel=Label(12,UIFontWeightRegular);_syncLabel.textColor=UIColor.secondaryLabelColor;_syncStatus=[[UIStackView alloc]initWithArrangedSubviews:@[_syncSpinner,_syncLabel]];_syncStatus.axis=UILayoutConstraintAxisHorizontal;_syncStatus.alignment=UIStackViewAlignmentCenter;_syncStatus.spacing=7;[self.view addSubview:_syncStatus];[self updateSyncStatus];
  _empty=Label(14,UIFontWeightRegular);_empty.textColor=UIColor.secondaryLabelColor;_empty.textAlignment=NSTextAlignmentCenter;_empty.numberOfLines=0;_empty.text=@"正在同步消息…";_table.backgroundView=_empty;_refresh=[UIRefreshControl new];[_refresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];_table.refreshControl=_refresh;
  self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
  if(self.conversation){_composer=Glass(22);[self.view addSubview:_composer];_input=[UITextView new];_input.backgroundColor=UIColor.clearColor;_input.textColor=UIColor.labelColor;_input.font=[UIFont systemFontOfSize:16];_input.delegate=self;_input.accessibilityLabel=@"输入消息";[_composer.contentView addSubview:_input];_send=Symbol(@"arrow.up.circle.fill",self,@selector(send));_send.accessibilityLabel=@"发送";[_composer.contentView addSubview:_send];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboard:) name:UIKeyboardWillChangeFrameNotification object:nil];}
@@ -64,7 +65,7 @@
 - (void)setChannelVisible:(BOOL)visible{
  if(_visible==visible)return;
  _visible=visible;[_timer invalidate];_timer=nil;
- if(!visible)return;
+ if(!visible){[self updateSyncStatus];return;}
  [self updateUnreadIndicators];
  [_service attach:self.view];[self poll];
  __weak DGMessages *weak=self;_timer=[NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer){[weak poll];}];
@@ -72,7 +73,19 @@
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];[self setChannelVisible:YES];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];if(self.conversation&&!_positioned&&_rows.count){_positioned=YES;[_table layoutIfNeeded];[_table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:_rows.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];}}
 - (void)viewWillDisappear:(BOOL)animated{[super viewWillDisappear:animated];[self setChannelVisible:NO];}
-- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat safe=self.view.safeAreaInsets.bottom,bottom=MAX(safe,_keyboard),height=self.view.bounds.size.height;_table.frame=CGRectMake(0,0,self.view.bounds.size.width,MAX(0,height-(self.conversation?64+bottom:0)));_composer.frame=CGRectMake(10,height-bottom-60,self.view.bounds.size.width-20,54);_input.frame=CGRectMake(10,5,_composer.bounds.size.width-66,44);_send.frame=CGRectMake(_composer.bounds.size.width-52,4,48,46);}
+- (void)viewDidLayoutSubviews{[super viewDidLayoutSubviews];CGFloat safe=self.view.safeAreaInsets.bottom,bottom=MAX(safe,_keyboard),height=self.view.bounds.size.height,top=self.embedded?0:self.view.safeAreaInsets.top;_syncStatus.frame=CGRectMake(18,top,MAX(0,self.view.bounds.size.width-36),30);_table.frame=CGRectMake(0,top+30,self.view.bounds.size.width,MAX(0,height-top-30-(self.conversation?64+bottom:0)));_table.contentInset=UIEdgeInsetsMake(0,0,self.conversation?0:safe,0);_composer.frame=CGRectMake(10,height-bottom-60,self.view.bounds.size.width-20,54);_input.frame=CGRectMake(10,5,_composer.bounds.size.width-66,44);_send.frame=CGRectMake(_composer.bounds.size.width-52,4,48,46);}
+- (void)updateSyncStatus{
+ BOOL active=_visible&&UIApplication.sharedApplication.applicationState==UIApplicationStateActive,connecting=!_service.ready&&!_service.failure,syncing=active&&(connecting||_service.loading||_busy||_noticeBusy||_waitingForInbox);NSString *text;
+ if(!active)text=@"同步已暂停";
+ else if(connecting)text=_rows.count?@"正在连接消息服务…（已显示缓存）":@"正在连接消息服务…";
+ else if(syncing)text=_rows.count&&!_lastSynced?@"正在同步…（已显示缓存）":@"正在同步…";
+ else if(_service.failure||_syncError)text=_rows.count?@"同步暂时失败，保留已有消息":@"同步暂时失败，稍后重试";
+ else if(_noticeError)text=@"部分消息同步失败，稍后重试";
+ else if(_lastSynced){NSDateFormatter *format=[NSDateFormatter new];format.dateFormat=@"HH:mm";text=[@"已同步 · " stringByAppendingString:[format stringFromDate:_lastSynced]];}
+ else text=_rows.count?@"已显示缓存，等待同步":@"等待同步";
+ if(![_syncLabel.text isEqualToString:text])_syncLabel.text=text;
+ _syncSpinner.hidden=!syncing;if(syncing)[_syncSpinner startAnimating];else[_syncSpinner stopAnimating];
+}
 - (void)keyboard:(NSNotification *)note{CGRect rect=[self.view convertRect:[note.userInfo[UIKeyboardFrameEndUserInfoKey]CGRectValue] fromView:nil];_keyboard=MAX(0,self.view.bounds.size.height-rect.origin.y);[self.view setNeedsLayout];[self.view layoutIfNeeded];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (void)refresh{if(self.conversation){[self query:@"older"];}else{_noticeCheckedAt=0;if(_service.failure)[_service reload];[self poll];}}
@@ -83,15 +96,16 @@
 }
 - (void)pollNoticeCounts{
  if(self.conversation||_noticeBusy||CACurrentMediaTime()-_noticeCheckedAt<30)return;
- _noticeBusy=YES;_noticeCheckedAt=CACurrentMediaTime();NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
- [_bridge request:@"noticeCounts" parameters:@{} completion:^(NSDictionary *result,NSString *error){DGMessages *self=weak;if(!self)return;self->_noticeBusy=NO;if(error||![scope isEqual:DGCurrentFeedScope()])return;DGInboxUpdateNoticeCounts(Array(result[@"items"]));}];
+ _noticeBusy=YES;_noticeError=nil;[self updateSyncStatus];_noticeCheckedAt=CACurrentMediaTime();NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
+ [_bridge request:@"noticeCounts" parameters:@{} completion:^(NSDictionary *result,NSString *error){DGMessages *self=weak;if(!self)return;self->_noticeBusy=NO;self->_noticeError=error;if(!error&&[scope isEqual:DGCurrentFeedScope()])DGInboxUpdateNoticeCounts(Array(result[@"items"]));[self updateSyncStatus];}];
 }
-- (void)poll{if(!_visible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;[self pollNoticeCounts];if(_busy||_sending)return;if(!_service.ready&&!_service.loading&&!_service.failure)[_service attach:self.view];[self query:self.conversation?(_opened?@"messages":@"open"):@"list"];}
+- (void)poll{if(!_visible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive){[self updateSyncStatus];return;}[self pollNoticeCounts];if(_busy||_sending)return;if(!_service.ready&&!_service.loading&&!_service.failure)[_service attach:self.view];[self query:self.conversation?(_opened?@"messages":@"open"):@"list"];}
 - (void)query:(NSString *)action{
- if(_busy||_sending)return;_busy=YES;NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
+ if(_busy||_sending)return;_busy=YES;_syncError=nil;[self updateSyncStatus];NSString *scope=DGCurrentFeedScope();__weak DGMessages *weak=self;
  [_service call:action parameters:@{@"id":self.conversation[@"id"]?:@"",@"uid":self.uid?:@""} completion:^(NSDictionary *result,NSString *error){
-  DGMessages *self=weak;if(!self)return;self->_busy=NO;[self->_refresh endRefreshing];if(![scope isEqual:DGCurrentFeedScope()])return;
-  if(error){if(self.conversation&&self->_service.ready)self->_opened=NO;if(!self->_rows.count)self->_empty.text=error;return;}
+  DGMessages *self=weak;if(!self)return;self->_busy=NO;[self->_refresh endRefreshing];if(![scope isEqual:DGCurrentFeedScope()]){[self updateSyncStatus];return;}
+  if(error){self->_syncError=error;self->_waitingForInbox=NO;if(self.conversation&&self->_service.ready)self->_opened=NO;if(!self->_rows.count)self->_empty.text=error;[self updateSyncStatus];return;}
+  self->_waitingForInbox=!self.conversation&&![result[@"ready"]boolValue];if(!self->_waitingForInbox)self->_lastSynced=NSDate.date;[self updateSyncStatus];
   if([action isEqualToString:@"open"]){self->_opened=YES;DGInboxMarkConversationRead(Text(String(self.conversation[@"id"])));}
   NSArray *previous=self->_rows,*incoming=Array(result[@"items"]);BOOL older=[action isEqualToString:@"older"];
   NSArray *rows=DGMergeInboxRows(previous,incoming,!self.conversation||older,self.conversation?200:100);

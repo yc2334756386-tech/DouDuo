@@ -1,6 +1,7 @@
 #import "DGComments.h"
 #include <unordered_map>
-static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=250;});return cache;}
+static UIImage *DGCommentEmojiPlaceholder(){static UIImage *image;static dispatch_once_t once;dispatch_once(&once,^{image=[[[UIGraphicsImageRenderer alloc]initWithSize:CGSizeMake(21,21)]imageWithActions:^(UIGraphicsImageRendererContext *context){}];});return image;}
+static void DGSortComments(std::vector<Comment> &comments,bool latest){std::stable_sort(comments.begin(),comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});}
 
 @interface DGCommentImage : DGImage
 @property(nonatomic, copy) NSString *sourceURL;
@@ -8,7 +9,47 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 @implementation DGCommentImage
 @end
 
-@interface DGCommentCell : UITableViewCell
+// Keep the text's attachment geometry fixed while each emoji loads independently.
+// Updating a bitmap never replaces the label text or changes the comment height.
+@interface DGCommentText:UILabel
+@property(nonatomic,copy) void (^openImageAction)(NSString *,UIImageView *);
+@property(nonatomic,copy) void (^saveImageAction)(NSString *);
+- (void)displayText:(NSString *)plain emojis:(NSArray<NSDictionary *> *)emojis;
+@end
+@implementation DGCommentText{
+    NSMutableArray<DGCommentImage *> *_emojiImages;NSMutableArray<NSNumber *> *_emojiPositions;
+    NSTextStorage *_storage;NSLayoutManager *_layout;NSTextContainer *_container;
+}
+- (void)displayText:(NSString *)plain emojis:(NSArray<NSDictionary *> *)emojis{
+    for(DGCommentImage *image in _emojiImages){[image remote:@""];[image removeFromSuperview];}
+    _emojiImages=[NSMutableArray array];_emojiPositions=[NSMutableArray array];
+    if(!plain.length&&emojis.count){NSMutableString *names=[NSMutableString string];for(NSDictionary *emoji in emojis)[names appendString:emoji[@"name"]?:@""];plain=names;}
+    NSMutableAttributedString *text=[[NSMutableAttributedString alloc]initWithString:plain?:@"" attributes:@{NSFontAttributeName:self.font,NSForegroundColorAttributeName:self.textColor}];
+    for(NSDictionary *emoji in emojis){NSString *name=emoji[@"name"],*url=emoji[@"url"];if(!name.length||!url.length)continue;NSUInteger start=0;
+        while(start<text.length){NSRange range=[text.string rangeOfString:name options:0 range:NSMakeRange(start,text.length-start)];if(range.location==NSNotFound)break;
+            NSTextAttachment *attachment=[NSTextAttachment new];attachment.image=DGCommentEmojiPlaceholder();attachment.bounds=CGRectMake(0,-4,21,21);NSMutableAttributedString *slot=[[NSAttributedString attributedStringWithAttachment:attachment]mutableCopy];[slot addAttribute:@"DGCommentEmojiURL" value:url range:NSMakeRange(0,slot.length)];[text replaceCharactersInRange:range withAttributedString:slot];start=range.location+1;
+        }
+    }
+    self.attributedText=text;self.accessibilityLabel=plain;
+    [text enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0,text.length) options:0 usingBlock:^(id value,NSRange range,BOOL *stop){
+        NSString *url=[text attribute:@"DGCommentEmojiURL" atIndex:range.location effectiveRange:NULL];if(!value||!url.length)return;
+        DGCommentImage *image=[DGCommentImage new];image.sourceURL=url;image.maximumPixelSize=64;image.contentMode=UIViewContentModeScaleAspectFit;image.showsLoadingIndicator=YES;image.userInteractionEnabled=YES;image.isAccessibilityElement=YES;image.accessibilityLabel=@"评论表情，轻点查看，长按保存";image.accessibilityTraits=UIAccessibilityTraitImage|UIAccessibilityTraitButton;
+        [image addGestureRecognizer:[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(openEmoji:)]];[image addGestureRecognizer:[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(saveEmoji:)]];
+        [self addSubview:image];[self->_emojiImages addObject:image];[self->_emojiPositions addObject:@(range.location)];[image remote:url];
+    }];
+    if(_emojiImages.count){_storage=[[NSTextStorage alloc]initWithAttributedString:text];_layout=[NSLayoutManager new];[_storage addLayoutManager:_layout];_container=[[NSTextContainer alloc]initWithSize:CGSizeZero];_container.lineFragmentPadding=0;_container.maximumNumberOfLines=self.numberOfLines;_container.lineBreakMode=self.lineBreakMode;[_layout addTextContainer:_container];}else{_storage=nil;_layout=nil;_container=nil;}
+    [self setNeedsLayout];
+}
+- (void)layoutSubviews{
+    [super layoutSubviews];if(!_emojiImages.count)return;
+    CGRect textRect=[self textRectForBounds:self.bounds limitedToNumberOfLines:self.numberOfLines];_container.size=CGSizeMake(textRect.size.width,CGFLOAT_MAX);[_layout ensureLayoutForTextContainer:_container];
+    for(NSUInteger i=0;i<_emojiImages.count;i++){NSRange glyph=[_layout glyphRangeForCharacterRange:NSMakeRange(_emojiPositions[i].unsignedIntegerValue,1) actualCharacterRange:NULL];CGRect rect=[_layout boundingRectForGlyphRange:glyph inTextContainer:_container];_emojiImages[i].frame=CGRectMake(textRect.origin.x+rect.origin.x,textRect.origin.y+CGRectGetMaxY(rect)-21,21,21);}
+}
+- (void)openEmoji:(UITapGestureRecognizer *)gesture{DGCommentImage *image=(DGCommentImage *)gesture.view;if(self.openImageAction)self.openImageAction(image.sourceURL,image);}
+- (void)saveEmoji:(UILongPressGestureRecognizer *)gesture{if(gesture.state!=UIGestureRecognizerStateBegan)return;DGHaptic();DGCommentImage *image=(DGCommentImage *)gesture.view;if(self.saveImageAction)self.saveImageAction(image.sourceURL);}
+@end
+
+@interface DGCommentCell : UITableViewCell<UIGestureRecognizerDelegate>
 @property(nonatomic,copy) void (^replyAction)(void);
 @property(nonatomic,copy) void (^profileAction)(void);
 @property(nonatomic,copy) void (^openImageAction)(NSString *,UIImageView *);
@@ -18,12 +59,11 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 @end
 @implementation DGCommentCell {
     DGImage *_avatar;
-    UILabel *_name,*_recipient,*_body,*_meta;
+    UILabel *_name,*_recipient,*_meta;DGCommentText *_body;
     UIButton *_reply;
     UIStackView *_stack,*_media;
     NSLayoutConstraint *_leading,*_avatarWidth,*_avatarHeight;
     NSString *_plainText;
-    NSArray<NSDictionary *> *_inlineEmoji;
 }
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
     if((self=[super initWithStyle:style reuseIdentifier:identifier])) {
@@ -35,8 +75,9 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
         _name=Label(12,UIFontWeightSemibold); _name.textColor=UIColor.secondaryLabelColor;
         _name.userInteractionEnabled=YES; [_name addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(profile)]];
         _recipient=Label(12,UIFontWeightMedium);_recipient.textColor=UIColor.secondaryLabelColor;_recipient.numberOfLines=0;_recipient.hidden=YES;
-        _body=Label(15,UIFontWeightRegular); _body.numberOfLines=0; _body.userInteractionEnabled=YES;
-        [_body addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(copyText:)]];
+        _body=[DGCommentText new];_body.font=[UIFont systemFontOfSize:15];_body.textColor=UIColor.labelColor; _body.numberOfLines=0; _body.userInteractionEnabled=YES;
+        __weak DGCommentCell *weakSelf=self;_body.openImageAction=^(NSString *url,UIImageView *source){DGCommentCell *cell=weakSelf;if(cell.openImageAction)cell.openImageAction(url,source);};_body.saveImageAction=^(NSString *url){DGCommentCell *cell=weakSelf;if(cell.saveImageAction)cell.saveImageAction(url);};
+        UILongPressGestureRecognizer *copy=[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(copyText:)];copy.delegate=self;[_body addGestureRecognizer:copy];
         _meta=Label(11,UIFontWeightRegular); _meta.textColor=UIColor.secondaryLabelColor;
         _media=[UIStackView new]; _media.axis=UILayoutConstraintAxisVertical; _media.alignment=UIStackViewAlignmentLeading; _media.spacing=8;
         _reply=[UIButton buttonWithType:UIButtonTypeSystem]; _reply.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
@@ -62,7 +103,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
 }
 - (void)addImage:(NSString *)url sticker:(BOOL)sticker nested:(BOOL)nested {
     if(!url.length)return;
-    DGCommentImage *image=[DGCommentImage new]; image.sourceURL=url;image.showsLoadingIndicator=YES;
+    DGCommentImage *image=[DGCommentImage new]; image.sourceURL=url;image.showsLoadingIndicator=YES;image.maximumPixelSize=640;image.translatesAutoresizingMaskIntoConstraints=NO;
     image.contentMode=UIViewContentModeScaleAspectFit; image.clipsToBounds=YES; image.layer.cornerRadius=sticker?0:12;
     image.userInteractionEnabled=YES; image.isAccessibilityElement=YES;
     image.accessibilityTraits=UIAccessibilityTraitButton|UIAccessibilityTraitImage;
@@ -80,11 +121,8 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     _avatarWidth.constant=nested?28:36; _avatarHeight.constant=nested?28:36; _avatar.layer.cornerRadius=nested?14:18;
     _avatar.accessibilityLabel=[Text(comment.author) stringByAppendingString:@"的主页"];
     _recipient.hidden=!nested;_recipient.text=nested?(recipient.length?[NSString stringWithFormat:@"回复 @%@",recipient]:@"回复对象暂不可见"):nil;
-    _name.text=Text(comment.author); _plainText=Text(comment.text); _body.hidden=comment.text.empty();
-    NSMutableArray *emojis=[NSMutableArray array];for(const auto &emoji:comment.emoticons)[emojis addObject:@{@"name":Text(emoji.first),@"url":Text(emoji.second)}];_inlineEmoji=emojis;[self renderEmoji];
-    for(NSDictionary *emoji in _inlineEmoji){NSString *url=emoji[@"url"];if([DGEmojiCache() objectForKey:url]||!url.length)continue;
-        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];[request setValue:DGUserAgent() forHTTPHeaderField:@"User-Agent"];[request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];__weak DGCommentCell *weakSelf=self;NSString *source=_plainText;
-        [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){UIImage *image=data?[UIImage imageWithData:data]:nil;if(!image)return;[DGEmojiCache() setObject:image forKey:url];dispatch_async(dispatch_get_main_queue(),^{DGCommentCell *cell=weakSelf;if(cell&&[cell->_plainText isEqualToString:source])[cell renderEmoji];});}] resume];}
+    _name.text=Text(comment.author); _plainText=Text(comment.text); _body.hidden=comment.text.empty()&&comment.emoticons.empty();
+    NSMutableArray *emojis=[NSMutableArray array];for(const auto &emoji:comment.emoticons)[emojis addObject:@{@"name":Text(emoji.first),@"url":Text(emoji.second)}];[_body displayText:_plainText emojis:emojis];
     [self clearMedia];
     for(const auto &url:comment.images) [self addImage:Text(url) sticker:NO nested:nested];
     if(!comment.sticker.empty() && std::find(comment.images.begin(),comment.images.end(),comment.sticker)==comment.images.end())
@@ -101,11 +139,8 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     _reply.enabled=!(loading&&expanded);
     [_reply setTitle:replyText forState:UIControlStateNormal];
 }
-- (void)renderEmoji {
-    NSMutableAttributedString *text=[[NSMutableAttributedString alloc] initWithString:_plainText?:@"" attributes:@{NSFontAttributeName:_body.font,NSForegroundColorAttributeName:_body.textColor}];
-    for(NSDictionary *emoji in _inlineEmoji){UIImage *image=[DGEmojiCache() objectForKey:emoji[@"url"]];NSString *name=emoji[@"name"];if(!image||!name.length)continue;NSUInteger start=0;while(start<text.length){NSRange range=[text.string rangeOfString:name options:0 range:NSMakeRange(start,text.length-start)];if(range.location==NSNotFound)break;NSTextAttachment *attachment=[NSTextAttachment new];attachment.image=image;attachment.bounds=CGRectMake(0,-4,21,21);[text replaceCharactersInRange:range withAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];start=range.location+1;}}_body.attributedText=text;
-}
 - (void)profile { if(self.profileAction)self.profileAction(); }
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch{for(UIView *view=touch.view;view&&view!=_body;view=view.superview)if([view isKindOfClass:DGCommentImage.class])return NO;return YES;}
 - (void)replies { if(self.replyAction)self.replyAction(); }
 - (void)openImage:(UITapGestureRecognizer *)gesture {
     DGCommentImage *image=(DGCommentImage *)gesture.view; if(self.openImageAction)self.openImageAction(image.sourceURL,image);
@@ -120,7 +155,7 @@ static NSCache *DGEmojiCache(void){static NSCache *cache;static dispatch_once_t 
     if(self.copyAction)self.copyAction(_plainText);
 }
 - (void)prepareForReuse {
-    [super prepareForReuse];self.copyAction=nil;self.replyAction=nil; self.profileAction=nil; self.openImageAction=nil; self.saveImageAction=nil; [self clearMedia];
+    [super prepareForReuse];self.copyAction=nil;self.replyAction=nil; self.profileAction=nil; self.openImageAction=nil; self.saveImageAction=nil;[_body displayText:@"" emojis:@[]]; [self clearMedia];
 }
 @end
 
@@ -203,7 +238,7 @@ namespace { struct DGReplyState {
     _titleLabel=Label(18,UIFontWeightSemibold); _titleLabel.text=_parent.length?@"回复":@"评论"; _titleLabel.textAlignment=NSTextAlignmentCenter; [_glass.contentView addSubview:_titleLabel];
     _modeLabel=Label(10,UIFontWeightRegular); _modeLabel.text=@"";_modeLabel.hidden=YES; _modeLabel.textColor=[UIColor colorWithWhite:1 alpha:.5]; [_glass.contentView addSubview:_modeLabel];
     _sort=[[UISegmentedControl alloc]initWithItems:@[@"最热",@"最新"]];_sort.selectedSegmentIndex=0;[_sort addTarget:self action:@selector(sortChanged) forControlEvents:UIControlEventValueChanged];[_glass.contentView addSubview:_sort];_sort.hidden=_parent.length>0;
-    _sortHint=Label(10,UIFontWeightRegular);_sortHint.text=@"按已加载评论排序";_sortHint.textColor=UIColor.secondaryLabelColor;[_glass.contentView addSubview:_sortHint];_sortHint.hidden=_sort.hidden;
+    _sortHint=Label(10,UIFontWeightRegular);_sortHint.text=@"后续评论追加，切换排序重排";_sortHint.textColor=UIColor.secondaryLabelColor;[_glass.contentView addSubview:_sortHint];_sortHint.hidden=_sort.hidden;
     _closeGlass=Glass(20); _close=Symbol(@"xmark",self,@selector(close)); _close.accessibilityLabel=@"关闭评论，继续浏览当前作品";
     [_closeGlass.contentView addSubview:_close]; [_glass.contentView addSubview:_closeGlass];
     _separator=[UIView new]; _separator.backgroundColor=[UIColor colorWithWhite:1 alpha:.10]; [_glass.contentView addSubview:_separator];
@@ -237,8 +272,7 @@ namespace { struct DGReplyState {
 - (void)rememberPosition{_savedOffset=_table.contentOffset;_remembered=YES;[_table setContentOffset:_savedOffset animated:NO];}
 - (void)restorePosition{if(!_remembered)return;[_table layoutIfNeeded];CGFloat maxY=MAX(-_table.adjustedContentInset.top,_table.contentSize.height-_table.bounds.size.height+_table.adjustedContentInset.bottom);[_table setContentOffset:CGPointMake(0,MAX(-_table.adjustedContentInset.top,MIN(maxY,_savedOffset.y))) animated:NO];}
 - (void)sortLoaded{
-    BOOL latest=_sort.selectedSegmentIndex==1;
-    std::stable_sort(_comments.begin(),_comments.end(),[latest](const Comment &a,const Comment &b){if(latest)return a.timestamp>b.timestamp;return a.likes==b.likes?a.timestamp>b.timestamp:a.likes>b.likes;});
+    DGSortComments(_comments,_sort.selectedSegmentIndex==1);
 }
 - (void)sortChanged{[self sortLoaded];[_table reloadData];[_table setContentOffset:CGPointZero animated:NO];_savedOffset=CGPointZero;}
 - (void)focusComment:(NSString *)identifier parent:(NSString *)parent {
@@ -274,18 +308,21 @@ namespace { struct DGReplyState {
     if(_comments.empty())_empty.text=@"正在读取评论"; NSString *oldCursor=_cursor.copy;
     __weak DGComments *weakSelf=self;
     [_bridge request:_parent.length?@"replies":@"comments" parameters:@{@"id":_workID,@"parent":_parent?:@"",@"cursor":_cursor} completion:^(NSDictionary *result,NSString *error) {
-        DGComments *self=weakSelf; if(!self)return; self->_loading=NO;
-        if(error) { self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
+        DGComments *self=weakSelf; if(!self)return;
+        if(error) {self->_loading=NO; self->_failed=YES; if(self->_comments.empty())self->_empty.text=error;
             [self->_footer setTitle:@"加载失败，轻点重试" forState:UIControlStateNormal]; self->_footer.enabled=YES;[self advanceFocus];return; }
         NSIndexPath *anchor=self->_table.indexPathsForVisibleRows.firstObject;NSString *anchorID=anchor&&anchor.section<(NSInteger)self->_comments.size()?Text(self->_comments[anchor.section].id):@"";CGFloat anchorOffset=anchor?self->_table.contentOffset.y-CGRectGetMinY([self->_table rectForRowAtIndexPath:anchor]):0;
+        std::size_t previousCount=self->_comments.size();std::vector<Comment> incoming;
         for(id value in Array(result[@"items"])) { if(![value isKindOfClass:NSDictionary.class])continue;
-            Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)self->_comments.emplace_back(std::move(comment)); }
+            Comment comment=ReadComment(value); if(!comment.id.empty()&&self->_ids.insert(comment.id).second)incoming.emplace_back(std::move(comment)); }
+        DGSortComments(incoming,self->_sort.selectedSegmentIndex==1);for(auto &comment:incoming)self->_comments.emplace_back(std::move(comment));
         self->_cursor=[result[@"cursor"] description]?:@"0"; self->_more=[result[@"more"] boolValue]&&![oldCursor isEqualToString:self->_cursor];
         self->_empty.text=self->_comments.empty()?@"还没有评论":@"";
         long long total=Number(result[@"total"]); self->_titleLabel.text=total>0?[NSString stringWithFormat:@"评论 %@",Text(douglass::compact(total))]:(self->_parent.length?@"回复":@"评论");
-        [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more;[self sortLoaded]; [self->_table reloadData];[self->_table layoutIfNeeded];
-        NSInteger section=[self indexOfComment:anchorID];if(section!=NSNotFound&&anchor.row<[self->_table numberOfRowsInSection:section]){NSIndexPath *path=[NSIndexPath indexPathForRow:anchor.row inSection:section];CGFloat y=CGRectGetMinY([self->_table rectForRowAtIndexPath:path])+anchorOffset;[self->_table setContentOffset:CGPointMake(0,y) animated:NO];if(self->_remembered)self->_savedOffset=self->_table.contentOffset;}
-        [self advanceFocus];
+        [self->_footer setTitle:self->_more?@"继续加载评论":@"已显示全部评论" forState:UIControlStateNormal]; self->_footer.enabled=self->_more;
+        if(self->_comments.size()>previousCount){NSIndexSet *sections=[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(previousCount,self->_comments.size()-previousCount)];[UIView performWithoutAnimation:^{if(!previousCount)[self->_table reloadData];else[self->_table insertSections:sections withRowAnimation:UITableViewRowAnimationNone];[self->_table layoutIfNeeded];}];}
+        NSInteger section=[self indexOfComment:anchorID];if(section!=NSNotFound&&anchor.row<[self->_table numberOfRowsInSection:section]){NSIndexPath *path=[NSIndexPath indexPathForRow:anchor.row inSection:section];CGFloat y=CGRectGetMinY([self->_table rectForRowAtIndexPath:path])+anchorOffset;if(fabs(y-self->_table.contentOffset.y)>.5)[self->_table setContentOffset:CGPointMake(0,y) animated:NO];if(self->_remembered)self->_savedOffset=self->_table.contentOffset;}
+        self->_loading=NO;[self advanceFocus];
     }];
 }
 - (NSInteger)indexOfComment:(NSString *)identifier {
@@ -293,7 +330,9 @@ namespace { struct DGReplyState {
 }
 - (void)reloadThread:(NSString *)identifier {
     NSInteger section=[self indexOfComment:identifier]; if(section==NSNotFound||section>=[_table numberOfSections])return;
-    [UIView performWithoutAnimation:^{[self->_table reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];}];
+    NSIndexPath *anchor=_table.indexPathsForVisibleRows.firstObject;NSString *anchorID=anchor&&anchor.section<(NSInteger)_comments.size()?Text(_comments[anchor.section].id):@"";CGFloat offset=anchor?_table.contentOffset.y-CGRectGetMinY([_table rectForRowAtIndexPath:anchor]):0;
+    [UIView performWithoutAnimation:^{[self->_table reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];[self->_table layoutIfNeeded];}];
+    NSInteger current=[self indexOfComment:anchorID];if(current!=NSNotFound&&anchor.row<[_table numberOfRowsInSection:current]){CGFloat y=CGRectGetMinY([_table rectForRowAtIndexPath:[NSIndexPath indexPathForRow:anchor.row inSection:current]])+offset;if(fabs(y-_table.contentOffset.y)>.5)[_table setContentOffset:CGPointMake(0,y) animated:NO];if(_remembered)_savedOffset=_table.contentOffset;}
 }
 - (void)toggleReplies:(NSString *)identifier {
     DGReplyState &state=_replyStates[String(identifier)]; state.expanded=!state.expanded;

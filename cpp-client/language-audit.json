@@ -37,7 +37,7 @@
     "restored index and position validation",
     "account confirmation classification",
     "hold speed tiers",
-    "portrait fill eligibility",
+    "portrait fill eligibility and source-to-viewport crop budget",
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",

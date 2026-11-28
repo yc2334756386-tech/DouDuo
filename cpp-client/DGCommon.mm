@@ -61,7 +61,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
             size_t stride=MAX((size_t)1,(frames+11)/12);
             for(size_t index=0;index<frames;index+=stride){
                 CGImageRef frame=CGImageSourceCreateThumbnailAtIndex(source,index,(__bridge CFDictionaryRef)@{(__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
-(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@320});
+(__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(MIN(maxPixels,(NSUInteger)320))});
                 if(!frame)continue;[animation addObject:[UIImage imageWithCGImage:frame]];CGImageRelease(frame);
                 NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,index,NULL));
                 NSDictionary *gif=properties[(__bridge NSString *)kCGImagePropertyGIFDictionary];
