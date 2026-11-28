@@ -5,6 +5,8 @@
 BOOL DGVTFSystemInterpolationAvailable(void);
 BOOL DGVTSuperResolutionAvailable(void);
 BOOL DGSuperResolutionTransitionProtection(void);
+extern NSString *const DGInterpolationProtectionKey;
+BOOL DGInterpolationTransitionProtection(void);
 void DGPrepareVideoFrameOutput(AVPlayerItem *item);
 CVPixelBufferRef DGCopyVideoFrame(AVPlayerItem *item, CFTimeInterval hostTime, CMTime *presentationTime) CF_RETURNS_RETAINED;
 void DGReleaseVideoFrameCache(AVPlayerItem *item);

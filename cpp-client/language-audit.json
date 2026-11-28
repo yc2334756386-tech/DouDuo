@@ -1,18 +1,18 @@
 {
-  "version": "0.20.25",
+  "version": "0.20.26",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
   "standard": "C++20",
   "active_source_counts": {
-    ".cpp": 9,
-    ".hpp": 9,
+    ".cpp": 10,
+    ".hpp": 10,
     ".h": 28,
     ".mm": 45,
     ".js": 4
   },
   "compiled_translation_units": {
-    "C++20": 9,
+    "C++20": 10,
     "Objective-C++": 45,
     "Swift": 0
   },
@@ -29,7 +29,8 @@
     "InteractionState.cpp",
     "RenderBudget.cpp",
     "AudioEnhancer.cpp",
-    "ExperimentalMedia.cpp"
+    "ExperimentalMedia.cpp",
+    "InterpolationProtection.cpp"
   ],
   "existing_pure_cpp_modules": [
     "Core.cpp",
@@ -57,7 +58,8 @@
     "gallery display-awake eligibility",
     "manual eight-band biquad filtering and peak protection",
     "linear sRGB luminance and spatially feathered complementary masks",
-    "ARM NEON NV12 midpoint blending with scene-cut rejection"
+    "ARM NEON NV12 midpoint blending with scene-cut rejection",
+    "common interpolation guard: subsampled luma/chroma, motion heuristics and stable-frame recovery"
   ],
   "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
   "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",
