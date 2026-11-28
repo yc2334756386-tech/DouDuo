@@ -1,5 +1,5 @@
 {
-  "version": "0.20.8",
+  "version": "0.20.9",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
@@ -37,7 +37,8 @@
     "hold speed tiers",
     "portrait fill eligibility",
     "following state and author matching",
-    "statistics parsing and validation"
+    "statistics parsing and validation",
+    "gallery scrubbing position and bounds"
   ],
   "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
   "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",

@@ -22,7 +22,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
     _failureLabel.hidden=!_showsLoadingIndicator||loading||!_loadFailed;
     if(_showsLoadingIndicator)self.accessibilityValue=loading?@"加载中":_loadFailed?@"加载失败":nil;
 }
-- (void)layoutSubviews{[super layoutSubviews];_loadingSpinner.center=CGPointMake(self.bounds.size.width/2,self.bounds.size.height/2);_failureLabel.frame=CGRectMake(4,(self.bounds.size.height-22)/2,MAX(0,self.bounds.size.width-8),22);}
+- (void)layoutSubviews{[super layoutSubviews];_loadingSpinner.center=CGPointMake(self.bounds.size.width/2,self.bounds.size.height/2);_failureLabel.text=self.bounds.size.width<60?@"!":@"加载失败";_failureLabel.frame=CGRectMake(4,(self.bounds.size.height-22)/2,MAX(0,self.bounds.size.width-8),22);}
 - (void)didMoveToWindow{[super didMoveToWindow];[self updateLoadingState];}
 + (NSCache *)cache {
     static NSCache *cache; static dispatch_once_t once;
@@ -77,7 +77,7 @@ void DGHaptic(void){dispatch_async(dispatch_get_main_queue(),^{static CFTimeInte
         [DGImage.cache setObject:image forKey:cacheKey cost:(NSUInteger)(image.size.width * image.size.height * image.scale * image.scale * 4 * MAX((NSUInteger)1,image.images.count))];
         finish(image);
     }];
-    [_task resume];
+    _task.priority=self.lowPriority?NSURLSessionTaskPriorityLow:NSURLSessionTaskPriorityDefault;[_task resume];
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self];[_task cancel]; }
 @end

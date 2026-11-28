@@ -1,5 +1,6 @@
 #include "ClientPolicy.hpp"
 #include <charconv>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -24,6 +25,12 @@ double holdRate(double upward,double maximum) noexcept {
 }
 bool fillsPortrait(bool enabled,bool compact,bool photo,double width,double height) noexcept {
     return enabled&&!compact&&!photo&&std::isfinite(width)&&std::isfinite(height)&&width>0&&height>width;
+}
+double photoScrubPosition(double current,double displacement,double stride,std::size_t count) noexcept {
+    if(count==0)return 0;
+    if(!std::isfinite(current))current=0;
+    if(std::isfinite(displacement)&&std::isfinite(stride)&&stride>0)current-=displacement/stride;
+    return std::clamp(current,0.,static_cast<double>(count-1));
 }
 AccountState assessAccount(bool requestOK,bool reportedSignedIn,std::string_view uid,bool expired,bool sessionHint,unsigned attempt) noexcept {
     if(requestOK&&reportedSignedIn&&!uid.empty()&&uid!="0")return AccountState::authenticated;

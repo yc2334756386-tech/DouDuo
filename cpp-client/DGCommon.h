@@ -93,6 +93,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 @property(nonatomic) BOOL showsLoadingIndicator;
 @property(nonatomic) BOOL previewLoading;
 @property(nonatomic,strong) UIImage *placeholderImage;
+@property(nonatomic) BOOL lowPriority;
 - (void)remote:(NSString *)url;
 + (void)purgeCache;
 @end
