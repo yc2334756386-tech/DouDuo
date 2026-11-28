@@ -30,11 +30,11 @@ void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size
             const auto sum=integral_[bottom*pitch+right]-integral_[top*pitch+right]-integral_[bottom*pitch+left]+integral_[top*pitch+left];
             const float average=static_cast<float>(sum)/(255.f*(right-left)*(bottom-top));
             const std::size_t i=y*width+x;auto &dark=darkInk_[i];
-            if(fresh){light_[i]=average;dark=average>=.55f;opacity_[i]=dark?1.f:0.f;}
+            if(fresh){light_[i]=average;dark=average>=.48f;opacity_[i]=dark?1.f:0.f;}
             else{
-                light_[i]+=(average-light_[i])*.35f;
-                if(light_[i]>.65f)dark=1;else if(light_[i]<.38f)dark=0;
-                opacity_[i]+=((dark?1.f:0.f)-opacity_[i])*.38f;
+                light_[i]=std::abs(average-light_[i])>.18f?average:light_[i]+(average-light_[i])*.65f;
+                if(light_[i]>.54f)dark=1;else if(light_[i]<.42f)dark=0;
+                opacity_[i]+=((dark?1.f:0.f)-opacity_[i])*.5f;
             }
             row+=opacity_[i];opacityIntegral_[(y+1)*pitch+x+1]=opacityIntegral_[y*pitch+x+1]+row;
         }
