@@ -24,7 +24,7 @@ void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefa
  CIImage *source=request.sourceImage;CGRect extent=source.extent;CIImage *image=source;double factor=MAX(1,self.scale);
  if(preset){auto values=douglass::picturePreset((unsigned)preset);image=[image imageByApplyingFilter:@"CIColorControls" withInputParameters:@{kCIInputSaturationKey:@(values.saturation),kCIInputContrastKey:@(values.contrast),kCIInputBrightnessKey:@(values.brightness)}];}
  CIImage *fallback=[image imageByApplyingTransform:CGAffineTransformMakeScale(factor,factor)];
- if(!spatial||factor<=1||!_context||!_queue||extent.size.width<1||extent.size.height<1||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
+ if(!spatial||factor<=1||!_context||!_queue||extent.size.width<1||extent.size.height<1||DGAnimationProcessingDeferred()||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
  @try{
   NSUInteger w=(NSUInteger)extent.size.width,h=(NSUInteger)extent.size.height;NSUInteger ow=(NSUInteger)ceil(w*factor),oh=(NSUInteger)ceil(h*factor);
   if(!_input||_input.width!=w||_input.height!=h){MTLTextureDescriptor *in=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:w height:h mipmapped:NO];in.usage=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;in.storageMode=MTLStorageModePrivate;_input=[_device newTextureWithDescriptor:in];}
@@ -42,8 +42,9 @@ void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefa
 @end
 void DGConfigureMediaEnhancement(AVPlayerItem *item){
  if(!item)return;NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;BOOL spatial=[prefs boolForKey:@"douglass.experimental.metalfx"]&&DGMetalFXSpatialAvailable();NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
+ static const void *key=&key;id token=[NSObject new];objc_setAssociatedObject(item,key,token,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
  if(!spatial&&!preset){item.videoComposition=nil;return;}if(item.asset.hasProtectedContent)return;
- DGSpatialSession *session=[DGSpatialSession new];__weak AVPlayerItem *weak=item;static const void *key=&key;id token=[NSObject new];objc_setAssociatedObject(item,key,token,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+ DGSpatialSession *session=[DGSpatialSession new];__weak AVPlayerItem *weak=item;
  [AVVideoComposition videoCompositionWithAsset:item.asset applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request){[session filter:request preset:preset spatial:spatial];} completionHandler:^(AVVideoComposition *composition,NSError *error){dispatch_async(dispatch_get_main_queue(),^{AVPlayerItem *current=weak;if(!current||objc_getAssociatedObject(current,key)!=token||!composition)return;CGSize size=composition.renderSize;double longest=MAX(size.width,size.height);session.scale=spatial&&longest>0?MAX(1.,MIN(1.5,1920./longest)):1.;AVMutableVideoComposition *configured=[composition mutableCopy];configured.renderSize=CGSizeMake(ceil(size.width*session.scale),ceil(size.height*session.scale));current.videoComposition=configured;DGDiagnostic(@"video.enhancement.attached",[NSString stringWithFormat:@"spatial=%d scale=%.2f preset=%ld input_w=%.0f input_h=%.0f",spatial,session.scale,(long)preset,size.width,size.height]);});}];
 }
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset){

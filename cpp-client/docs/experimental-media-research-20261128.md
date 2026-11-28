@@ -143,7 +143,7 @@ Apple `AVVideoComposition` 文档说明：内置 compositor 可做空间变换�
 ### HLS/远程 MP4 判断
 
 - **本地 MP4 或可随机访问的普通 AVAsset：** 传统按音轨的 `AVAudioMixInputParameters.audioTapProcessor` 通常是可行路线，但仍需处理解码格式变化、seek/重建和 tap 错误。
-- **HLS/流式播放：** Apple 的 `AVPlayerItem.audioMix` 文档仍明确写着 audio mix 只适用于 file-based media、HTTP Live Streaming 不支持；这是 iOS 27 HLS 扩展前的基线。Apple 2026 HLS 更新新增 `AVAudioMixInputParametersTrackMixID.mixID`：它把 tap 应用于播放中产生音频的所有音轨，特别适合 streaming playback，但 FairPlay-protected audio 例外。当前 DouDuo deployment target 是 iOS 26.0，因此不能直接依赖 iOS 27 API；运行时/编译时必须隔离 `@available(iOS 27.0, *)` 分支，iOS 26 及更早版本对 HLS 回退到原生 AVPlayer 音频或自有解码/音频引擎。
+- **HLS/流式播放：** Apple 的 `AVPlayerItem.audioMix` 文档仍明确写着 audio mix 只适用于 file-based media、HTTP Live Streaming 不支持；这是 iOS 27 HLS 扩展前的基线。Apple 2026 HLS 更新新增 `AVAudioMixInputParametersTrackMixID.mixID`：它把 tap 应用于播放中产生音频的所有音轨，特别适合 streaming playback，但 FairPlay-protected audio 例外。原始 Swift DouDuo target 为 iOS 26.0；本交付 cpp-client 的最低 iOS 为 18.0，因此均不能无条件依赖 iOS 27 API；运行时/编译时必须隔离 `@available(iOS 27.0, *)` 分支，iOS 26 及更早版本对 HLS 回退到原生 AVPlayer 音频或自有解码/音频引擎。
 - **FairPlay/受保护流：** Apple 的 HLS 更新资料对 FairPlay Streaming 音频处理有额外限制；不能承诺受保护 HLS 一定能被 tap 读取。遇到受保护资源应保留原生 AVPlayer 音频，或只对获得授权的本地解码样本做 EQ。
 
 官方资料：
@@ -159,7 +159,7 @@ Apple `AVVideoComposition` 文档说明：内置 compositor 可做空间变换�
 
 ## 对 DouDuo 的落地建议
 
-1. **视频：** 以 `AVVideoCompositing` 作为 AVPlayer 集成点；iOS 26+ 先探测 VideoToolbox 低延迟 SR；不支持时使用 MetalFX spatial 或自有 Metal/Core Image 缩放。直播 VLC 路径没有 AVPlayerItem，不能复用这套 compositor。
+1. **视频：** 以 `AVVideoCompositing` 作为 AVPlayer 集成点；iOS 26+ 先探测 VideoToolbox 低延迟 SR；不支持时使用 MetalFX spatial 或自有 Metal/Core Image 缩放。非 AVPlayer 路径不能复用这套 compositor；当前 cpp-client 仍以 AVPlayer 为主。
 2. **音频：** 保留现有 C++ EQ 为唯一 DSP；Objective-C++ 只做 AVAudioMix/MTAudioProcessingTap 生命周期和 AudioBufferList ↔ C++ buffer 适配。tap process 线程禁止锁、分配和日志 I/O。
 3. **部署：** 以 iOS 26 为最低“系统 SR”能力线，以 iOS 27 为“HLS mix tap”能力线；更低系统只提供原生音频/空间缩放或本地媒体 EQ。
 4. **版权：** AutoEq 代码可按 MIT 条件使用；Atang FPGA 无许可证，不复制；OctaEQ GPL-3.0 只做算法概念和性能参考，不复制源码、注释或 VST3 glue。

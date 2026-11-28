@@ -218,7 +218,7 @@ namespace { struct DGReplyState {
     UIButton *_close,*_footer;
     UITableView *_table;
     BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
-    BOOL _previewOpen,_previewReturning;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
+    BOOL _previewOpen,_previewReturning,_previewUserMoved;UIView *_previewSnapshot;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
     std::vector<Comment> _comments;
     std::unordered_set<std::string> _ids;
     std::unordered_map<std::string,DGReplyState> _replyStates;
@@ -267,6 +267,7 @@ namespace { struct DGReplyState {
     _table.frame=CGRectMake(0,header,width,MAX(0,b.size.height-header));
     _table.contentInset=UIEdgeInsetsMake(0,0,MAX(12,self.view.safeAreaInsets.bottom),0);
     if(_previewOpen&&!_table.dragging&&!_table.decelerating)[self restorePreviewPosition];
+    _previewSnapshot.frame=_table.frame;
 }
 - (void)close { if(self.closeAction)self.closeAction(); }
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture{if(![gesture isKindOfClass:UIPanGestureRecognizer.class])return YES;CGPoint velocity=[(UIPanGestureRecognizer *)gesture velocityInView:self.view];return velocity.y>0&&velocity.y>fabs(velocity.x);}
@@ -285,17 +286,19 @@ namespace { struct DGReplyState {
 }
 - (BOOL)deferPreviewUpdate:(NSString *)key action:(dispatch_block_t)action{if(!_previewOpen)return NO;if(!_previewUpdates)_previewUpdates=[NSMutableDictionary dictionary];_previewUpdates[key]=[action copy];return YES;}
 - (void)previewClosed{
+ if(!_previewUserMoved)[self restorePreviewPosition];[_previewSnapshot removeFromSuperview];_previewSnapshot=nil;
  _previewOpen=NO;_previewReturning=NO;_table.scrollEnabled=YES;
  // Do not publish a queued page into the return animation. It is consumed only
  // when the reader deliberately scrolls to the loaded list's end.
 }
-- (void)dgPreviewWillClose{_previewReturning=YES;[self restorePreviewPosition];_table.scrollEnabled=YES;}
+- (void)dgPreviewWillClose{if(_previewReturning)return;_previewReturning=YES;[self restorePreviewPosition];if(_previewSnapshot){_previewSnapshot.frame=_table.frame;[_glass.contentView addSubview:_previewSnapshot];}_table.scrollEnabled=YES;}
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{if(_previewReturning){_previewUserMoved=YES;[_previewSnapshot removeFromSuperview];_previewSnapshot=nil;}}
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView{
  if(_previewOpen||_previewReturning||!_previewUpdates.count||!scrollView.dragging||scrollView.contentOffset.y+scrollView.bounds.size.height<scrollView.contentSize.height-80)return;
  NSDictionary *updates=_previewUpdates.copy;[_previewUpdates removeAllObjects];for(id action in updates.allValues)((dispatch_block_t)action)();
 }
 - (void)openPreview:(NSString *)url source:(UIImageView *)source{
- if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;}
+ if(_previewOpen||!url.length)return;[self capturePreviewPosition];_previewUserMoved=NO;_previewSnapshot=[_table snapshotViewAfterScreenUpdates:NO];_previewSnapshot.userInteractionEnabled=NO;_previewOpen=YES;_table.scrollEnabled=NO;__weak DGComments *weak=self;if(!DGShowImageWithCompletion(self,url,source,^{[weak previewClosed];})){_previewOpen=NO;_table.scrollEnabled=YES;_previewSnapshot=nil;}
 }
 - (void)sortLoaded{
     douglass::sortComments(_comments,_sort.selectedSegmentIndex==1);

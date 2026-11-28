@@ -9,6 +9,7 @@ public:
     std::uint64_t begin(double now,double duration);
     void end(std::uint64_t token) noexcept;
     bool active(double now) noexcept;
+    double deadline(double now) noexcept;
 private:
     struct Lease {std::uint64_t token;double until;};
     std::vector<Lease> leases_;

@@ -18,4 +18,5 @@ bool RenderBudget::active(double now) noexcept{
     std::erase_if(leases_,[now](const Lease &lease){return now>=lease.until;});
     return !leases_.empty();
 }
+double RenderBudget::deadline(double now) noexcept{active(now);double result=0;for(const auto &lease:leases_)result=std::max(result,lease.until);return result;}
 }

@@ -2,10 +2,13 @@
 #import "DGDiagnostics.h"
 #import "DGRefreshPiP.h"
 #include "RenderBudget.hpp"
+#include <atomic>
 static douglass::RenderBudget renderBudget;
-uint64_t DGBeginAnimationPriority(NSTimeInterval duration){return renderBudget.begin(CACurrentMediaTime(),duration);}
-void DGEndAnimationPriority(uint64_t token){renderBudget.end(token);}
-BOOL DGAnimationPriorityActive(void){return renderBudget.active(CACurrentMediaTime());}
+static std::atomic<double> processingDeadline{0};
+uint64_t DGBeginAnimationPriority(NSTimeInterval duration){CFTimeInterval now=CACurrentMediaTime();uint64_t token=renderBudget.begin(now,duration);processingDeadline.store(renderBudget.deadline(now),std::memory_order_relaxed);return token;}
+void DGEndAnimationPriority(uint64_t token){renderBudget.end(token);processingDeadline.store(renderBudget.deadline(CACurrentMediaTime()),std::memory_order_relaxed);}
+BOOL DGAnimationPriorityActive(void){double deadline=renderBudget.deadline(CACurrentMediaTime());processingDeadline.store(deadline,std::memory_order_relaxed);return deadline>0;}
+BOOL DGAnimationProcessingDeferred(void){return processingDeadline.load(std::memory_order_relaxed)>CACurrentMediaTime();}
 void DGAfterAnimations(dispatch_block_t action){if(!action)return;if(DGAnimationPriorityActive()){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{DGAfterAnimations(action);});return;}action();}
 static NSArray *Points(){NSArray *points=[NSUserDefaults.standardUserDefaults arrayForKey:@"douglass.animation.points"];return points.count==4?points:@[@.16,@1,@.3,@1];}
 NSTimeInterval DGDuration(NSTimeInterval base){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.animation.speed"];return base/(speed>=.2&&speed<=4?speed:.8);}

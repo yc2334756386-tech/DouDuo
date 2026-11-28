@@ -13,4 +13,5 @@ NSString *DGRefreshRateStatus(void);
 uint64_t DGBeginAnimationPriority(NSTimeInterval duration);
 void DGEndAnimationPriority(uint64_t token);
 BOOL DGAnimationPriorityActive(void);
+BOOL DGAnimationProcessingDeferred(void);
 void DGAfterAnimations(dispatch_block_t action);
