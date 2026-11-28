@@ -4,6 +4,7 @@
 #import "DGAnimation.h"
 #import "DGFeedCache.h"
 #import "DGDiagnostics.h"
+#import "DGMediaEnhancement.h"
 #import "DGAppearance.h"
 #import "DGNavigationResume.h"
 #include <cmath>
@@ -40,7 +41,7 @@ UIViewController *DGMakeFeedController(void);
         [prefs removeObjectForKey:@"douglass.comments.write"];
         [prefs setBool:YES forKey:@"douglass.migration.v07refit"];
     }
-    DGDiagnosticStart();DGRestoreFeedScope();
+    DGMigrateMetalFXPreference();DGDiagnosticStart();DGRestoreFeedScope();
     [NSURLCache setSharedURLCache:[[NSURLCache alloc] initWithMemoryCapacity:12*1024*1024 diskCapacity:256*1024*1024 diskPath:@"douglass-images"]];
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
     [[AVAudioSession sharedInstance] setActive:YES error:nil];

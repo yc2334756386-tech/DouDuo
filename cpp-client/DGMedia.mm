@@ -8,8 +8,8 @@
 #import <AVKit/AVKit.h>
 #import "DGRefreshPiP.h"
 #import "DGAmbient.h"
-#import "DGVideoEffects.h"
-#import "DGRife.h"
+#import "DGVideoFrames.h"
+#import "DGMetalFXPlayback.h"
 #import "DGTimeline.h"
 #import "DGDanmaku.h"
 #include "InteractionState.hpp"
@@ -137,7 +137,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 @interface DGFeedCell()<UIScrollViewDelegate,UIGestureRecognizerDelegate,AVPictureInPictureControllerDelegate>
 @end
 @implementation DGFeedCell {
- DGVideoEffects *_videoEffects;
+ DGMetalFXPlayback *_metalFX;
  DGAmbient *_ambient;UIPanGestureRecognizer *_railShield,*_moreShield;NSCache *_frameCache;BOOL _previewBusy;double _desiredPreview;NSMutableArray<NSNumber *> *_cachedTimes;
  UIActivityIndicatorView *_loadingSpinner;UILabel *_elapsed,*_totalTime;UIButton *_expandCaption;BOOL _captionExpanded;BOOL _backgroundSoundState;UITapGestureRecognizer *_danmakuTap,*_commentCloseTap;NSString *_tappedDanmaku;
  DGPhotoNavigator *_photoNavigator;Work _work;DGImage *_cover,*_avatar,*_musicAvatar;UIImageView *_photoBrowse;UIScrollView *_photos;NSMutableArray<DGImage*> *_images;
@@ -166,15 +166,15 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  _pause=Label(52,UIFontWeightLight);_pause.text=@"▶";_pause.textAlignment=NSTextAlignmentCenter;_pause.hidden=YES;_pause.layer.shadowColor=UIColor.blackColor.CGColor;_pause.layer.shadowOpacity=.35;_pause.layer.shadowRadius=7;[self.contentView addSubview:_pause];_message=Label(13,UIFontWeightRegular);_message.textAlignment=NSTextAlignmentCenter;_message.numberOfLines=2;[self.contentView addSubview:_message];
  _slider=[DGTimeline new];_slider.minimumValue=0;_slider.maximumValue=1;_slider.tintColor=[UIColor colorWithRed:.76 green:.96 blue:.96 alpha:1];_slider.maximumTrackTintColor=[UIColor colorWithWhite:1 alpha:.18];_slider.tintColor=UIColor.whiteColor;__weak DGFeedCell *timelineCell=self;((DGTimeline *)_slider).trackingBegan=^{[timelineCell seekStart];};((DGTimeline *)_slider).trackingChanged=^{[timelineCell seekChange];};((DGTimeline *)_slider).trackingEnded=^(BOOL cancelled){if(cancelled)[timelineCell seekCancel];else[timelineCell seekEnd];};[self.contentView addSubview:_slider];
  _previewGlass=Glass(14);_previewGlass.hidden=YES;_previewGlass.userInteractionEnabled=NO;_previewImage=[UIImageView new];_previewImage.contentMode=UIViewContentModeScaleAspectFit;_previewTime=Label(11,UIFontWeightMedium);_previewTime.textAlignment=NSTextAlignmentCenter;[_previewGlass.contentView addSubview:_previewImage];[_previewGlass.contentView addSubview:_previewTime];[self.contentView addSubview:_previewGlass];_speedGlass=Glass(19);_speedGlass.hidden=YES;_speedGlass.userInteractionEnabled=NO;_speedText=Label(13,UIFontWeightSemibold);_speedText.textAlignment=NSTextAlignmentCenter;[_speedGlass.contentView addSubview:_speedText];[self.contentView addSubview:_speedGlass];
- [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(videoEffectsChanged) name:@"DGVideoEffectsChanged" object:nil];
  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(pictureEnhancementChanged) name:@"DGMediaEnhancementChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioEnhancementChanged) name:@"DGAudioEnhancementChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(preparedVideoWarmed) name:@"DGPreparedVideoWarmed" object:nil];
+ [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncMetalFX) name:@"DGMetalFXSettingsChanged" object:nil];
  _commentCloseTap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(closeCommentsFromVideo)];_commentCloseTap.delegate=self;_commentCloseTap.delaysTouchesBegan=NO;_commentCloseTap.delaysTouchesEnded=NO;[self.contentView addGestureRecognizer:_commentCloseTap];
  UITapGestureRecognizer *single=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(toggle)];single.delegate=self;single.cancelsTouchesInView=NO;[self.contentView addSubview:_loadingSpinner];UITapGestureRecognizer *doubleTap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(doubleLike:)];doubleTap.numberOfTapsRequired=2;doubleTap.delegate=self;[single requireGestureRecognizerToFail:doubleTap];[self.contentView addGestureRecognizer:single];[self.contentView addGestureRecognizer:doubleTap];UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(hold:)];hold.minimumPressDuration=.32;hold.allowableMovement=22;hold.delegate=self;[self.contentView addGestureRecognizer:hold];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(settingsChanged) name:@"DouGlassSettingsChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(startPiP) name:@"DGPiPStart" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(emojiReady) name:@"DGEmojiAssetsReady" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(interactionChanged:) name:@"DouGlassWorkStateChanged" object:nil];
  }return self;
 }
 - (void)layoutSubviews {
  [super layoutSubviews];CGRect b=self.contentView.bounds;if(_mediaHeight>0)b.size.height=_mediaHeight;CGFloat w=b.size.width,h=b.size.height,bottom=_compact?4:MAX(self.safeAreaInsets.bottom,14),top=MAX(self.safeAreaInsets.top,18)+65;
- [CATransaction begin];[CATransaction setDisableActions:YES];CGRect media=b;if(_compact){media.origin.y=MAX(self.safeAreaInsets.top,18)+45;media.size.height=MAX(80,b.size.height-media.origin.y-6);}_playerLayer.frame=media;[self applyVideoGravity];[_videoEffects layout];[CATransaction commit];_loadingSpinner.center=CGPointMake(CGRectGetMidX(media),CGRectGetMidY(media));_ambient.frame=b;_cover.frame=media;_photoBrowse.frame=media;_photos.frame=media;_photos.contentSize=CGSizeMake(w*_images.count,_photos.bounds.size.height);for(NSUInteger i=0;i<_images.count;++i)_images[i].frame=CGRectMake(i*w,0,w,_photos.bounds.size.height);if(_work.photo()&&w>0&&!_photoNavigator.browsing&&!_photos.tracking&&!_photos.dragging&&!_photos.decelerating&&fabs(_photos.contentOffset.x-_photoIndex*w)>.5)_photos.contentOffset=CGPointMake(_photoIndex*w,0);
+ [CATransaction begin];[CATransaction setDisableActions:YES];CGRect media=b;if(_compact){media.origin.y=MAX(self.safeAreaInsets.top,18)+45;media.size.height=MAX(80,b.size.height-media.origin.y-6);}_playerLayer.frame=media;[self applyVideoGravity];[_metalFX layout];[CATransaction commit];_loadingSpinner.center=CGPointMake(CGRectGetMidX(media),CGRectGetMidY(media));_ambient.frame=b;_cover.frame=media;_photoBrowse.frame=media;_photos.frame=media;_photos.contentSize=CGSizeMake(w*_images.count,_photos.bounds.size.height);for(NSUInteger i=0;i<_images.count;++i)_images[i].frame=CGRectMake(i*w,0,w,_photos.bounds.size.height);if(_work.photo()&&w>0&&!_photoNavigator.browsing&&!_photos.tracking&&!_photos.dragging&&!_photos.decelerating&&fabs(_photos.contentOffset.x-_photoIndex*w)>.5)_photos.contentOffset=CGPointMake(_photoIndex*w,0);
  _shade.frame=CGRectMake(0,MAX(0,h-260),w,260);_gradient.frame=_shade.bounds;CGFloat tw=MAX(80,MIN(w-103,680));CGFloat line=_caption.font.lineHeight;CGFloat full=ceil([Text(_work.caption)boundingRectWithSize:CGSizeMake(tw,CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:_caption.font} context:nil].size.height);BOOL expandable=full>line*3+1;CGFloat ch=_captionExpanded?full:MIN(full,line*3);_caption.numberOfLines=_captionExpanded?0:3;CGFloat expansion=expandable?22:0;_expandCaption.hidden=!expandable||_compact||_cleanScreen;[_expandCaption setTitle:_captionExpanded?@"收起 ︿":@"展开 ﹀" forState:UIControlStateNormal];
  _musicAvatar.frame=CGRectMake(20,h-bottom-56,22,22);_musicButton.frame=CGRectMake(49,h-bottom-60,tw-29,30);_metadata.frame=CGRectMake(20,CGRectGetMinY(_musicAvatar.frame)-23,tw,18);_expandCaption.frame=CGRectMake(20,CGRectGetMinY(_metadata.frame)-expansion-4,64,expansion);_caption.frame=CGRectMake(20,CGRectGetMinY(_metadata.frame)-ch-expansion-7,tw,ch);_author.frame=CGRectMake(20,CGRectGetMinY(_caption.frame)-30,tw,26);_following.frame=CGRectMake(20,MAX(0,CGRectGetMinY(_author.frame)-21),tw,17);_following.hidden=_compact||_cleanScreen||!douglass::isFollowing(_work.followStatus);
  CGFloat font=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.danmaku.size"];if(font<12||font>28)font=14;CGFloat laneHeight=font+12,limit=MIN(CGRectGetMinY(_author.frame)-18,h*.36);CGSize videoSize=_player.currentItem.presentationSize;CGRect videoRect=_playerLayer.videoRect;if(videoSize.width>videoSize.height&&videoSize.height>0&&!CGRectIsEmpty(videoRect)){CGRect visible=[_playerLayer convertRect:videoRect toLayer:self.contentView.layer];limit=MIN(limit,CGRectGetMinY(visible)-12);}CGFloat available=MAX(laneHeight,limit-top);NSInteger scope=MIN(2,MAX(0,[NSUserDefaults.standardUserDefaults integerForKey:@"douglass.danmaku.range"]));CGFloat range=scope==0?MIN(available,3*laneHeight):scope==1?MIN(available,MAX(3*laneHeight,available*.68)):available;_danmaku.frame=CGRectMake(0,top,w,range);[_ambient contrastInRect:_danmaku.frame playerLayer:_playerLayer];
@@ -190,8 +190,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)interactiveMediaHeight:(CGFloat)value{[_playerLayer removeAnimationForKey:@"comment-position"];[_playerLayer removeAnimationForKey:@"comment-bounds"];_mediaHeight=value;[UIView performWithoutAnimation:^{[self setNeedsLayout];[self layoutIfNeeded];}];}
 
 - (void)enterBackgroundKeepingPlayback:(BOOL)keep audioOnly:(BOOL)audioOnly {
- [_videoEffects stop];
- DGSetMetalFXPlaybackActive(_observedItem,NO);
+ [_metalFX stop];
  if(_backgroundMode)return;
  _backgroundMode=YES;DGUpdateGalleryWake();[self syncDanmakuPlayback];[_slider stopFollowing];
  [self stopWatchdog];[_ambient active:NO];[_ambient item:nil imageView:nil];
@@ -202,8 +201,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  }
 }
 - (void)suspendForegroundWork {
- [_videoEffects stop];
- DGSetMetalFXPlaybackActive(_observedItem,NO);
+ [_metalFX stop];
  _appInactive=YES;DGUpdateGalleryWake();[_photoNavigator cancelBrowsing];[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
  [self syncDanmakuPlayback];
 }
@@ -250,8 +248,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  return CGRectGetMaxY([_danmaku convertRect:area toView:view])+12;
 }
 - (void)detach {
- [_videoEffects stop];
- DGSetMetalFXPlaybackActive(_observedItem,NO);
+ [_metalFX stop];
  DGUpdateGalleryWake();
  [_frameExport cancelAllCGImageGeneration];_frameExport=nil;
  [_danmaku adaptive:[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku.adaptive"] playing:NO];
@@ -341,7 +338,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  if(!_player||!_active||_paused||_dragging||_seeking)return;
  if(!_prepared.needsBeginning){[_player playImmediatelyAtRate:_boosting?_boostRate:_rate];return;}
  if(_observedItem.status!=AVPlayerItemStatusReadyToPlay)return;
- [_videoEffects resetFrames];
+ [_metalFX resetFrame];
  _seeking=YES;[_player pause];NSUInteger request=++_restartToken;
  __weak DGFeedCell *weak=self;__weak AVPlayer *weakPlayer=_player;
  [_player seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){
@@ -478,7 +475,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;
- if(inMotion){[_videoEffects suspendForPaging];if(DGSuperResolutionTransitionProtection())DGSetMetalFXPlaybackActive(_observedItem,NO);DGReleaseVideoFrameCache(_observedItem);[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
+ if(inMotion){if(DGMetalFXTransitionProtection())[_metalFX stop];DGReleaseVideoFrameCache(_observedItem);[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
  [self syncDanmakuPlayback];
 }
 - (void)active:(BOOL)value {
@@ -490,10 +487,9 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   if(changed||_foregroundRebind){_foregroundRebind=NO;if(_prepared.warming)[_player cancelPendingPrerolls];_progressAt=CACurrentMediaTime();_firstFrameStarted=_progressAt;}
   if(!_dragging&&!_seeking&&(_player.rate==0||changed||_prepared.needsBeginning))[self playCurrentVideo];
   if(_musicPlayer.rate==0||changed)[_musicPlayer playImmediatelyAtRate:_rate];
-  [self displayFirstFrame];if(!_pagingMotion){[self syncVideoEffects];[self queueWatchdogAfter:3];}
+  [self displayFirstFrame];if(!_pagingMotion){[self syncMetalFX];[self queueWatchdogAfter:3];}
  }else{
-  [_videoEffects stop];
-  DGSetMetalFXPlaybackActive(_observedItem,NO);
+  [_metalFX stop];
   [_slider stopFollowing];[self stopWatchdog];[_player pause];[_musicPlayer pause];
   if(!value){[_photoNavigator cancelBrowsing];[self unlock];_boosting=NO;_speedGlass.hidden=YES;}
  }
@@ -510,19 +506,15 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)first shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)second{return ([first isKindOfClass:UILongPressGestureRecognizer.class]&&(second==_railShield||second==_moreShield))||([second isKindOfClass:UILongPressGestureRecognizer.class]&&(first==_railShield||first==_moreShield));}
 - (void)absorbRail:(UIPanGestureRecognizer*)gesture{}
 - (void)closeCommentsFromVideo{if(self.dismissCommentsAction)self.dismissCommentsAction();}
-- (void)syncVideoEffects {
- if(!_active||_paused||_backgroundMode||_appInactive||_pagingMotion||_work.photo()||_work.isLive||!_player.currentItem){
-  DGSetMetalFXPlaybackActive(_observedItem,NO);
-  [_videoEffects stop];return;
+- (void)syncMetalFX {
+ if(!DGMetalFXRequested()||!_active||_paused||_backgroundMode||_appInactive||_pagingMotion||_work.photo()||!_player.currentItem){
+  [_metalFX stop];
+  return;
  }
- DGSetMetalFXPlaybackActive(_observedItem,YES);
- NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
- if(!_videoEffects&&(DGRifeRequested()||[prefs boolForKey:@"douglass.experimental.frameInterpolation"]||
-                     [prefs boolForKey:@"douglass.experimental.vtSuperResolution"]))_videoEffects=[DGVideoEffects new];
- [_videoEffects showForPlayerLayer:_playerLayer];
+ if(!_metalFX)_metalFX=[DGMetalFXPlayback new];
+ [_metalFX showForPlayerLayer:_playerLayer];
 }
-- (void)pictureEnhancementChanged{if(_player.currentItem)DGConfigureMediaEnhancement(_player.currentItem);if(_work.photo())[self loadPhotos];[self syncVideoEffects];}
-- (void)videoEffectsChanged{[self syncVideoEffects];}
+- (void)pictureEnhancementChanged{if(_player.currentItem)DGConfigureMediaEnhancement(_player.currentItem);if(_work.photo())[self loadPhotos];[self syncMetalFX];}
 - (void)audioEnhancementChanged{DGUpdateAudioControls();}
 
 
@@ -632,7 +624,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  _dragging=NO;_previewGlass.hidden=YES;++_previewGeneration;_previewBusy=NO;[_generator cancelAllCGImageGeneration];
  _progressAt=CACurrentMediaTime();
  if(!_player||!std::isfinite(seconds)){_seeking=NO;[self playCurrentVideo];return;}
- [_videoEffects resetFrames];
+ [_metalFX resetFrame];
  _seeking=YES;NSUInteger request=++_restartToken;
  __weak DGFeedCell *weak=self;__weak AVPlayer *weakPlayer=_player;
  [_player seekToTime:CMTimeMakeWithSeconds(seconds,600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){

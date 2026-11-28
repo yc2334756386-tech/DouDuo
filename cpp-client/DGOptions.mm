@@ -72,7 +72,7 @@ static NSDictionary *Action(NSString *title,NSString *action,NSString *detail){r
  @[Switch(@"过滤广告",@"douglass.filter.ads",@"",NO),Switch(@"过滤直播间",@"douglass.filter.live",@"",YES)],
  @[Switch(@"显示弹幕",@"douglass.danmaku",@"",YES),Segments(@"弹幕范围",@"douglass.danmaku.range",@[@"小范围",@"中范围",@"大范围"],0,@"最大延伸至横屏视频上方"),Range(@"弹幕大小",@"douglass.danmaku.size",12,28,14,1,@""),Segments(@"弹幕颜色",@"douglass.danmaku.color",@[@"白",@"黄",@"粉",@"蓝",@"绿"],0,@""),Action(@"自定义 RGB 颜色",@"rgb",@"填写 R、G、B，范围 0～255"),Switch(@"弹幕实时变色",@"douglass.danmaku.adaptive",@"较大局部平滑变色，黑字无背景模糊",NO),Switch(@"弹幕阴影",@"douglass.danmaku.shadow",@"",YES),Action(@"字体替换",@"font",@"选择系统字体或导入字体文件")],
  @[Switch(@"撑满画面",@"douglass.fillPortrait",@"只对竖屏视频裁切放大以铺满上下，横屏视频保持完整显示",NO),Switch(@"一键清屏",@"douglass.clean.knob",@"显示可拖动的玻璃旋钮，点按清屏或恢复",NO),Segments(@"实时环境光",@"douglass.ambient",@[@"亮",@"中",@"暗",@"很暗",@"关"],1,@""),Switch(@"优化画质",@"douglass.quality",@"优先高清片源，切换时可能短暂缓冲",NO),Switch(@"提高帧率",@"douglass.highFPS",@"优先平台实际提供的高帧率片源",NO)],
- @[Action(@"画面与音频实验室",@"experiments",@"MetalFX 空间放大、独立画面预设、八段均衡与自动调音")],
+ @[Action(@"画面与音频实验室",@"experiments",@"MetalFX 2×、画面预设与八段均衡")],
  @[Switch(@"后台音频播放",@"douglass.backgroundAudio",@"退到后台沿当前位置继续播放",NO),Switch(@"画中画",@"douglass.pip",@"支持设备上允许退到后台自动开启",NO),Switch(@"自动上滑",@"douglass.autoScroll",@"视频播完后播放下一条，评论打开时循环当前视频",NO),Range(@"加速到的最高倍速",@"douglass.holdMaximum",2,4,3,.1,@"长按 1.5×，上滑切到 2×，继续上滑切到此倍速")],
  @[Action(@"全局动画曲线与速率",@"animation",@"拖动控制点或填写贝塞尔曲线数值"),Switch(@"强制 120Hz",@"douglass.force120",@"微型 VideoCall PiP 持续更新，关闭恢复系统策略；系统仍可限频",NO)],
  @[Segments(@"外观",@"douglass.appearance",@[@"深色",@"浅色",@"自动"],0,@"自动跟随手机的深色模式")],

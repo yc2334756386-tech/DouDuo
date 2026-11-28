@@ -1,4 +1,4 @@
-抖音极简版 / DouGlass 0.20.30
+抖音极简版 / DouGlass 0.20.31
 
 Native iOS client: C++20 business core and Objective-C++ UIKit/WebKit integration.
 The read adapter and overall website-context approach draw on DouDuo:
@@ -45,9 +45,4 @@ Experimental media research references, no source copied:
 https://github.com/Atang0406/-fpga-
 https://github.com/jaakkopasanen/AutoEq (MIT; headphone equalizer settings generation)
 https://github.com/AmeHanare/OctaEQ (GPL-3.0 desktop VST3; design reference only)
-The eight-band DSP and adaptive controls are independently implemented in C++.
-
-RIFE 4.25, derived from Practical-RIFE and mlx-community/RIFE-4.25.
-Copyright (c) 2021 hzwer. MIT license is included as RIFE-LICENSE.txt.
-https://github.com/hzwer/Practical-RIFE
-https://huggingface.co/mlx-community/RIFE-4.25
+The eight-band DSP is independently implemented in C++.

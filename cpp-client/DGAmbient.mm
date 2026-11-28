@@ -1,7 +1,7 @@
 #import "DGAmbient.h"
 #import "DGDiagnostics.h"
 #import "DGAnimation.h"
-#import "DGVideoEffects.h"
+#import "DGVideoFrames.h"
 #import <CoreImage/CoreImage.h>
 #import <QuartzCore/QuartzCore.h>
 #include "ContrastMap.hpp"

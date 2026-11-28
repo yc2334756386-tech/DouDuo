@@ -3,20 +3,17 @@
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 FOUNDATION_EXPORT BOOL DGMetalFXSpatialAvailable(void);
-FOUNDATION_EXPORT NSString *DGMediaEnhancementStatus(void);
+FOUNDATION_EXPORT NSString *const DGMetalFXKey;
+BOOL DGMetalFXRequested(void);
+BOOL DGMetalFXTransitionProtection(void);
+void DGMigrateMetalFXPreference(void);
 FOUNDATION_EXPORT void DGMediaEnhancementApply(void);
-typedef NS_ENUM(NSUInteger, DGVideoEffect) {
-    DGVideoEffectMetalFX, DGVideoEffectSuperResolution, DGVideoEffectInterpolation,
-};
 FOUNDATION_EXPORT NSNotificationName const DGVideoEffectStatusChanged;
-void DGReportVideoEffect(DGVideoEffect effect,id owner,NSString *state,NSString *reason,unsigned multiplier=0,NSString *backend=nil);
-void DGEndVideoEffect(DGVideoEffect effect,id owner);
-NSString *DGVideoEffectStatusText(DGVideoEffect effect);
+void DGReportMetalFX(id owner,NSString *state,NSString *reason);
+void DGEndMetalFX(id owner);
+NSString *DGMetalFXStatusText(void);
 void DGLogVideoEffectSnapshot(void);
 void DGConfigureMediaEnhancement(AVPlayerItem *item);
-BOOL DGUseMetalFXFallback(AVPlayerItem *item);
-BOOL DGHasMetalFXFallback(AVPlayerItem *item);
 void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion);
 void DGSealMediaEnhancement(AVPlayerItem *item);
-void DGSetMetalFXPlaybackActive(AVPlayerItem *item,BOOL active);
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset);
