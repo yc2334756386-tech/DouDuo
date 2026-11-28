@@ -756,14 +756,12 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         AVPlayer *player=_nativeLayer.player;
         if(!player||player.currentItem!=_item){[self stop];return;}
         if(_unsupported)return;
-        const bool thermal=NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious;
         if(!_orientationReady||!_nativeLayer.readyForDisplay||player.timeControlStatus!=AVPlayerTimeControlStatusPlaying||
-           player.rate<.75||player.rate>1.25||DGAnimationProcessingDeferred()||
-           thermal){
+           player.rate<.75||player.rate>1.25||DGAnimationProcessingDeferred()){
             if(_latest.source||!_display.hidden)[self resetFrames];
-            if(thermal||_lastEffectStateChange){
-                if(_interpolation&&!_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,self,thermal?@"bypassed":@"preparing",thermal?@"thermal":@"waiting_for_frame");
-                if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,thermal?@"bypassed":@"preparing",thermal?@"thermal":@"waiting_for_frame");
+            if(_lastEffectStateChange){
+                if(_interpolation&&!_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"preparing",@"waiting_for_frame");
+                if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"preparing",@"waiting_for_frame");
                 _lastEffectStateChange=0;
             }
             return;

@@ -99,7 +99,7 @@ NSString *DGVideoEffectStatusText(DGVideoEffect effect) {
  }
  if([status.state isEqualToString:@"protected"])return @"转场保护中 · 播放原始帧";
  if([status.state isEqualToString:@"bypassed"]){
-  NSDictionary *reasons=@{@"thermal":@"温度过高",@"unsupported_source":@"当前片源不支持",
+  NSDictionary *reasons=@{@"unsupported_source":@"当前片源不支持",
       @"source_rate":@"原视频帧率较高",@"frame_budget":@"处理超时",@"no_output":@"暂未收到增强帧",
       @"renderer":@"渲染队列繁忙",@"gpu":@"GPU 未能完成超分",@"size_limit":@"当前画面已达到尺寸上限"};
   NSString *reason=reasons[status.reason];
@@ -163,7 +163,7 @@ void DGMediaEnhancementApply(void){
  dispatch_async(dispatch_get_main_queue(),^{
   DGSpatialSession *session=weak;
   if(!session||session->_activeAfter.load()!=activation||session->_reportedOutput.load()!=output)return;
-  NSString *reason=output==1?@"frame_output":(output==2?@"thermal":@"gpu");
+  NSString *reason=output==1?@"frame_output":@"gpu";
   DGReportVideoEffect(DGVideoEffectMetalFX,session,output==1?@"active":@"bypassed",reason);
  });
 }
@@ -183,10 +183,6 @@ void DGMediaEnhancementApply(void){
  if(preset&&!protectedFrame)image=DGFilterPicture(image,(unsigned)preset,YES);
  CIImage *fallback=[image imageByApplyingTransform:CGAffineTransformMakeScale(factor,factor)];
  if(!spatial||factor<=1||extent.size.width<1||extent.size.height<1||protectedFrame){[request finishWithImage:fallback context:nil];return;}
- if(NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious){
-  [self reportSpatialOutput:2 activation:activeAfter];
-  [request finishWithImage:fallback context:nil];return;
- }
  if(_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
  @try{
   if(_activeAfter.load(std::memory_order_acquire)!=activeAfter||DGAnimationProcessingDeferred()){
