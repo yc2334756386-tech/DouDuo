@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <array>
+#include <utility>
 
 namespace douglass {
 MediaRect fittedMedia(double sourceWidth,double sourceHeight,MediaRect viewport,bool fill) noexcept{
@@ -13,67 +14,53 @@ MediaRect fittedMedia(double sourceWidth,double sourceHeight,MediaRect viewport,
 static const std::array<float,256> &linearComponents(){
     static const auto values=[](){std::array<float,256> values{};for(std::size_t i=0;i<values.size();++i){const double encoded=i/255.;values[i]=static_cast<float>(encoded<=.04045?encoded/12.92:std::pow((encoded+.055)/1.055,2.4));}return values;}();return values;
 }
-void ContrastMap::makeMasks(const std::uint8_t *rgba,std::size_t width,std::size_t height,
-                            std::size_t stride,std::uint8_t *white,std::uint8_t *black,double lineHeight) {
-    if(!rgba||!white||!black||!width||!height||width>2048||height>2048||
-       stride<width*4||height>std::numeric_limits<std::size_t>::max()/stride)return;
-    if(!std::isfinite(lineHeight)||lineHeight<1)lineHeight=0;
-    const bool fresh=width!=width_||height!=height_||std::abs(lineHeight-lineHeight_)>.01;
-    const std::size_t pixels=width*height,pitch=width+1;
-    if(fresh){width_=width;height_=height;lineHeight_=lineHeight;darkInk_.assign(pixels,0);candidate_.assign(pixels,0);votes_.assign(pixels,0);light_.assign(pixels,0);opacity_.assign(pixels,0);}
-    integral_.assign(pitch*(height+1),0);squared_.assign(pitch*(height+1),0);opacityIntegral_.assign(pitch*(height+1),0);
-    const auto &linear=linearComponents();
-    for(std::size_t y=0;y<height;++y){
-        double row=0,squareRow=0;
-        for(std::size_t x=0;x<width;++x){
-            const auto *p=rgba+y*stride+x*4;const double light=.2126*linear[p[0]]+.7152*linear[p[1]]+.0722*linear[p[2]];row+=light;squareRow+=light*light;
-            integral_[(y+1)*pitch+x+1]=integral_[y*pitch+x+1]+row;
-            squared_[(y+1)*pitch+x+1]=squared_[y*pitch+x+1]+squareRow;
-        }
+std::shared_ptr<const ContrastFrame> ContrastMap::makeFrame(const std::uint8_t *rgba,std::size_t width,std::size_t height,std::size_t stride) const {
+    if(!rgba||!width||!height||width>2048||height>2048||stride<width*4||height>std::numeric_limits<std::size_t>::max()/stride)return {};
+    auto frame=std::make_shared<ContrastFrame>();frame->width=width;frame->height=height;frame->luminance.resize(width*height);const auto &linear=linearComponents();
+    for(std::size_t y=0;y<height;++y)for(std::size_t x=0;x<width;++x){const auto *p=rgba+y*stride+x*4;frame->luminance[y*width+x]=.2126f*linear[p[0]]+.7152f*linear[p[1]]+.0722f*linear[p[2]];}
+    return frame;
+}
+int ContrastFrame::inkFor(MediaRect region) const noexcept {
+    if(!width||!height||luminance.size()!=width*height||!std::isfinite(region.x)||!std::isfinite(region.y)||!std::isfinite(region.width)||!std::isfinite(region.height)||region.width<=0||region.height<=0)return -1;
+    const double left=std::max(0.,region.x),top=std::max(0.,region.y),right=std::min(double(width),region.x+region.width),bottom=std::min(double(height),region.y+region.height);
+    if(right<=left||bottom<=top||(right-left)*(bottom-top)<region.width*region.height*.95)return -1;
+    const auto x0=static_cast<std::size_t>(std::floor(left)),x1=std::min(width,static_cast<std::size_t>(std::ceil(right)));
+    const auto y0=static_cast<std::size_t>(std::floor(top)),y1=std::min(height,static_cast<std::size_t>(std::ceil(bottom)));
+    double blackArea=0,whiteArea=0,total=0;
+    for(auto y=y0;y<y1;++y)for(auto x=x0;x<x1;++x){
+        const double area=(std::min(right,double(x+1))-std::max(left,double(x)))*(std::min(bottom,double(y+1))-std::max(top,double(y)));
+        const double light=luminance[y*width+x],blackContrast=(light+.05)/(.018+.05),whiteContrast=(.955+.05)/(light+.05);
+        if(blackContrast>=3.6&&blackContrast>whiteContrast*1.18)blackArea+=area;
+        else if(whiteContrast>=3.0&&whiteContrast>blackContrast*1.18)whiteArea+=area;
+        total+=area;
     }
-    // The sampler uses about 128 columns. This neighborhood spans several glyph
-    // strokes, so texture/noise does not split text into rapidly flashing specks.
-    const std::size_t radius=std::max<std::size_t>(3,width/16);
-    for(std::size_t y=0;y<height;++y){
-        for(std::size_t x=0;x<width;++x){
-            const auto left=x>radius?x-radius:0,right=std::min(width,x+radius+1);
-            const std::size_t top=lineHeight?std::min(height-1,static_cast<std::size_t>(std::floor(std::floor(y/lineHeight)*lineHeight))):(y>radius?y-radius:0);
-            const std::size_t bottom=lineHeight?std::min(height,static_cast<std::size_t>(std::ceil((std::floor(y/lineHeight)+1)*lineHeight))):std::min(height,y+radius+1);
-            const auto sum=integral_[bottom*pitch+right]-integral_[top*pitch+right]-integral_[bottom*pitch+left]+integral_[top*pitch+left];
-            const float average=static_cast<float>(sum/((right-left)*(bottom-top)));
-            const auto squareSum=squared_[bottom*pitch+right]-squared_[top*pitch+right]-squared_[bottom*pitch+left]+squared_[top*pitch+left];
-            const float variance=std::max(0.f,static_cast<float>(squareSum/((right-left)*(bottom-top)))-average*average);
-            const std::size_t i=y*width+x;auto &dark=darkInk_[i];
-            if(fresh)light_[i]=average;else light_[i]=std::abs(average-light_[i])>.10f?average:light_[i]+(average-light_[i])*.75f;
-            // Compare the actual near-white and charcoal inks in linear sRGB.
-            // Texture widens the dead band; it never unconditionally forces white.
-            const float blackContrast=(light_[i]+.05f)/(.015f+.05f),whiteContrast=(.955f+.05f)/(light_[i]+.05f),margin=variance>.06f?1.26f:1.16f;
-            const bool blackReadable=blackContrast>=3.6f,whiteReadable=whiteContrast>=3.0f;
-            const bool preferBlack=blackReadable&&(!whiteReadable||blackContrast>whiteContrast*margin);
-            const bool preferWhite=whiteReadable&&(!blackReadable||whiteContrast>blackContrast*margin);
-            candidate_[i]=preferBlack?1:preferWhite?0:dark;
-        }
+    // Each whole character needs a broadly consistent background. Small corners
+    // and narrow strokes do not classify a character, much less a two-glyph group.
+    return total>0&&blackArea/total>=.82?1:total>0&&whiteArea/total>=.82?0:-1;
+}
+void GroupedInk::setGlyphs(std::vector<InkGlyph> glyphs){
+    glyphs_=std::move(glyphs);groups_.clear();if(glyphs_.size()<2)return;
+    std::sort(glyphs_.begin(),glyphs_.end(),[](const InkGlyph &a,const InkGlyph &b){return a.x<b.x;});
+    for(std::size_t i=0;i<glyphs_.size();){const auto count=glyphs_.size()-i==3?3u:2u;groups_.push_back({i,std::min(glyphs_.size(),i+count)});i+=count;}
+}
+bool GroupedInk::update(const ContrastFrame &frame,MediaRect text,double overlayWidth,double overlayHeight) noexcept {
+    if(!std::isfinite(overlayWidth)||!std::isfinite(overlayHeight)||overlayWidth<=0||overlayHeight<=0)return false;
+    const double sx=frame.width/overlayWidth,sy=frame.height/overlayHeight;bool changed=false;
+    for(auto &group:groups_){int wanted=-1;
+        for(auto i=group.begin;i<group.end;++i){const auto &glyph=glyphs_[i];const auto ink=frame.inkFor({(text.x+glyph.x)*sx,text.y*sy,glyph.width*sx,text.height*sy});if(ink<0||(wanted>=0&&ink!=wanted)){wanted=-1;break;}wanted=ink;}
+        if(wanted<0||wanted==int(group.dark)){group.pending=-1;group.votes=0;continue;}
+        if(group.pending!=wanted){group.pending=wanted;group.votes=1;}else ++group.votes;
+        if(group.votes>=2){group.dark=wanted==1;group.votes=0;group.pending=-1;changed=true;}
     }
-    // A color patch must cover at least two font advances, then remain eligible
-    // across three samples. A window edge or one narrow stroke cannot flip ink.
-    const auto minimumRun=std::max<std::size_t>(4,static_cast<std::size_t>(std::ceil(lineHeight?lineHeight*1.15:width/12.)));
-    for(std::size_t y=0;y<height;++y){
-        for(std::size_t x=0;x<width;){const std::size_t start=x;const auto ink=candidate_[y*width+x];while(x<width&&candidate_[y*width+x]==ink)++x;
-            for(std::size_t p=start;p<x;++p){const std::size_t i=y*width+p;
-                if(x-start>=minimumRun&&ink!=darkInk_[i]){if(++votes_[i]>=3){darkInk_[i]=ink;votes_[i]=0;}}else votes_[i]=0;
-                opacity_[i]+=((darkInk_[i]?1.f:0.f)-opacity_[i])*.38f;
-            }
-        }
-        float row=0;for(std::size_t x=0;x<width;++x){row+=opacity_[y*width+x];opacityIntegral_[(y+1)*pitch+x+1]=opacityIntegral_[y*pitch+x+1]+row;}
-    }
-    const std::size_t feather=std::max<std::size_t>(2,width/40);
-    for(std::size_t y=0;y<height;++y)for(std::size_t x=0;x<width;++x){
-        const auto left=x>feather?x-feather:0,top=lineHeight?y:(y>feather?y-feather:0);
-        const auto right=std::min(width,x+feather+1),bottom=lineHeight?y+1:std::min(height,y+feather+1);
-        const float sum=opacityIntegral_[bottom*pitch+right]-opacityIntegral_[top*pitch+right]-opacityIntegral_[bottom*pitch+left]+opacityIntegral_[top*pitch+left];
-        const auto alpha=static_cast<std::uint8_t>(std::lround(255*std::clamp(sum/((right-left)*(bottom-top)),0.f,1.f)));
-        const std::size_t offset=(y*width+x)*4;
-        for(unsigned channel=0;channel<4;++channel){white[offset+channel]=255-alpha;black[offset+channel]=alpha;}
+    return changed;
+}
+void GroupedInk::masks(std::size_t width,std::uint8_t *white,std::uint8_t *black) const noexcept {
+    if(!white||!black||!width||width>4096)return;std::fill_n(white,width*4,255);std::fill_n(black,width*4,0);
+    double left=0;
+    for(std::size_t g=0;g<groups_.size();++g){const auto &group=groups_[g];double right=double(width);
+        if(g+1<groups_.size()){const auto &last=glyphs_[group.end-1];right=(last.x+last.width+glyphs_[groups_[g+1].begin].x)/2;}
+        const auto first=static_cast<std::size_t>(std::clamp(std::round(left),0.,double(width))),end=static_cast<std::size_t>(std::clamp(std::round(right),0.,double(width)));
+        if(group.dark&&end>first){std::fill(white+first*4,white+end*4,0);std::fill(black+first*4,black+end*4,255);}left=right;
     }
 }
 }

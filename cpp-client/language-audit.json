@@ -1,5 +1,5 @@
 {
-  "version": "0.20.19",
+  "version": "0.20.20",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
@@ -45,7 +45,7 @@
     "comment ordering",
     "allocation-free eight-band biquad audio filtering, small adaptive spectral correction and peak protection",
     "MetalFX spatial scaler ownership/configuration/command encoding via Apple metal-cpp",
-    "independent picture preset parameters",
+    "independent picture preset parameters, including original-color luminance texture/clarity enhancement",
     "comment/reply reading anchor identity and offset restoration",
     "image preview double-tap zoom policy and bounded zoom geometry",
     "lazy work model materialization flag",
@@ -53,7 +53,7 @@
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "linear sRGB luminance, actual ink contrast, per-line texture hysteresis and feathered complementary masks",
+    "linear sRGB luminance, per-complete-character coverage and two/three-character ink groups, consecutive-sample hysteresis and group-constant one-dimensional masks",
     "gallery gesture state, incremental dragging, bounded edge-hold advancement, fixed center rail and spaced thumbnail geometry",
     "search first appearance, input/results state and back routing",
     "gallery display-awake eligibility"
@@ -70,7 +70,11 @@
     "device": false
   },
   "pure_cpp_only": false,
-  "vendored_headers": {"project":"apple/metal-cpp","license":"Apache-2.0","scope":"Foundation, Metal, MetalFX headers; SDK C++ bridge only"},
+  "vendored_headers": {
+    "project": "apple/metal-cpp",
+    "license": "Apache-2.0",
+    "scope": "Foundation, Metal, MetalFX headers; SDK C++ bridge only"
+  },
   "reference_implementations": [
     {
       "project": "GlobalRefresh-PiP",

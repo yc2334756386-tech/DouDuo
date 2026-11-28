@@ -4,7 +4,7 @@
 namespace douglass {
 enum class ExperimentalMediaFeature : std::uint8_t { spatialSampling=0, frameInterpolation=1 };
 bool experimentalMediaRequested(ExperimentalMediaFeature feature,bool stored) noexcept;
-struct PicturePreset{double saturation=1,contrast=1,brightness=0;};
+struct PicturePreset{double saturation=1,contrast=1,brightness=0,texture=0,clarity=0;};
 PicturePreset picturePreset(unsigned index) noexcept;
 class SpatialUpscaler {
 public:

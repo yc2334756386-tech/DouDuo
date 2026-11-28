@@ -5,7 +5,7 @@
 #include "third-party/metal-cpp/MetalFX/MTLFXSpatialScaler.hpp"
 namespace douglass {
 bool experimentalMediaRequested(ExperimentalMediaFeature feature,bool stored) noexcept{return stored&&(feature==ExperimentalMediaFeature::spatialSampling||feature==ExperimentalMediaFeature::frameInterpolation);}
-PicturePreset picturePreset(unsigned index) noexcept{switch(index){case 1:return {1.04,1.04,0};case 2:return {.88,.98,-.015};case 3:return {1.08,1.08,0};default:return {};}}
+PicturePreset picturePreset(unsigned index) noexcept{switch(index){case 1:return {1.04,1.04,0};case 2:return {.88,.98,-.015};case 3:return {1.08,1.08,0};case 4:return {1,1,0,.14,.32};default:return {};}}
 struct SpatialUpscaler::State{MTL::Device *device=nullptr;MTLFX::SpatialScaler *scaler=nullptr;unsigned iw=0,ih=0,ow=0,oh=0;~State(){if(scaler)scaler->release();if(device)device->release();}};
 SpatialUpscaler::SpatialUpscaler(void *device):state_(std::make_unique<State>()){state_->device=reinterpret_cast<MTL::Device *>(device);if(state_->device)state_->device->retain();}
 SpatialUpscaler::~SpatialUpscaler()=default;

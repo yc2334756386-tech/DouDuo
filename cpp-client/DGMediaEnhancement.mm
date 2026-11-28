@@ -8,6 +8,19 @@
 #import "DGAnimation.h"
 #include <atomic>
 #include "ExperimentalMedia.hpp"
+static CIImage *DGSharpenLuma(CIImage *image,double radius,double sharpness){
+ if(sharpness<=0)return image;CIFilter *filter=[CIFilter filterWithName:@"CISharpenLuminance"];if(!filter)return image;
+ BOOL hasRadius=[filter.inputKeys containsObject:@"inputRadius"];if(radius>1&&!hasRadius)return image;
+ [filter setValue:[image imageByClampingToExtent] forKey:kCIInputImageKey];[filter setValue:@(sharpness) forKey:@"inputSharpness"];if(hasRadius)[filter setValue:@(radius) forKey:@"inputRadius"];
+ return filter.outputImage?[filter.outputImage imageByCroppingToRect:image.extent]:image;
+}
+static CIImage *DGFilterPicture(CIImage *image,unsigned preset,BOOL details){
+ auto values=douglass::picturePreset(preset);
+ if(values.saturation!=1||values.contrast!=1||values.brightness!=0)image=[image imageByApplyingFilter:@"CIColorControls" withInputParameters:@{kCIInputSaturationKey:@(values.saturation),kCIInputContrastKey:@(values.contrast),kCIInputBrightnessKey:@(values.brightness)}];
+ // The original-color preset only sharpens luminance at two scales. It does not
+ // set saturation, hue, white balance or a global contrast/color grade.
+ if(details){image=DGSharpenLuma(image,2.4,values.texture);image=DGSharpenLuma(image,.8,values.clarity);}return image;
+}
 static BOOL DGSupports(Class cls,id device){if(!cls||!device)return NO;SEL selector=NSSelectorFromString(@"supportsDevice:");if(![cls respondsToSelector:selector])return NO;BOOL(*message)(id,SEL,id)=(BOOL(*)(id,SEL,id))objc_msgSend;return message(cls,selector,device);}
 BOOL DGMetalFXSpatialAvailable(void){return DGSupports(NSClassFromString(@"MTLFXSpatialScalerDescriptor"),MTLCreateSystemDefaultDevice());}
 BOOL DGMetalFXFrameInterpolationAvailable(void){return DGSupports(NSClassFromString(@"MTLFXFrameInterpolatorDescriptor"),MTLCreateSystemDefaultDevice());}
@@ -21,7 +34,7 @@ void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefa
 @implementation DGSpatialSession{ id<MTLDevice> _device;id<MTLCommandQueue> _queue;CIContext *_context;id<MTLTexture> _input,_output;std::unique_ptr<douglass::SpatialUpscaler> _scaler;std::atomic_bool _busy;}
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial{
  CIImage *source=request.sourceImage;CGRect extent=source.extent;CIImage *image=source;double factor=MAX(1,self.scale);
- if(preset){auto values=douglass::picturePreset((unsigned)preset);image=[image imageByApplyingFilter:@"CIColorControls" withInputParameters:@{kCIInputSaturationKey:@(values.saturation),kCIInputContrastKey:@(values.contrast),kCIInputBrightnessKey:@(values.brightness)}];}
+ if(preset)image=DGFilterPicture(image,(unsigned)preset,!DGAnimationProcessingDeferred());
  CIImage *fallback=[image imageByApplyingTransform:CGAffineTransformMakeScale(factor,factor)];
  if(!spatial||factor<=1||extent.size.width<1||extent.size.height<1||DGAnimationProcessingDeferred()||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
  @try{
@@ -58,5 +71,5 @@ void DGConfigureMediaEnhancement(AVPlayerItem *item){
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset){
  if(!image||!image.CGImage||!preset||image.images.count)return image;
  static CIContext *context;static dispatch_once_t once;dispatch_once(&once,^{context=[CIContext contextWithOptions:@{kCIContextCacheIntermediates:@NO}];});
- auto values=douglass::picturePreset(preset);CIImage *input=[CIImage imageWithCGImage:image.CGImage];CIImage *output=[input imageByApplyingFilter:@"CIColorControls" withInputParameters:@{kCIInputSaturationKey:@(values.saturation),kCIInputContrastKey:@(values.contrast),kCIInputBrightnessKey:@(values.brightness)}];CGImageRef result=[context createCGImage:output fromRect:input.extent];if(!result)return image;UIImage *picture=[UIImage imageWithCGImage:result scale:image.scale orientation:image.imageOrientation];CGImageRelease(result);return picture;
+ CIImage *input=[CIImage imageWithCGImage:image.CGImage];CIImage *output=DGFilterPicture(input,preset,YES);CGImageRef result=[context createCGImage:output fromRect:input.extent];if(!result)return image;UIImage *picture=[UIImage imageWithCGImage:result scale:image.scale orientation:image.imageOrientation];CGImageRelease(result);return picture;
 }
