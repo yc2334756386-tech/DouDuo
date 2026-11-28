@@ -217,6 +217,7 @@ namespace { struct DGReplyState {
     UILabel *_titleLabel,*_modeLabel,*_empty,*_sortHint;UISegmentedControl *_sort;
     UIButton *_close,*_footer;
     UITableView *_table;
+    NSMutableDictionary<NSString *,NSNumber *> *_rowHeights;CGFloat _heightWidth;
     BOOL _loading,_more,_failed,_remembered;CGPoint _savedOffset;
     BOOL _previewOpen,_previewReturning,_previewUserMoved;UIView *_previewSnapshot;NSMutableDictionary *_previewUpdates;douglass::ReadingPosition _previewPosition;
     std::vector<Comment> _comments;
@@ -228,6 +229,7 @@ namespace { struct DGReplyState {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    _rowHeights=[NSMutableDictionary dictionary];
     _backdrop=[DGImage new];_backdrop.contentMode=UIViewContentModeScaleAspectFill;_backdrop.clipsToBounds=YES;[_backdrop remote:self.coverURL?:@""];[self.view addSubview:_backdrop];
     _backdropBlur=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];[self.view addSubview:_backdropBlur];_backdropShade=[UIView new];_backdropShade.backgroundColor=[UIColor.systemBackgroundColor colorWithAlphaComponent:.28];[self.view addSubview:_backdropShade];
     self.view.backgroundColor=UIColor.clearColor; self.view.clipsToBounds=YES;
@@ -259,6 +261,7 @@ namespace { struct DGReplyState {
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews]; CGRect b=self.view.bounds; CGFloat width=b.size.width; _backdrop.frame=b;_backdropBlur.frame=b;_backdropShade.frame=b;_glass.frame=b;
+    if(fabs(_heightWidth-width)>.5){_heightWidth=width;[_rowHeights removeAllObjects];}
     _handle.frame=CGRectMake((width-50)/2,8,50,5); _titleLabel.frame=CGRectMake(68,24,MAX(0,width-136),30);
     _handleHit.frame=CGRectMake((width-140)/2,0,140,26);
     _modeLabel.frame=CGRectMake(20,35,40,18); _closeGlass.frame=CGRectMake(MAX(0,width-58),22,40,40); _close.frame=_closeGlass.bounds;
@@ -392,6 +395,11 @@ namespace { struct DGReplyState {
         state.cursor=String(result[@"cursor"]?:@"0"); state.more=[result[@"more"] boolValue]&&state.cursor!=String(cursor); [self reloadThread:identifier];[self advanceFocus];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return(NSInteger)_comments.size();}
+- (NSString *)heightKey:(NSIndexPath *)path{
+ if(path.section<0||(std::size_t)path.section>=_comments.size())return nil;const Comment &parent=_comments[path.section];if(path.row==0)return Text(parent.id);
+ auto state=_replyStates.find(parent.id);if(state==_replyStates.end()||path.row<1)return nil;if((std::size_t)path.row<=state->second.items.size())return Text(state->second.items[path.row-1].id);return [Text(parent.id)stringByAppendingString:@":footer"];
+}
+- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)path{NSString *key=[self heightKey:path];NSNumber *height=key?_rowHeights[key]:nil;return height?height.doubleValue:112;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(section<0||(std::size_t)section>=_comments.size())return 0; auto found=_replyStates.find(_comments[section].id);
     return found!=_replyStates.end()&&found->second.expanded&&(!found->second.loading||found->second.loaded)?(NSInteger)found->second.items.size()+2:1;
@@ -424,6 +432,7 @@ namespace { struct DGReplyState {
     return cell;
 }
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *key=[self heightKey:indexPath];if(key&&cell.bounds.size.height>1)_rowHeights[key]=@(cell.bounds.size.height);
     if(self.view.window&&!_failed&&_more&&!_loading&&(std::size_t)(indexPath.section+3)>=_comments.size())[self loadMore];
 }
 - (void)dealloc{[NSNotificationCenter.defaultCenter removeObserver:self];}
