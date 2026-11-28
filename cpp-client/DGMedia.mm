@@ -89,7 +89,14 @@ static NSMutableDictionary<NSString *,DGPrepared *> *Pool(){static NSMutableDict
 void DGSuspendPrerolls(void){DGPrewarmAllowed=NO;for(DGPrepared *prepared in Pool().allValues)[prepared suspendWarm];}
 static NSString *PlayerURL(const Work &work){NSString *identifier=Text(work.id);NSURL *file=DGCacheLocalVideo(identifier)?:DGPlaybackResumeLocalVideo(identifier);return file.absoluteString?:Text(work.play);}
 static NSString *PoolKey(const Work &work){return [NSString stringWithFormat:@"%@|%@",Text(work.id),PlayerURL(work)];}
-static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=Pool()[key];if(!p){p=[[DGPrepared alloc]initWithURL:PlayerURL(w)];Pool()[key]=p;}if(Pool().count>3)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(![key isEqualToString:old]&&!v.leases){[v retire];[Pool() removeObjectForKey:old];if(Pool().count<=3)break;}}return p;}
+static DGPrepared *PreparedForWork(const Work &work){
+ DGPrepared *prepared=Pool()[PoolKey(work)];if(prepared&&!prepared.retired&&prepared.item.status!=AVPlayerItemStatusFailed)return prepared;
+ // A disk download may finish after this URL was already prepared. Retain the
+ // decoded stream instead of discarding its preroll to open the new local file.
+ NSString *streamKey=[NSString stringWithFormat:@"%@|%@",Text(work.id),Text(work.play)];prepared=Pool()[streamKey];
+ return prepared&&!prepared.retired&&prepared.item.status!=AVPlayerItemStatusFailed&&(prepared.warmed||prepared.warming||prepared.item.status==AVPlayerItemStatusReadyToPlay)?prepared:nil;
+}
+static DGPrepared *Obtain(const Work &w){if(w.play.empty())return nil;NSString *key=PoolKey(w);DGPrepared *p=PreparedForWork(w);BOOL reused=p!=nil;if(!p){p=[[DGPrepared alloc]initWithURL:PlayerURL(w)];Pool()[key]=p;}if(Pool().count>3)for(NSString *old in Pool().allKeys){DGPrepared *v=Pool()[old];if(v!=p&&!v.leases){[v retire];[Pool() removeObjectForKey:old];if(Pool().count<=3)break;}}if(DGDiagnosticEnabled())DGDiagnostic(@"playback.prepare",[NSString stringWithFormat:@"reuse=%d source=%@ ready=%d warmed=%d pool=%lu",reused,p.sourceKind,p.item.status==AVPlayerItemStatusReadyToPlay,p.warmed,(unsigned long)Pool().count]);return p;}
 void DGWarmWorks(const std::vector<Work>&works,NSInteger index){
  if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive||index<0||index>=(NSInteger)works.size())return;
  DGPrewarmAllowed=YES;
@@ -356,7 +363,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)stagePreparedVideo {
  if(_active||_player||_work.photo()||_work.play.empty()||_backgroundMode)return;
- DGPrepared *prepared=Pool()[PoolKey(_work)];
+ DGPrepared *prepared=PreparedForWork(_work);
  if(!prepared||prepared.leases||prepared.retired||prepared.needsBeginning||!prepared.warmed)return;
  // Attach only a prepared source during the transition.
  [self attach:prepared position:0];

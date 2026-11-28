@@ -138,6 +138,7 @@ BOOL LooksLikeVideo(NSURL *file){
  return _mediaSizes[identifier]?[self file:identifier]:nil;
 }
 - (void)setIdle:(BOOL)idle {
+ if(_idle!=idle)DGDiagnostic(@"cache.idle",[NSString stringWithFormat:@"enabled=%d queued=%lu ready=%lu downloading=%d",idle,(unsigned long)_queue.count,(unsigned long)_mediaSizes.count,_task!=nil]);
  _idle=idle;
  NSURLSessionDownloadTask *task=_task;
  if(task&&!idle&&!_suspended){_suspended=YES;dispatch_async(Transfers(),^{[task suspend];});}

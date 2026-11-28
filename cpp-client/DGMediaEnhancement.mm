@@ -19,13 +19,16 @@ void DGMediaEnhancementApply(void){BOOL spatial=[NSUserDefaults.standardUserDefa
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial;
 @end
 @implementation DGSpatialSession{ id<MTLDevice> _device;id<MTLCommandQueue> _queue;CIContext *_context;id<MTLTexture> _input,_output;std::unique_ptr<douglass::SpatialUpscaler> _scaler;std::atomic_bool _busy;}
-- (instancetype)init{if((self=[super init])){_device=MTLCreateSystemDefaultDevice();_queue=[_device newCommandQueue];if(_device){_context=[CIContext contextWithMTLDevice:_device options:@{kCIContextCacheIntermediates:@NO}];_scaler=std::make_unique<douglass::SpatialUpscaler>((__bridge void *)_device);}}return self;}
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial{
  CIImage *source=request.sourceImage;CGRect extent=source.extent;CIImage *image=source;double factor=MAX(1,self.scale);
  if(preset){auto values=douglass::picturePreset((unsigned)preset);image=[image imageByApplyingFilter:@"CIColorControls" withInputParameters:@{kCIInputSaturationKey:@(values.saturation),kCIInputContrastKey:@(values.contrast),kCIInputBrightnessKey:@(values.brightness)}];}
  CIImage *fallback=[image imageByApplyingTransform:CGAffineTransformMakeScale(factor,factor)];
- if(!spatial||factor<=1||!_context||!_queue||extent.size.width<1||extent.size.height<1||DGAnimationProcessingDeferred()||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
+ if(!spatial||factor<=1||extent.size.width<1||extent.size.height<1||DGAnimationProcessingDeferred()||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
  @try{
+  // Preparing adjacent URLs must not construct another GPU pipeline on the UI
+  // thread. Allocate only when a real, non-deferred frame needs enhancement.
+  if(!_context){_device=MTLCreateSystemDefaultDevice();_queue=[_device newCommandQueue];if(_device){_context=[CIContext contextWithMTLDevice:_device options:@{kCIContextCacheIntermediates:@NO}];_scaler=std::make_unique<douglass::SpatialUpscaler>((__bridge void *)_device);}}
+  if(!_context||!_queue||!_scaler){_busy=false;[request finishWithImage:fallback context:nil];return;}
   NSUInteger w=(NSUInteger)extent.size.width,h=(NSUInteger)extent.size.height;NSUInteger ow=(NSUInteger)ceil(w*factor),oh=(NSUInteger)ceil(h*factor);
   if(!_input||_input.width!=w||_input.height!=h){MTLTextureDescriptor *in=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:w height:h mipmapped:NO];in.usage=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;in.storageMode=MTLStorageModePrivate;_input=[_device newTextureWithDescriptor:in];}
   // CI retains the finished output beyond the GPU callback. Give each published
