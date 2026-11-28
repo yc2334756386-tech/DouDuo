@@ -1,4 +1,5 @@
 #import "DGAnimation.h"
+#import "DGDiagnostics.h"
 static NSArray *Points(){NSArray *points=[NSUserDefaults.standardUserDefaults arrayForKey:@"douglass.animation.points"];return points.count==4?points:@[@.16,@1,@.3,@1];}
 NSTimeInterval DGDuration(NSTimeInterval base){double speed=[NSUserDefaults.standardUserDefaults doubleForKey:@"douglass.animation.speed"];return base/(speed>=.2&&speed<=4?speed:.8);}
 CAMediaTimingFunction *DGTiming(void){NSArray *p=Points();return [CAMediaTimingFunction functionWithControlPoints:[p[0]floatValue]:[p[1]floatValue]:[p[2]floatValue]:[p[3]floatValue]];}
@@ -27,12 +28,56 @@ UIViewPropertyAnimator *DGAnimate(NSTimeInterval duration,void (^changes)(void),
 - (void)preview{[_demoAnimator stopAnimation:YES];_demo.transform=CGAffineTransformIdentity;_demoAnimator=DGAnimate(1,^{self->_demo.transform=CGAffineTransformMakeTranslation(self.view.bounds.size.width-80,0);},nil);}
 @end
 UIViewController *DGMakeAnimationSettings(void){return [DGAnimationSettings new];}
+// A tiny, noninteractive foreground surface performs a real update on every
+// requested frame. A fully hidden view would be discarded by the compositor.
+@interface DGRefreshPulse:UIView
+@property(nonatomic) CFTimeInterval stamp;
+@end
+@implementation DGRefreshPulse
+- (void)drawRect:(CGRect)rect{
+ CGContextRef context=UIGraphicsGetCurrentContext();unsigned tick=(unsigned)fmod(_stamp*1000,256);CGFloat value=(tick&1)?.9:.1;CGContextSetGrayFillColor(context,value,1);CGContextFillRect(context,self.bounds);
+}
+@end
+static UIWindow *DGRefreshWindow(){
+ for(UIScene *scene in UIApplication.sharedApplication.connectedScenes)if([scene isKindOfClass:UIWindowScene.class]&&scene.activationState==UISceneActivationStateForegroundActive){for(UIWindow *window in ((UIWindowScene *)scene).windows)if(window.isKeyWindow)return window;}return nil;
+}
+void DGApplyDisplayLinkRate(CADisplayLink *link,UIView *view){
+ if(!link)return;UIScreen *screen=view.window.windowScene.screen?:DGRefreshWindow().windowScene.screen?:UIScreen.mainScreen;
+ if([NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"]){float rate=MIN(120,screen.maximumFramesPerSecond);link.preferredFrameRateRange=CAFrameRateRangeMake(rate,rate,rate);}else link.preferredFrameRateRange=CAFrameRateRangeDefault;
+}
 @interface DGRefreshRate:NSObject
 @property(nonatomic,strong) CADisplayLink *link;
+@property(nonatomic,strong) DGRefreshPulse *pulse;
+@property(nonatomic) double observedFPS;
+@property(nonatomic) CFTimeInterval sampleStart,lastLog;
+@property(nonatomic) NSUInteger frames;
 @end
 @implementation DGRefreshRate
-- (void)tick:(CADisplayLink *)link{}
+- (void)tick:(CADisplayLink *)link{
+ self.pulse.stamp=link.timestamp;[self.pulse setNeedsDisplay];
+ if(!_sampleStart){_sampleStart=link.timestamp;_frames=0;return;}++_frames;double elapsed=link.timestamp-_sampleStart;
+ if(elapsed>=1){_observedFPS=_frames/elapsed;_frames=0;_sampleStart=link.timestamp;if(DGDiagnosticEnabled()&&link.timestamp-_lastLog>=15){_lastLog=link.timestamp;DGDiagnostic(@"refresh.callback",[NSString stringWithFormat:@"observed_fps=%.1f maximum=%ld low_power=%d thermal=%ld",_observedFPS,(long)(self.pulse.window.windowScene.screen?:UIScreen.mainScreen).maximumFramesPerSecond,NSProcessInfo.processInfo.lowPowerModeEnabled,(long)NSProcessInfo.processInfo.thermalState]);}}
+}
 @end
 static DGRefreshRate *refresh;
-void DGRefreshRateSuspend(void){[refresh.link invalidate];refresh.link=nil;}
-void DGRefreshRateApply(void){static dispatch_once_t once;dispatch_once(&once,^{refresh=[DGRefreshRate new];});BOOL enabled=UIApplication.sharedApplication.applicationState==UIApplicationStateActive&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];if(!enabled){[refresh.link invalidate];refresh.link=nil;return;}if(!refresh.link){refresh.link=[CADisplayLink displayLinkWithTarget:refresh selector:@selector(tick:)];[refresh.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];}float rate=MIN(120,UIScreen.mainScreen.maximumFramesPerSecond);refresh.link.preferredFrameRateRange=CAFrameRateRangeMake(rate,rate,rate);}
+void DGRefreshRateSuspend(void){[refresh.link invalidate];refresh.link=nil;[refresh.pulse removeFromSuperview];refresh.pulse=nil;refresh.sampleStart=0;refresh.frames=0;refresh.observedFPS=0;}
+NSString *DGRefreshRateStatus(void){
+ UIScreen *screen=DGRefreshWindow().windowScene.screen?:UIScreen.mainScreen;NSInteger maximum=screen.maximumFramesPerSecond;
+ if(maximum<120)return [NSString stringWithFormat:@"此屏幕上限 %ldHz，无法请求 120Hz",(long)maximum];
+ if(![NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"])return @"关闭时跟随系统 ProMotion；开启持续请求高刷";
+ NSString *rate=refresh.observedFPS>0?[NSString stringWithFormat:@"界面回调约 %.0ffps",refresh.observedFPS]:@"界面回调测量中";
+ return [rate stringByAppendingString:NSProcessInfo.processInfo.lowPowerModeEnabled?@" · 低电量模式可能限制刷新率":@" · 系统可降频，视频片源帧率不变"];
+}
+void DGRefreshRateApply(void){
+ static dispatch_once_t once;dispatch_once(&once,^{refresh=[DGRefreshRate new];});
+ BOOL enabled=UIApplication.sharedApplication.applicationState==UIApplicationStateActive&&[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.force120"];
+ if(!enabled)DGRefreshRateSuspend();else{
+  UIWindow *window=DGRefreshWindow();
+  if(window&&!refresh.pulse){refresh.pulse=[[DGRefreshPulse alloc]initWithFrame:CGRectMake(2,window.safeAreaInsets.top+2,2,2)];refresh.pulse.userInteractionEnabled=NO;refresh.pulse.isAccessibilityElement=NO;refresh.pulse.accessibilityElementsHidden=YES;refresh.pulse.backgroundColor=UIColor.clearColor;refresh.pulse.opaque=NO;refresh.pulse.alpha=.005;refresh.pulse.contentScaleFactor=1;}
+  if(window&&refresh.pulse.superview!=window)[window addSubview:refresh.pulse];
+  if(!refresh.link){refresh.link=[CADisplayLink displayLinkWithTarget:refresh selector:@selector(tick:)];[refresh.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];}
+  DGApplyDisplayLinkRate(refresh.link,refresh.pulse);
+  if(DGDiagnosticEnabled())DGDiagnostic(@"refresh.request",[NSString stringWithFormat:@"maximum=%ld foreground_surface=%d low_power=%d",(long)(window.windowScene.screen?:UIScreen.mainScreen).maximumFramesPerSecond,refresh.pulse.window!=nil,NSProcessInfo.processInfo.lowPowerModeEnabled]);
+ }
+ [NSNotificationCenter.defaultCenter postNotificationName:@"DGRefreshRateChanged" object:nil];
+}

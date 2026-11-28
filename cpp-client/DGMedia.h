@@ -22,12 +22,14 @@
 - (void)leaveBackground;
 - (void)suspendForegroundWork;
 - (NSString *)selectedImageURL;
+- (void)saveCurrentFrame;
 - (void)releaseUnusedResources;
 - (void)pagingInMotion:(BOOL)inMotion;
 - (BOOL)hasRenderedMedia;
 - (void)stagePreparedVideo;
 - (double)currentPlaybackPosition;
 - (BOOL)isPlaybackPaused;
+- (BOOL)isPlaybackActive;
 - (void)restorePlaybackPosition:(double)seconds paused:(BOOL)paused;
 - (CGFloat)notificationTopInView:(UIView *)view;
 @end
@@ -40,3 +42,4 @@ void DGTrimPlayers(void);
 
 BOOL DGAutomaticPiPAvailable(void);
 CGFloat DGFeedNotificationTop(UIViewController *host);
+void DGSaveCurrentFrame(UIViewController *host);

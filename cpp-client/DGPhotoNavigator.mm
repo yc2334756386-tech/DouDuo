@@ -19,7 +19,7 @@
 - (instancetype)initWithFrame:(CGRect)frame{
  if((self=[super initWithFrame:frame])){
   self.backgroundColor=UIColor.clearColor;self.clipsToBounds=NO;
-  _images=[NSMutableArray array];_thumbnails=[DGPhotoStrip new];_thumbnails.backgroundColor=UIColor.clearColor;_thumbnails.showsHorizontalScrollIndicator=NO;_thumbnails.showsVerticalScrollIndicator=NO;_thumbnails.alwaysBounceVertical=NO;_thumbnails.directionalLockEnabled=YES;_thumbnails.decelerationRate=UIScrollViewDecelerationRateFast;_thumbnails.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_thumbnails.delegate=self;[_thumbnails.panGestureRecognizer addTarget:self action:@selector(panState:)];[self addSubview:_thumbnails];
+  _images=[NSMutableArray array];_thumbnails=[DGPhotoStrip new];_thumbnails.transform=CGAffineTransformMakeScale(-1,1);_thumbnails.scrollsToTop=NO;_thumbnails.backgroundColor=UIColor.clearColor;_thumbnails.showsHorizontalScrollIndicator=NO;_thumbnails.showsVerticalScrollIndicator=NO;_thumbnails.alwaysBounceVertical=NO;_thumbnails.directionalLockEnabled=YES;_thumbnails.decelerationRate=UIScrollViewDecelerationRateFast;_thumbnails.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_thumbnails.delegate=self;[_thumbnails.panGestureRecognizer addTarget:self action:@selector(panState:)];[self addSubview:_thumbnails];
   [self addGestureRecognizer:[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(tap:)]];
   _count=Label(15,UIFontWeightMedium);_count.textAlignment=NSTextAlignmentCenter;_count.hidden=YES;_count.layer.shadowColor=UIColor.blackColor.CGColor;_count.layer.shadowOpacity=.55;_count.layer.shadowRadius=2;_count.layer.shadowOffset=CGSizeMake(0,1);[self addSubview:_count];
  }return self;
@@ -39,7 +39,7 @@
 - (void)images:(NSArray<NSString *> *)urls{
  [self cancelBrowsing];_urls=urls.copy;_index=0;_position=0;_count.attributedText=nil;_layoutWidth=0;_thumbnails.allowsBrowsing=urls.count>1;
  for(UIView *image in _images)[image removeFromSuperview];[_images removeAllObjects];
- for(NSString *url in urls){DGImage *image=[DGImage new];image.maximumPixelSize=160;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;image.hidden=YES;[_thumbnails addSubview:image];[_images addObject:image];}
+ for(NSString *url in urls){DGImage *image=[DGImage new];image.transform=CGAffineTransformMakeScale(-1,1);image.maximumPixelSize=160;image.lowPriority=YES;image.contentMode=UIViewContentModeScaleAspectFill;image.clipsToBounds=YES;image.backgroundColor=[UIColor colorWithWhite:1 alpha:.12];image.showsLoadingIndicator=YES;image.hidden=YES;[_thumbnails addSubview:image];[_images addObject:image];}
  [self page:0];[self setNeedsLayout];
 }
 - (void)page:(NSInteger)index{
@@ -55,7 +55,7 @@
 }
 - (void)layoutSubviews{
  [super layoutSubviews];CGFloat width=self.bounds.size.width;BOOL resized=fabs(width-_layoutWidth)>.5;_layoutWidth=width;
- _thumbnails.frame=CGRectMake(0,-13,width,58);_count.frame=CGRectMake(0,49,width,21);
+ _thumbnails.bounds=CGRectMake(0,0,width,58);_thumbnails.center=CGPointMake(width/2,16);_count.frame=CGRectMake(0,49,width,21);
  CGSize content=CGSizeMake(width+MAX(0,(NSInteger)_urls.count-1)*38,58);if(!CGSizeEqualToSize(content,_thumbnails.contentSize))_thumbnails.contentSize=content;
  for(NSUInteger i=0;i<_images.count;i++){CGFloat selected=MAX(0,1-fabs((double)i-_position)),w=30+14*selected,h=44+12*selected;DGImage *image=_images[i];image.frame=CGRectMake(width/2+i*38-w/2,(58-h)/2,w,h);image.layer.cornerRadius=4+selected*2;image.layer.borderColor=UIColor.whiteColor.CGColor;image.layer.borderWidth=i==_index?1.5:0;}
  if(resized&&!_thumbnails.dragging&&!_thumbnails.decelerating)[_thumbnails setContentOffset:CGPointMake(_position*38,0) animated:NO];
@@ -80,30 +80,22 @@
  [self setNeedsLayout];if(self.onScrub)self.onScrub(_position,NO);
 }
 - (void)scrollViewWillEndDragging:(UIScrollView *)scroll withVelocity:(CGPoint)velocity targetContentOffset:(inout CGPoint *)target{
- if(!target)return;double position=douglass::photoScrubPosition(0,-target->x,38,_urls.count);target->x=llround(position)*38;target->y=0;
+ if(target)*target=scroll.contentOffset;
 }
 - (void)finishBrowsing{
  if(!_browsing)return;_position=llround(douglass::photoScrubPosition(0,-_thumbnails.contentOffset.x,38,_urls.count));
- [_thumbnails setContentOffset:CGPointMake(_position*38,0) animated:NO];[self page:(NSInteger)_position];if(self.onScrub)self.onScrub(_position,YES);[self collapseSoon];
+ [_thumbnails setContentOffset:CGPointMake(_position*38,0) animated:NO];[self page:(NSInteger)_position];if(self.onScrub)self.onScrub(_position,YES);[self setBrowsing:NO];
 }
-- (void)settle{
- double position=llround(douglass::photoScrubPosition(0,-_thumbnails.contentOffset.x,38,_urls.count));
- if(fabs(_thumbnails.contentOffset.x-position*38)<.5)[self finishBrowsing];else [_thumbnails setContentOffset:CGPointMake(position*38,0) animated:YES];
-}
-- (void)scrollViewDidEndDragging:(UIScrollView *)scroll willDecelerate:(BOOL)decelerate{if(!decelerate)[self settle];}
+- (void)scrollViewDidEndDragging:(UIScrollView *)scroll willDecelerate:(BOOL)decelerate{[self finishBrowsing];}
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scroll{[self finishBrowsing];}
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scroll{[self finishBrowsing];}
 - (void)panState:(UIPanGestureRecognizer *)gesture{
- if(gesture.state!=UIGestureRecognizerStateCancelled&&gesture.state!=UIGestureRecognizerStateFailed)return;
- NSUInteger token=_collapseToken;__weak DGPhotoNavigator *weak=self;dispatch_async(dispatch_get_main_queue(),^{DGPhotoNavigator *self=weak;if(self&&token==self->_collapseToken&&self->_browsing&&!self->_thumbnails.dragging&&!self->_thumbnails.decelerating)[self settle];});
-}
-- (void)collapseSoon{
- NSUInteger token=++_collapseToken;__weak DGPhotoNavigator *weak=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,650*NSEC_PER_MSEC),dispatch_get_main_queue(),^{DGPhotoNavigator *self=weak;if(self&&token==self->_collapseToken&&!self->_thumbnails.dragging&&!self->_thumbnails.decelerating)[self setBrowsing:NO];});
+ if(gesture.state==UIGestureRecognizerStateEnded||gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed)[self finishBrowsing];
 }
 - (void)tap:(UITapGestureRecognizer *)gesture{
  if(!_urls.count)return;CGPoint point=[gesture locationInView:self];NSInteger index;
- if(_browsing)index=(NSInteger)llround((point.x+_thumbnails.contentOffset.x-self.bounds.size.width/2)/38);
+ if(_browsing){CGPoint local=[gesture locationInView:_thumbnails];index=(NSInteger)llround((local.x-self.bounds.size.width/2)/38);}
  else{NSInteger count=MIN((NSInteger)15,(NSInteger)_urls.count),first=MIN(MAX(0,_index-count/2),MAX(0,(NSInteger)_urls.count-count));CGFloat start=(self.bounds.size.width-MAX(0,count-1)*12)/2;index=first+MIN(MAX(0,(NSInteger)llround((point.x-start)/12)),count-1);}
- index=MIN(MAX(0,index),MAX(0,(NSInteger)_urls.count-1));if(index!=_index)DGHaptic();_position=index;[self page:index];if(self.onSelect)self.onSelect(index);if(_browsing){[_thumbnails setContentOffset:CGPointMake(index*38,0) animated:YES];[self collapseSoon];}
+ index=MIN(MAX(0,index),MAX(0,(NSInteger)_urls.count-1));if(index!=_index)DGHaptic();_position=index;[self page:index];if(self.onSelect)self.onSelect(index);if(_browsing){[_thumbnails setContentOffset:CGPointMake(index*38,0) animated:NO];[self finishBrowsing];}
 }
 @end

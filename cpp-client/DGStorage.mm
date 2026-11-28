@@ -58,6 +58,13 @@ void DGSaveURL(UIViewController *host,NSString *url,BOOL video) {
         }] resume];
     }];
 }
+void DGSaveImage(UIViewController *host,UIImage *image){
+ if(!image){DGToast(host,@"当前画面尚未加载");return;}DGHaptic();__weak UIViewController *owner=host;
+ [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status){
+  if(status!=PHAuthorizationStatusAuthorized&&status!=PHAuthorizationStatusLimited){DGToast(owner,@"请在系统设置允许添加照片");return;}
+  [PHPhotoLibrary.sharedPhotoLibrary performChanges:^{[PHAssetChangeRequest creationRequestForAssetFromImage:image];} completionHandler:^(BOOL success,NSError *error){if(success)DGHaptic();DGToast(owner,success?@"此帧画面已保存到相册":@"画面保存失败，请稍后重试");}];
+ }];
+}
 void DGSaveAudioDirect(UIViewController *host,NSString *url,NSString *name) {
     if(!host||host.presentedViewController)return;
     if(!url.length){DGToast(host,@"平台未提供可保存的原声地址");return;}

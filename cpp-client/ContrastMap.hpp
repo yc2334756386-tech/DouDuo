@@ -12,5 +12,8 @@ public:
 private:
     std::size_t width_=0,height_=0;
     std::vector<std::uint8_t> darkInk_;
+    std::vector<float> light_,opacity_;
+    std::vector<std::uint32_t> integral_;
+    std::vector<float> opacityIntegral_;
 };
 }

@@ -1,4 +1,5 @@
 #import "DGDanmaku.h"
+#import "DGAnimation.h"
 #import <QuartzCore/QuartzCore.h>
 @implementation DGDanmakuLabel{
  BOOL _adaptive;UILabel *_white,*_black;CALayer *_whiteMask,*_blackMask;
@@ -10,13 +11,14 @@
  if(!_adaptive){[_white removeFromSuperview];[_black removeFromSuperview];_white=nil;_black=nil;_whiteMask=nil;_blackMask=nil;self.layer.shadowOpacity=shadows?.85:0;[self setNeedsDisplay];return;}
  if(!_white){_white=[UILabel new];_black=[UILabel new];_whiteMask=[CALayer layer];_blackMask=[CALayer layer];[self addSubview:_white];[self addSubview:_black];}
  NSArray<UILabel *> *copies=@[_white,_black];NSArray<UIColor *> *ink=@[UIColor.whiteColor,UIColor.blackColor],*shade=@[UIColor.blackColor,UIColor.whiteColor];
- for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=shadows?.9:0;copy.layer.shadowRadius=2;copy.layer.shadowOffset=CGSizeMake(0,1);copy.userInteractionEnabled=NO;}
+ for(NSUInteger index=0;index<2;++index){UILabel *copy=copies[index];NSMutableAttributedString *text=[self.attributedText mutableCopy];if(text.length)[text addAttribute:NSForegroundColorAttributeName value:ink[index] range:NSMakeRange(0,text.length)];copy.font=self.font;copy.numberOfLines=self.numberOfLines;copy.lineBreakMode=self.lineBreakMode;copy.textAlignment=self.textAlignment;copy.attributedText=text;copy.textColor=ink[index];copy.layer.shadowColor=shade[index].CGColor;copy.layer.shadowOpacity=index==0&&shadows?.85:0;copy.layer.shadowRadius=2;copy.layer.shadowOffset=CGSizeMake(0,1);copy.userInteractionEnabled=NO;}
  self.layer.shadowOpacity=0;[self setNeedsDisplay];[self setNeedsLayout];
 }
 - (void)layoutSubviews{[super layoutSubviews];_white.frame=self.bounds;_black.frame=self.bounds;}
 - (void)whiteMask:(UIImage *)white blackMask:(UIImage *)black{
  if(!_adaptive)return;
- _whiteMask.contents=(id)white.CGImage;_blackMask.contents=(id)black.CGImage;
+ NSArray<CALayer *> *layers=@[_whiteMask,_blackMask];NSArray *images=@[white?(id)white.CGImage:NSNull.null,black?(id)black.CGImage:NSNull.null];
+ for(NSUInteger index=0;index<2;++index){CALayer *layer=layers[index];id next=images[index]==NSNull.null?nil:images[index],previous=layer.contents;layer.contents=next;if(previous&&next&&previous!=next){CABasicAnimation *fade=[CABasicAnimation animationWithKeyPath:@"contents"];fade.fromValue=previous;fade.toValue=next;fade.duration=1./12;fade.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];[layer addAnimation:fade forKey:@"contrast-fade"];}else [layer removeAnimationForKey:@"contrast-fade"];}
  _white.layer.mask=white?_whiteMask:nil;_black.layer.mask=black?_blackMask:nil;_black.hidden=!black;
 }
 - (void)alignMask:(CGRect)frame overlaySize:(CGSize)size{
@@ -36,6 +38,8 @@
 @implementation DGDanmakuOverlay{
  BOOL _adaptive,_playing,_sampling;CADisplayLink *_clock;UIImage *_whiteMask,*_blackMask;
 }
+- (instancetype)initWithFrame:(CGRect)frame{if((self=[super initWithFrame:frame]))[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshRateChanged) name:@"DGRefreshRateChanged" object:nil];return self;}
+- (void)refreshRateChanged{DGApplyDisplayLinkRate(_clock,self);}
 - (NSString *)textAtPoint:(CGPoint)point{
  if(!CGRectContainsPoint(self.bounds,point))return nil;
  for(DGDanmakuLabel *label in self.subviews.reverseObjectEnumerator){CALayer *layer=label.layer.presentationLayer?:label.layer;if(CGRectContainsPoint(CGRectInset(layer.frame,-6,-5),point))return label.plain;}return nil;
@@ -55,7 +59,7 @@
 }
 - (void)updateClock{
  BOOL run=_adaptive&&_playing&&self.window&&!self.hidden&&self.alpha>.01&&self.subviews.count>0;
- if(run&&!_clock){DGDanmakuClock *target=[DGDanmakuClock new];target.overlay=self;_clock=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];_clock.preferredFrameRateRange=CAFrameRateRangeMake(30,60,60);[_clock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];}
+ if(run&&!_clock){DGDanmakuClock *target=[DGDanmakuClock new];target.overlay=self;_clock=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];DGApplyDisplayLinkRate(_clock,self);[_clock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];}
  else if(!run&&_clock){[_clock invalidate];_clock=nil;[self alignMasks];}
  if(_sampling!=run){_sampling=run;if(self.samplingChanged)self.samplingChanged(run);}
 }
@@ -64,5 +68,5 @@
 - (void)didMoveToWindow{[super didMoveToWindow];[self updateClock];}
 - (void)setHidden:(BOOL)hidden{[super setHidden:hidden];[self updateClock];}
 - (void)layoutSubviews{[super layoutSubviews];[self alignMasks];}
-- (void)dealloc{[_clock invalidate];}
+- (void)dealloc{[_clock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 @end

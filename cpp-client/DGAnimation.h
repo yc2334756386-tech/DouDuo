@@ -7,3 +7,5 @@ UIViewController *DGMakeAnimationSettings(void);
 void DGRefreshRateApply(void);
 
 void DGRefreshRateSuspend(void);
+void DGApplyDisplayLinkRate(CADisplayLink *link,UIView *view);
+NSString *DGRefreshRateStatus(void);

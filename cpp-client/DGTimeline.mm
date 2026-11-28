@@ -1,4 +1,5 @@
 #import "DGTimeline.h"
+#import "DGAnimation.h"
 #import <QuartzCore/QuartzCore.h>
 #import <AVFoundation/AVFoundation.h>
 #include <cmath>
@@ -29,7 +30,7 @@
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])){
-        _maximumValue=1;self.backgroundColor=UIColor.clearColor;
+        _maximumValue=1;self.backgroundColor=UIColor.clearColor;[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshRateChanged) name:@"DGRefreshRateChanged" object:nil];
         self.isAccessibilityElement=YES;self.accessibilityLabel=@"视频播放进度";self.accessibilityTraits=UIAccessibilityTraitAdjustable;
         _track=[CALayer layer];_track.cornerRadius=1.5;
         _progress=[CALayer layer];_progress.cornerRadius=1.5;_progress.anchorPoint=CGPointMake(0,.5);
@@ -70,7 +71,7 @@
     _player=player;_duration=duration;[self updateFromPlayer];
     if(_displayLink||player.timeControlStatus!=AVPlayerTimeControlStatusPlaying)return;
     DGTimelineClock *clock=[DGTimelineClock new];clock.timeline=self;
-    _displayLink=[CADisplayLink displayLinkWithTarget:clock selector:@selector(step:)];
+    _displayLink=[CADisplayLink displayLinkWithTarget:clock selector:@selector(step:)];DGApplyDisplayLinkRate(_displayLink,self);
     [_displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
 - (void)updateFromPlayer {
@@ -80,6 +81,7 @@
     if(std::isfinite(seconds)&&_duration>0)self.value=seconds/_duration;
     if(player.timeControlStatus!=AVPlayerTimeControlStatusPlaying)[self stopFollowing];
 }
+- (void)refreshRateChanged{DGApplyDisplayLinkRate(_displayLink,self);}
 - (void)stopFollowing {[_displayLink invalidate];_displayLink=nil;_player=nil;}
 - (void)setHidden:(BOOL)hidden{[super setHidden:hidden];if(hidden)[self stopFollowing];}
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event{return CGRectContainsPoint(CGRectInset(self.bounds,-8,-14),point);}
@@ -115,5 +117,5 @@
 }
 - (void)accessibilityIncrement{[self adjustAccessibility:1];}
 - (void)accessibilityDecrement{[self adjustAccessibility:-1];}
-- (void)dealloc{[_displayLink invalidate];}
+- (void)dealloc{[_displayLink invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
 @end
