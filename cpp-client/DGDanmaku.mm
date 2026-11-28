@@ -9,10 +9,17 @@ static UIColor *DGCharcoalInk(CGFloat lineHeight){
  UIImage *image=[[[UIGraphicsImageRenderer alloc]initWithSize:size format:format]imageWithActions:^(UIGraphicsImageRendererContext *renderer){CGContextRef context=renderer.CGContext;CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGFloat colors[]={.14,.15,.17,1,.10,.11,.13,1,.12,.13,.15,1},stops[]={0,.48,1};CGGradientRef gradient=CGGradientCreateWithColorComponents(space,colors,stops,3);CGContextDrawLinearGradient(context,gradient,CGPointZero,CGPointMake(0,size.height),0);CGGradientRelease(gradient);CGColorSpaceRelease(space);}];
  ink=[UIColor colorWithPatternImage:image];[cache setObject:ink forKey:key];return ink;
 }
-static CGImageRef DGGroupMask(NSData *bytes,size_t width){
- CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)bytes);CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
- CGImageRef image=CGImageCreate(width,1,8,32,width*4,space,kCGBitmapByteOrder32Big|kCGImageAlphaPremultipliedLast,provider,NULL,NO,kCGRenderingIntentDefault);
- CGColorSpaceRelease(space);CGDataProviderRelease(provider);return image;
+static void DGSetInkOpacity(CALayer *layer,float target,BOOL animated){
+ if(layer.opacity==target&&!animated){[layer removeAnimationForKey:@"ink-opacity"];return;}
+ if(layer.opacity==target)return;
+ CALayer *visible=layer.presentationLayer;
+ float starting=visible?visible.opacity:layer.opacity;
+ layer.opacity=target;
+ if(!animated){[layer removeAnimationForKey:@"ink-opacity"];return;}
+ CABasicAnimation *fade=[CABasicAnimation animationWithKeyPath:@"opacity"];
+ fade.fromValue=@(starting);fade.toValue=@(target);fade.duration=.24;
+ fade.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+ [layer addAnimation:fade forKey:@"ink-opacity"];
 }
 @implementation DGDanmakuLabel{
  BOOL _adaptive,_eligible;UILabel *_white,*_black;CALayer *_whiteMask,*_blackMask;
@@ -47,11 +54,29 @@ static CGImageRef DGGroupMask(NSData *bytes,size_t width){
  _ink.setGlyphs(std::move(glyphs));[self renderGroupMasks:NO];
 }
 - (void)renderGroupMasks:(BOOL)animated{
- if(!_white||self.bounds.size.width<=0)return;size_t width=MIN(4096,MAX(1,(size_t)ceil(self.bounds.size.width)));
- NSMutableData *white=[NSMutableData dataWithLength:width*4],*black=[NSMutableData dataWithLength:width*4];_ink.masks(width,(uint8_t *)white.mutableBytes,(uint8_t *)black.mutableBytes);
- CGImageRef images[]={DGGroupMask(white,width),DGGroupMask(black,width)};NSArray<CALayer *> *layers=@[_whiteMask,_blackMask];
+ if(!_white||self.bounds.size.width<=0)return;
+ const auto spans=_ink.spans(self.bounds.size.width);
+ BOOL fade=animated&&!UIAccessibilityIsReduceMotionEnabled();
  [CATransaction begin];[CATransaction setDisableActions:YES];
- for(NSUInteger i=0;i<2;++i){CALayer *layer=layers[i];id previous=layer.contents;layer.frame=self.bounds;layer.magnificationFilter=kCAFilterNearest;layer.minificationFilter=kCAFilterNearest;layer.contents=(__bridge id)images[i];if(animated&&previous&&images[i]){CABasicAnimation *fade=[CABasicAnimation animationWithKeyPath:@"contents"];fade.fromValue=previous;fade.toValue=(__bridge id)images[i];fade.duration=.14;fade.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];[layer addAnimation:fade forKey:@"contrast-fade"];}else [layer removeAnimationForKey:@"contrast-fade"];if(images[i])CGImageRelease(images[i]);}
+ for(CALayer *mask in @[_whiteMask,_blackMask]){
+  mask.frame=self.bounds;
+  if(mask.sublayers.count!=spans.size()){
+   NSMutableArray<CALayer *> *parts=[NSMutableArray arrayWithCapacity:spans.size()];
+   for(std::size_t i=0;i<spans.size();++i){
+    CALayer *part=[CALayer layer];part.backgroundColor=UIColor.blackColor.CGColor;
+    [parts addObject:part];
+   }
+   mask.sublayers=parts;
+   fade=NO;
+  }
+  NSArray<CALayer *> *parts=mask.sublayers;
+  for(std::size_t i=0;i<spans.size();++i){
+   const auto &span=spans[i];
+   CALayer *part=parts[i];
+   part.frame=CGRectMake(span.start,0,span.end-span.start,self.bounds.size.height);
+   DGSetInkOpacity(part,span.dark==(mask==_blackMask)?1:0,fade);
+  }
+ }
  _white.layer.mask=_whiteMask;_black.layer.mask=_blackMask;[CATransaction commit];
 }
 - (void)layoutSubviews{[super layoutSubviews];_white.frame=self.bounds;_black.frame=self.bounds;if(!CGSizeEqualToSize(_inkLayoutSize,self.bounds.size))[self rebuildInkGroups];}

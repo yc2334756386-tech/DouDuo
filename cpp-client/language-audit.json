@@ -1,5 +1,5 @@
 {
-  "version": "0.20.22",
+  "version": "0.20.23",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",

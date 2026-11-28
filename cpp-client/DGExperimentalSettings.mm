@@ -38,12 +38,16 @@
  DGExperimentalControlCell *cell=[self base:title detail:detail];
  UISwitch *control=[UISwitch new];control.accessibilityIdentifier=key;
  BOOL available=YES;
+ NSString *unavailableReason=nil;
  if([key isEqualToString:@"douglass.experimental.metalfx"])available=DGMetalFXSpatialAvailable();
- if([key isEqualToString:@"douglass.experimental.frameInterpolation"])available=DGVTFInterpolationAvailable();
+ if([key isEqualToString:@"douglass.experimental.frameInterpolation"]){
+  unavailableReason=DGVTFInterpolationUnavailableReason();
+  available=unavailableReason==nil;
+ }
  if([key isEqualToString:@"douglass.experimental.vtSuperResolution"])available=DGVTSuperResolutionAvailable();
  control.enabled=available;
  control.on=available&&[NSUserDefaults.standardUserDefaults boolForKey:key];
- if(!available)cell.controlDetail.text=@"当前设备或系统不支持";
+ if(!available)cell.controlDetail.text=unavailableReason?:@"当前设备或系统不支持";
  [control addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
  cell.accessoryView=control;
  return cell;

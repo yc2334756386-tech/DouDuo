@@ -60,13 +60,23 @@ bool GroupedInk::update(const ContrastFrame &frame,MediaRect text,double overlay
     }
     return changed;
 }
-void GroupedInk::masks(std::size_t width,std::uint8_t *white,std::uint8_t *black) const noexcept {
-    if(!white||!black||!width||width>4096)return;std::fill_n(white,width*4,255);std::fill_n(black,width*4,0);
-    double left=0;
-    for(std::size_t g=0;g<groups_.size();++g){const auto &group=groups_[g];double right=double(width);
-        if(g+1<groups_.size()){const auto &last=glyphs_[group.end-1];right=(last.x+last.width+glyphs_[groups_[g+1].begin].x)/2;}
-        const auto first=static_cast<std::size_t>(std::clamp(std::round(left),0.,double(width))),end=static_cast<std::size_t>(std::clamp(std::round(right),0.,double(width)));
-        if(group.dark&&end>first){std::fill(white+first*4,white+end*4,0);std::fill(black+first*4,black+end*4,255);}left=right;
+std::vector<InkSpan> GroupedInk::spans(double width) const {
+    if(!std::isfinite(width)||width<=0)return {};
+    if(groups_.empty())return {{0,width,false}};
+    std::vector<InkSpan> spans;
+    spans.reserve(groups_.size());
+    double start=0;
+    for(std::size_t i=0;i<groups_.size()&&start<width;++i){
+        const auto &group=groups_[i];
+        double end=width;
+        if(i+1<groups_.size()){
+            const auto &last=glyphs_[group.end-1];
+            const auto &next=glyphs_[groups_[i+1].begin];
+            end=std::clamp((last.x+last.width+next.x)/2,start,width);
+        }
+        if(end>start)spans.push_back({start,end,group.dark});
+        start=end;
     }
+    return spans;
 }
 }

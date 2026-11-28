@@ -14,12 +14,13 @@ struct ContrastFrame {
     int inkFor(MediaRect region) const noexcept;
 };
 struct InkGlyph { double x=0,width=0; };
+struct InkSpan { double start=0,end=0;bool dark=false; };
 // State belongs to complete text groups, never to individual background pixels.
 class GroupedInk {
 public:
     void setGlyphs(std::vector<InkGlyph> glyphs);
     bool update(const ContrastFrame &frame,MediaRect text,double overlayWidth,double overlayHeight) noexcept;
-    void masks(std::size_t width,std::uint8_t *white,std::uint8_t *black) const noexcept;
+    std::vector<InkSpan> spans(double width) const;
 private:
     struct Group {std::size_t begin=0,end=0;bool dark=false;int pending=-1;unsigned votes=0;};
     std::vector<InkGlyph> glyphs_;
