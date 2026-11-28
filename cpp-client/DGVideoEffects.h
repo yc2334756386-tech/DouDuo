@@ -2,9 +2,12 @@
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 
-BOOL DGVTFInterpolationAvailable(void);
+BOOL DGVTFSystemInterpolationAvailable(void);
 BOOL DGVTSuperResolutionAvailable(void);
-NSString *DGVTFInterpolationUnavailableReason(void);
+BOOL DGSuperResolutionTransitionProtection(void);
+void DGPrepareVideoFrameOutput(AVPlayerItem *item);
+CVPixelBufferRef DGCopyVideoFrame(AVPlayerItem *item, CFTimeInterval hostTime, CMTime *presentationTime) CF_RETURNS_RETAINED;
+void DGReleaseVideoFrameCache(AVPlayerItem *item);
 
 @interface DGVideoEffects : NSObject
 - (void)showForPlayerLayer:(AVPlayerLayer *)layer;

@@ -60,7 +60,9 @@ static BOOL DGPrewarmAllowed=NO;
 }
 - (void)configurationReady{if(_bound||_retired||!_configurationRemaining)return;if(--_configurationRemaining==0)[self bindPreparedItem];}
 - (void)bindPreparedItem{
- if(_bound||_retired)return;_bound=YES;_configurationRemaining=0;DGSealAudioEnhancement(_item);DGSealMediaEnhancement(_item);[_player replaceCurrentItemWithPlayerItem:_item];
+ if(_bound||_retired)return;_bound=YES;_configurationRemaining=0;DGSealAudioEnhancement(_item);DGSealMediaEnhancement(_item);
+ DGPrepareVideoFrameOutput(_item);
+ [_player replaceCurrentItemWithPlayerItem:_item];
  DGDiagnostic(@"playback.pipeline.bound",[NSString stringWithFormat:@"audio=%d picture=%d ms=%.0f",_item.audioMix!=nil,_item.videoComposition!=nil,(CACurrentMediaTime()-_createdAt)*1000]);[self warm];
 }
 - (void)warm {
@@ -150,7 +152,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
  self.contentView.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;self.contentView.backgroundColor=UIColor.blackColor;_loadingSpinner=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];_loadingSpinner.color=UIColor.whiteColor;_loadingSpinner.hidesWhenStopped=YES;_ambient=[DGAmbient new];[self.contentView addSubview:_ambient];_cachedTimes=[NSMutableArray array];_frameCache=[NSCache new];_frameCache.countLimit=32;_frameCache.totalCostLimit=4*1024*1024;_rate=1;_danmakuWindow=-1;_images=[NSMutableArray array];_locked=[NSMutableArray array];_emitted=[NSMutableSet set];
  _cover=[DGImage new];_cover.contentMode=UIViewContentModeScaleAspectFit;_cover.clipsToBounds=YES;[self.contentView addSubview:_cover];_playerLayer=[AVPlayerLayer playerLayerWithPlayer:nil];_playerLayer.videoGravity=AVLayerVideoGravityResizeAspect;_playerLayer.masksToBounds=YES;[self.contentView.layer addSublayer:_playerLayer];[_playerLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionNew context:NULL];
  _photos=[UIScrollView new];_photos.pagingEnabled=YES;_photos.scrollsToTop=NO;_photos.clipsToBounds=YES;_photos.directionalLockEnabled=YES;_photos.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;_photos.alwaysBounceVertical=NO;_photos.showsHorizontalScrollIndicator=NO;_photos.delegate=self;[self.contentView addSubview:_photos];_photoBrowse=[UIImageView new];_photoBrowse.contentMode=UIViewContentModeScaleAspectFit;_photoBrowse.clipsToBounds=YES;_photoBrowse.hidden=YES;[self.contentView addSubview:_photoBrowse];_photoNavigator=[DGPhotoNavigator new];__weak DGFeedCell *photoCell=self;_photoNavigator.onThumbnailReady=^(UIImage *image){DGFeedCell *cell=photoCell;if(cell&&cell->_photoNavigator.browsing&&cell->_photoIndex>=0&&cell->_photoIndex<(NSInteger)cell->_images.count&&!cell->_images[cell->_photoIndex].image)cell->_photoBrowse.image=image;};_photoNavigator.onSelect=^(NSInteger index){DGFeedCell *self=photoCell;if(!self)return;[UIView performWithoutAnimation:^{[self->_photos.layer removeAnimationForKey:@"bounds"];[self->_photos setContentOffset:CGPointMake(index*self->_photos.bounds.size.width,0) animated:NO];[self loadPhotos];}];if(self->_photoNavigator.browsing)[self refreshPhotoBrowse];};_photoNavigator.onBrowsingChanged=^(BOOL browsing){DGFeedCell *self=photoCell;if(!self)return;if(browsing)[self refreshPhotoBrowse];self->_photoBrowse.hidden=!browsing;self->_photos.hidden=browsing||!self->_work.photo();if(!browsing)self->_photoBrowse.image=nil;[self setNeedsLayout];DGAnimate(.18,^{[self layoutIfNeeded];},nil);};[self.contentView addSubview:_photoNavigator];
- _danmaku=[DGDanmakuOverlay new];__weak DGDanmakuOverlay *contrastOverlay=_danmaku;__weak DGAmbient *contrastAmbient=_ambient;_danmaku.samplingChanged=^(BOOL enabled){[contrastAmbient adaptive:enabled];};_ambient.contrastReady=^(std::shared_ptr<const douglass::ContrastFrame> sample){[contrastOverlay contrastFrame:sample];};_danmaku.clipsToBounds=YES;_danmakuTap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(copyDanmaku:)];_danmakuTap.delegate=self;[_danmaku addGestureRecognizer:_danmakuTap];[self.contentView addSubview:_danmaku];_shade=[UIView new];_shade.userInteractionEnabled=NO;_gradient=[CAGradientLayer layer];_gradient.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.75].CGColor];[_shade.layer addSublayer:_gradient];[self.contentView addSubview:_shade];
+ _danmaku=[DGDanmakuOverlay new];__weak DGDanmakuOverlay *contrastOverlay=_danmaku;__weak DGAmbient *contrastAmbient=_ambient;_danmaku.samplingChanged=^(BOOL enabled){[contrastAmbient adaptive:enabled];};_ambient.contrastReady=^(UIImage *white,UIImage *black){[contrastOverlay whiteMask:white blackMask:black];};_danmaku.clipsToBounds=YES;_danmakuTap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(copyDanmaku:)];_danmakuTap.delegate=self;[_danmaku addGestureRecognizer:_danmakuTap];[self.contentView addSubview:_danmaku];_shade=[UIView new];_shade.userInteractionEnabled=NO;_gradient=[CAGradientLayer layer];_gradient.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.75].CGColor];[_shade.layer addSublayer:_gradient];[self.contentView addSubview:_shade];
  _author=Label(17,UIFontWeightSemibold);_author.userInteractionEnabled=NO;_following=Label(11,UIFontWeightMedium);_following.text=@"正在关注";_following.textColor=[UIColor colorWithWhite:1 alpha:.78];_following.hidden=YES;[self.contentView addSubview:_following];
  _caption=Label(14,UIFontWeightRegular);_caption.numberOfLines=3;_caption.userInteractionEnabled=YES;[_caption addGestureRecognizer:[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(copyCaption:)]];
  _expandCaption=[UIButton buttonWithType:UIButtonTypeSystem];_expandCaption.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];_expandCaption.tintColor=UIColor.whiteColor;[_expandCaption setTitle:@"展开 ﹀" forState:UIControlStateNormal];[_expandCaption addTarget:self action:@selector(expandCaption) forControlEvents:UIControlEventTouchUpInside];[self.contentView addSubview:_expandCaption];_elapsed=Label(10,UIFontWeightRegular);_totalTime=Label(10,UIFontWeightRegular);_totalTime.textAlignment=NSTextAlignmentRight;[self.contentView addSubview:_elapsed];[self.contentView addSubview:_totalTime];_metadata=Label(11,UIFontWeightRegular);_metadata.textColor=[UIColor colorWithWhite:1 alpha:.64];for(UIView *v in @[_author,_caption,_metadata])[self.contentView addSubview:v];
@@ -188,6 +190,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 
 - (void)enterBackgroundKeepingPlayback:(BOOL)keep audioOnly:(BOOL)audioOnly {
  [_videoEffects stop];
+ DGSetMetalFXPlaybackActive(_observedItem,NO);
  if(_backgroundMode)return;
  _backgroundMode=YES;DGUpdateGalleryWake();[self syncDanmakuPlayback];[_slider stopFollowing];
  [self stopWatchdog];[_ambient active:NO];[_ambient item:nil imageView:nil];
@@ -199,6 +202,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)suspendForegroundWork {
  [_videoEffects stop];
+ DGSetMetalFXPlaybackActive(_observedItem,NO);
  _appInactive=YES;DGUpdateGalleryWake();[_photoNavigator cancelBrowsing];[_slider stopFollowing];[self stopWatchdog];[self cancelLoadingIndicator];[_ambient active:NO];
  [self syncDanmakuPlayback];
 }
@@ -246,6 +250,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)detach {
  [_videoEffects stop];
+ DGSetMetalFXPlaybackActive(_observedItem,NO);
  DGUpdateGalleryWake();
  [_frameExport cancelAllCGImageGeneration];_frameExport=nil;
  [_danmaku adaptive:[NSUserDefaults.standardUserDefaults boolForKey:@"douglass.danmaku.adaptive"] playing:NO];
@@ -472,7 +477,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;
- if(inMotion){[_videoEffects suspendForPaging];[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
+ if(inMotion){[_videoEffects suspendForPaging];DGSetMetalFXPlaybackActive(_observedItem,NO);DGReleaseVideoFrameCache(_observedItem);[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
  [self syncDanmakuPlayback];
 }
 - (void)active:(BOOL)value {
@@ -487,6 +492,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
   [self displayFirstFrame];if(!_pagingMotion){[self syncVideoEffects];[self queueWatchdogAfter:3];}
  }else{
   [_videoEffects stop];
+  DGSetMetalFXPlaybackActive(_observedItem,NO);
   [_slider stopFollowing];[self stopWatchdog];[_player pause];[_musicPlayer pause];
   if(!value){[_photoNavigator cancelBrowsing];[self unlock];_boosting=NO;_speedGlass.hidden=YES;}
  }
@@ -505,8 +511,10 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)closeCommentsFromVideo{if(self.dismissCommentsAction)self.dismissCommentsAction();}
 - (void)syncVideoEffects {
  if(!_active||_paused||_backgroundMode||_appInactive||_pagingMotion||_work.photo()||_work.isLive||!_player.currentItem){
+  DGSetMetalFXPlaybackActive(_observedItem,NO);
   [_videoEffects stop];return;
  }
+ DGSetMetalFXPlaybackActive(_observedItem,YES);
  NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
  if(!_videoEffects&&([prefs boolForKey:@"douglass.experimental.frameInterpolation"]||
                      [prefs boolForKey:@"douglass.experimental.vtSuperResolution"]))_videoEffects=[DGVideoEffects new];

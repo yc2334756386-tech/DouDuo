@@ -30,38 +30,38 @@
 - (void)viewDidLoad{[super viewDidLoad];self.title=@"画面与音频实验室";self.tableView.backgroundColor=UIColor.systemGroupedBackgroundColor;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=92;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 4;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?4:section==1?4:section==2?8:1;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?5:section==1?2:section==2?8:1;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section{return @[@"画面增强 · 默认关闭",@"音频增强 · 默认关闭",@"八段均衡 · ±12 dB",@"实现与限制"][section];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return section==0?@"MetalFX 为单帧空间放大，不生成原片没有的真实细节。最高 1.5×、长边不超过 1920；高温时旁路。画面预设独立于音频。":section==1?@"首次开启调音对后续新作品生效，参数调节实时生效。自动调音缓慢分析低、中、高频能量，最多作小幅修正。处理不了的音频格式和直播 HLS 保留原声；不切换音频会话。":section==2?@"预设会覆盖八段增益，选好后可逐项调节。低延迟 IIR，无频谱可视化持续刷新。":@"AutoEq 用于生成耳机校正参数；本版没有冒用通用耳机校正。OctaEQ 仅作设计参考，不移植 VST3 或 GPL 源码。处理核心为本项目 C++，系统框架由 Objective-C++ 适配。";}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section{return section==0?@"MetalFX 为单帧空间放大，不生成原片没有的真实细节。最高 1.5×、长边不超过 1920；高温时旁路。画面预设独立于音频。":section==1?@"首次开启调音对后续新作品生效，参数调节实时生效。处理不了的音频格式和直播 HLS 保留原声；不切换音频会话。":section==2?@"预设会覆盖八段增益，选好后可逐项调节。低延迟 IIR，无频谱可视化持续刷新。":@"AutoEq 用于生成耳机校正参数；本版没有冒用通用耳机校正。OctaEQ 仅作设计参考，不移植 VST3 或 GPL 源码。处理核心为本项目 C++，系统框架由 Objective-C++ 适配。";}
 - (DGExperimentalControlCell *)base:(NSString *)title detail:(NSString *)detail{DGExperimentalControlCell *cell=[DGExperimentalControlCell new];cell.controlTitle.text=title;cell.controlDetail.text=detail;cell.controlDetail.hidden=!detail.length;return cell;}
 - (UITableViewCell *)toggle:(NSString *)title key:(NSString *)key detail:(NSString *)detail{
  DGExperimentalControlCell *cell=[self base:title detail:detail];
  UISwitch *control=[UISwitch new];control.accessibilityIdentifier=key;
  BOOL available=YES;
- NSString *unavailableReason=nil;
  if([key isEqualToString:@"douglass.experimental.metalfx"])available=DGMetalFXSpatialAvailable();
- if([key isEqualToString:@"douglass.experimental.frameInterpolation"]){
-  unavailableReason=DGVTFInterpolationUnavailableReason();
-  available=unavailableReason==nil;
- }
  if([key isEqualToString:@"douglass.experimental.vtSuperResolution"])available=DGVTSuperResolutionAvailable();
  control.enabled=available;
- control.on=available&&[NSUserDefaults.standardUserDefaults boolForKey:key];
- if(!available)cell.controlDetail.text=unavailableReason?:@"当前设备或系统不支持";
+ NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
+ BOOL protection=[key isEqualToString:@"douglass.experimental.transitionProtection"];
+ control.on=available&&(protection?DGSuperResolutionTransitionProtection():[prefs boolForKey:key]);
+ if(!available)cell.controlDetail.text=@"当前设备或系统不支持";
  [control addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
  cell.accessoryView=control;
  return cell;
 }
 - (UITableViewCell *)segments:(NSString *)title key:(NSString *)key items:(NSArray *)items{DGExperimentalControlCell *cell=[self base:title detail:nil];UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:items];control.apportionsSegmentWidthsByContent=YES;control.accessibilityIdentifier=key;control.selectedSegmentIndex=MIN((NSInteger)items.count-1,MAX(0,[NSUserDefaults.standardUserDefaults integerForKey:key]));[control addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];[cell.controlStack addArrangedSubview:control];[control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;return cell;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path{
- if(path.section==0){if(path.row==0)return [self toggle:@"MetalFX 空间超采样" key:@"douglass.experimental.metalfx" detail:@"仅处理画面，保持原比例与原视频时间线"];if(path.row==1){DGExperimentalControlCell *cell=(DGExperimentalControlCell *)[self segments:@"画面预设" key:@"douglass.experimental.picturePreset" items:@[@"原始",@"自然",@"柔和",@"鲜明",@"原画增强"]];cell.controlDetail.text=@"原画增强：提高亮度细节的质感与清晰度，保留原有色彩";cell.controlDetail.hidden=NO;return cell;}if(path.row==2)return [self toggle:@"低延迟插帧" key:@"douglass.experimental.frameInterpolation" detail:@"在相邻原帧之间生成一帧，适用于支持的低帧率视频"];
-  return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];}
+ if(path.section==0){if(path.row==0)return [self toggle:@"MetalFX 空间超采样" key:@"douglass.experimental.metalfx" detail:@"仅处理画面，保持原比例与原视频时间线"];if(path.row==1){DGExperimentalControlCell *cell=(DGExperimentalControlCell *)[self segments:@"画面预设" key:@"douglass.experimental.picturePreset" items:@[@"原始",@"自然",@"柔和",@"鲜明",@"原画增强"]];cell.controlDetail.text=@"原画增强：提高亮度细节的质感与清晰度，保留原有色彩";cell.controlDetail.hidden=NO;return cell;}
+  if(path.row==2)return [self toggle:@"低延迟插帧" key:@"douglass.experimental.frameInterpolation" detail:DGVTFSystemInterpolationAvailable()?@"系统插帧优先，兼容模式可生成混合中间帧":@"兼容模式，在相邻原帧间生成混合中间帧"];
+  if(path.row==3)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
+  return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"切片时释放增强资源，画面稳定后再启动增强"];
+ }
 
- if(path.section==1){if(path.row==0)return [self toggle:@"启用音频增强" key:@"douglass.experimental.audio" detail:@"八段 C++ IIR，参数平滑与峰值保护"];if(path.row==1)return [self toggle:@"自动调音" key:@"douglass.experimental.adaptiveAudio" detail:@"依照音频频段能量缓慢、小幅调整"];if(path.row==2)return [self segments:@"自动听感风格" key:@"douglass.experimental.audioStyle" items:@[@"均衡",@"人声",@"低音",@"柔和"]];return [self segments:@"均衡预设" key:@"douglass.experimental.audioPreset" items:@[@"平直",@"人声",@"低音",@"柔和"]];}
+ if(path.section==1){if(path.row==0)return [self toggle:@"启用音频增强" key:@"douglass.experimental.audio" detail:@"八段 C++ IIR，参数平滑与峰值保护"];return [self segments:@"均衡预设" key:@"douglass.experimental.audioPreset" items:@[@"平直",@"人声",@"低音",@"柔和"]];}
  if(path.section==2){NSArray *names=@[@"60 Hz",@"150 Hz",@"400 Hz",@"1 kHz",@"2.4 kHz",@"5 kHz",@"9 kHz",@"14 kHz"];NSString *key=[NSString stringWithFormat:@"douglass.experimental.eq.%ld",(long)path.row];float value=[NSUserDefaults.standardUserDefaults floatForKey:key];DGExperimentalControlCell *cell=[self base:[NSString stringWithFormat:@"%@ · %+.1f dB",names[path.row],value] detail:nil];UISlider *slider=[UISlider new];slider.minimumValue=-12;slider.maximumValue=12;slider.value=value;slider.tag=path.row;slider.accessibilityIdentifier=key;[slider addTarget:self action:@selector(gainChanged:) forControlEvents:UIControlEventValueChanged];[cell.controlStack addArrangedSubview:slider];[slider.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;return cell;}
  return [self base:@"系统能力检测" detail:DGMediaEnhancementStatus()];
 }
-- (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.frameInterpolation"]){
+- (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.frameInterpolation"]||[key isEqualToString:@"douglass.experimental.transitionProtection"]){
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];return;
 }
 if([key isEqualToString:@"douglass.experimental.metalfx"]||[key isEqualToString:@"douglass.experimental.vtSuperResolution"]){

@@ -27,7 +27,7 @@ BOOL DGMetalFXSpatialAvailable(void){return DGSupports(NSClassFromString(@"MTLFX
 NSString *DGMediaEnhancementStatus(void){
  return [NSString stringWithFormat:@"MetalFX 空间放大 %@ · VideoToolbox 插帧 %@ · 低延迟超分 %@",
          DGMetalFXSpatialAvailable()?@"支持":@"不支持",
-         DGVTFInterpolationAvailable()?@"支持":@"不支持",
+         DGVTFSystemInterpolationAvailable()?@"系统支持":@"兼容模式",
          DGVTSuperResolutionAvailable()?@"支持":@"不支持"];
 }
 void DGMediaEnhancementApply(void){
@@ -36,35 +36,72 @@ void DGMediaEnhancementApply(void){
 }
 @interface DGSpatialSession:NSObject
 @property(nonatomic) double scale;
+- (void)setPlaybackActive:(BOOL)active;
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial;
 @end
-@implementation DGSpatialSession{ id<MTLDevice> _device;id<MTLCommandQueue> _queue;CIContext *_context;id<MTLTexture> _input,_output;std::unique_ptr<douglass::SpatialUpscaler> _scaler;std::atomic_bool _busy;}
+@implementation DGSpatialSession{
+ id<MTLDevice> _device;id<MTLCommandQueue> _queue;CIContext *_context;
+ id<MTLTexture> _input;std::unique_ptr<douglass::SpatialUpscaler> _scaler;
+ std::atomic_bool _busy;
+ std::atomic<double> _activeAfter;
+}
+- (void)releaseGPUResources {
+ _scaler.reset();_input=nil;_context=nil;_queue=nil;_device=nil;
+}
+- (void)setPlaybackActive:(BOOL)active {
+ const double previous=_activeAfter.load(std::memory_order_acquire);
+ if(active){
+  if(previous==0)_activeAfter.store(CACurrentMediaTime()+(DGSuperResolutionTransitionProtection()?.55:.20),std::memory_order_release);
+  return;
+ }
+ _activeAfter.store(0,std::memory_order_release);
+ if(previous!=0&&!_busy.exchange(true,std::memory_order_acq_rel)){
+  [self releaseGPUResources];
+  _busy.store(false,std::memory_order_release);
+ }
+}
+- (void)finishGPUWork {
+ if(_activeAfter.load(std::memory_order_acquire)==0)[self releaseGPUResources];
+ _busy.store(false,std::memory_order_release);
+ // Handle deactivation between the initial check and relinquishing the GPU.
+ if(_activeAfter.load(std::memory_order_acquire)==0&&!_busy.exchange(true,std::memory_order_acq_rel)){
+  [self releaseGPUResources];
+  _busy.store(false,std::memory_order_release);
+ }
+}
 - (void)filter:(AVAsynchronousCIImageFilteringRequest *)request preset:(NSInteger)preset spatial:(BOOL)spatial{
  CIImage *source=request.sourceImage;CGRect extent=source.extent;CIImage *image=source;double factor=MAX(1,self.scale);
- if(preset)image=DGFilterPicture(image,(unsigned)preset,!DGAnimationProcessingDeferred());
+ double activeAfter=_activeAfter.load(std::memory_order_acquire);
+ BOOL protectedFrame=activeAfter==0||CACurrentMediaTime()<activeAfter||DGAnimationProcessingDeferred();
+ if(preset&&!protectedFrame)image=DGFilterPicture(image,(unsigned)preset,YES);
  CIImage *fallback=[image imageByApplyingTransform:CGAffineTransformMakeScale(factor,factor)];
- if(!spatial||factor<=1||extent.size.width<1||extent.size.height<1||DGAnimationProcessingDeferred()||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
+ if(!spatial||factor<=1||extent.size.width<1||extent.size.height<1||protectedFrame||NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious||_busy.exchange(true)){[request finishWithImage:fallback context:nil];return;}
  @try{
+  if(_activeAfter.load(std::memory_order_acquire)!=activeAfter||DGAnimationProcessingDeferred()){
+   [self finishGPUWork];[request finishWithImage:fallback context:nil];return;
+  }
   // Preparing adjacent URLs must not construct another GPU pipeline on the UI
   // thread. Allocate only when a real, non-deferred frame needs enhancement.
   if(!_context){_device=MTLCreateSystemDefaultDevice();_queue=[_device newCommandQueue];if(_device){_context=[CIContext contextWithMTLDevice:_device options:@{kCIContextCacheIntermediates:@NO}];_scaler=std::make_unique<douglass::SpatialUpscaler>((__bridge void *)_device);}}
-  if(!_context||!_queue||!_scaler){_busy=false;[request finishWithImage:fallback context:nil];return;}
+  if(!_context||!_queue||!_scaler){[self finishGPUWork];[request finishWithImage:fallback context:nil];return;}
   NSUInteger w=(NSUInteger)extent.size.width,h=(NSUInteger)extent.size.height;NSUInteger ow=(NSUInteger)ceil(w*factor),oh=(NSUInteger)ceil(h*factor);
   if(!_input||_input.width!=w||_input.height!=h){MTLTextureDescriptor *in=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:w height:h mipmapped:NO];in.usage=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;in.storageMode=MTLStorageModePrivate;_input=[_device newTextureWithDescriptor:in];}
   // CI retains the finished output beyond the GPU callback. Give each published
   // image ownership of its texture instead of overwriting a previous frame.
-  MTLTextureDescriptor *out=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:ow height:oh mipmapped:NO];out.usage=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;out.storageMode=MTLStorageModePrivate;_output=[_device newTextureWithDescriptor:out];
-  id<MTLCommandBuffer> command=[_queue commandBuffer];if(!_input||!_output||!command){_busy=false;[request finishWithImage:fallback context:nil];return;}
+  MTLTextureDescriptor *out=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:ow height:oh mipmapped:NO];out.usage=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;out.storageMode=MTLStorageModePrivate;id<MTLTexture> output=[_device newTextureWithDescriptor:out];
+  id<MTLCommandBuffer> command=[_queue commandBuffer];if(!_input||!output||!command){[self finishGPUWork];[request finishWithImage:fallback context:nil];return;}
   CIImage *normalized=[image imageByApplyingTransform:CGAffineTransformMakeTranslation(-extent.origin.x,-extent.origin.y)];CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);[_context render:normalized toMTLTexture:_input commandBuffer:command bounds:CGRectMake(0,0,w,h) colorSpace:space];CGColorSpaceRelease(space);
-  if(!_scaler->encode((__bridge void *)command,(__bridge void *)_input,(__bridge void *)_output)){_busy=false;[request finishWithImage:fallback context:nil];return;}
-  id<MTLTexture> output=_output;CIContext *context=_context;__weak DGSpatialSession *weak=self;
+  if(!_scaler->encode((__bridge void *)command,(__bridge void *)_input,(__bridge void *)output)){[self finishGPUWork];[request finishWithImage:fallback context:nil];return;}
+  CIContext *context=_context;__weak DGSpatialSession *weak=self;
   [command addCompletedHandler:^(id<MTLCommandBuffer> buffer){@autoreleasepool{DGSpatialSession *session=weak;CGColorSpaceRef color=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);CIImage *result=buffer.status==MTLCommandBufferStatusCompleted?[CIImage imageWithMTLTexture:output options:@{kCIImageColorSpace:(__bridge id)color}]:nil;CGColorSpaceRelease(color);
-    if(result)result=[result imageByApplyingTransform:CGAffineTransformMakeTranslation(extent.origin.x*factor,extent.origin.y*factor)];[request finishWithImage:result?:fallback context:context];if(session)session->_busy=false;}}];[command commit];
- }@catch(NSException *error){_busy=false;[request finishWithImage:fallback context:nil];}
+    if(result)result=[result imageByApplyingTransform:CGAffineTransformMakeTranslation(extent.origin.x*factor,extent.origin.y*factor)];[request finishWithImage:result?:fallback context:context];[session finishGPUWork];}}];[command commit];
+ }@catch(NSException *error){[self finishGPUWork];[request finishWithImage:fallback context:nil];}
 }
 @end
 @interface DGPicturePreparation:NSObject
 @property(nonatomic) BOOL sealed,completed;
+@property(nonatomic) BOOL playbackActive;
+@property(nonatomic,strong) DGSpatialSession *session;
 @property(nonatomic,copy) dispatch_block_t completion;
 - (void)finish;
 @end
@@ -74,9 +111,13 @@ void DGMediaEnhancementApply(void){
 static const void *DGPicturePreparationKey=&DGPicturePreparationKey;
 void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
  if(!item){if(completion)completion();return;}NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;BOOL spatial=[prefs boolForKey:@"douglass.experimental.metalfx"]&&DGMetalFXSpatialAvailable();NSInteger preset=[prefs integerForKey:@"douglass.experimental.picturePreset"];
- DGPicturePreparation *stage=[DGPicturePreparation new];stage.completion=completion;objc_setAssociatedObject(item,DGPicturePreparationKey,stage,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+ DGPicturePreparation *previous=objc_getAssociatedObject(item,DGPicturePreparationKey);
+ DGPicturePreparation *stage=[DGPicturePreparation new];stage.completion=completion;stage.playbackActive=previous.playbackActive;
+ [previous.session setPlaybackActive:NO];
+ objc_setAssociatedObject(item,DGPicturePreparationKey,stage,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
  if(!spatial&&!preset){item.videoComposition=nil;[stage finish];return;}
- DGSpatialSession *session=[DGSpatialSession new];__weak AVPlayerItem *weak=item;AVAsset *asset=item.asset;
+ DGSpatialSession *session=[DGSpatialSession new];stage.session=session;[session setPlaybackActive:stage.playbackActive];
+ __weak AVPlayerItem *weak=item;AVAsset *asset=item.asset;
  // Reading an unloaded AVAsset property synchronously can hold up player
  // construction. Resolve it asynchronously and keep playback independent.
  [asset loadValuesAsynchronouslyForKeys:@[@"hasProtectedContent"] completionHandler:^{
@@ -86,6 +127,12 @@ void DGPrepareMediaEnhancement(AVPlayerItem *item,dispatch_block_t completion){
 }
 void DGConfigureMediaEnhancement(AVPlayerItem *item){DGPrepareMediaEnhancement(item,nil);}
 void DGSealMediaEnhancement(AVPlayerItem *item){DGPicturePreparation *stage=objc_getAssociatedObject(item,DGPicturePreparationKey);if(!stage)return;if(!stage.completed)DGDiagnostic(@"video.enhancement.bypass",@"reason=playback_started_before_optional_processing_ready");stage.sealed=YES;[stage finish];}
+void DGSetMetalFXPlaybackActive(AVPlayerItem *item,BOOL active){
+ if(!item)return;
+ DGPicturePreparation *stage=objc_getAssociatedObject(item,DGPicturePreparationKey);
+ stage.playbackActive=active;
+ [stage.session setPlaybackActive:active];
+}
 UIImage *DGApplyPicturePreset(UIImage *image,unsigned preset){
  if(!image||!image.CGImage||!preset||image.images.count)return image;
  static CIContext *context;static dispatch_once_t once;dispatch_once(&once,^{context=[CIContext contextWithOptions:@{kCIContextCacheIntermediates:@NO}];});

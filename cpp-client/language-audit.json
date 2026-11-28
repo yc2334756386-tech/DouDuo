@@ -1,5 +1,5 @@
 {
-  "version": "0.20.23",
+  "version": "0.20.24",
   "date": "2026-11-28",
   "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
   "compiler": "Apple clang++",
@@ -43,7 +43,6 @@
     "portrait fill eligibility (crop limit reverted at user request)",
     "animation lease deadlines, cancellation expiry and deferred-work eligibility",
     "comment ordering",
-    "allocation-free eight-band biquad audio filtering, small adaptive spectral correction and peak protection",
     "MetalFX spatial scaler ownership/configuration/command encoding via Apple metal-cpp",
     "independent picture preset parameters, including original-color luminance texture/clarity enhancement",
     "comment/reply reading anchor identity and offset restoration",
@@ -53,10 +52,12 @@
     "following state and author matching",
     "statistics parsing and validation",
     "gallery scrubbing position and bounds",
-    "linear sRGB luminance, per-complete-character coverage and two/three-character ink groups, consecutive-sample hysteresis and group-constant one-dimensional masks",
     "gallery gesture state, incremental dragging, bounded edge-hold advancement, fixed center rail and spaced thumbnail geometry",
     "search first appearance, input/results state and back routing",
-    "gallery display-awake eligibility"
+    "gallery display-awake eligibility",
+    "manual eight-band biquad filtering and peak protection",
+    "linear sRGB luminance and spatially feathered complementary masks",
+    "ARM NEON NV12 midpoint blending with scene-cut rejection"
   ],
   "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
   "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",
