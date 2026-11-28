@@ -37,6 +37,7 @@ work.authorID=String(value[@"authorID"]);work.authorUID=String(value[@"authorUID
 work.followStatus=Number(value[@"authorFollowStatus"]);
 work.followStatusKnown=[value[@"authorFollowStatusKnown"]boolValue];
 work.musicID=String(value[@"musicID"]);work.musicTitle=String(value[@"musicTitle"]);work.musicAuthor=String(value[@"musicAuthor"]);
+work.musicCover=String(value[@"musicCover"]);
 work.location=String(value[@"location"]);work.locationKind=String(value[@"locationKind"]);
 work.publishedAt=Number(value[@"publishedAt"]);work.collects=Number(value[@"collects"]);
 work.liked=[value[@"liked"] boolValue];work.collected=[value[@"collected"] boolValue];
@@ -91,6 +92,7 @@ static inline AVURLAsset *Asset(NSString *url) {
 @property(nonatomic) NSUInteger maximumPixelSize;
 @property(nonatomic) BOOL showsLoadingIndicator;
 @property(nonatomic) BOOL previewLoading;
+@property(nonatomic,strong) UIImage *placeholderImage;
 - (void)remote:(NSString *)url;
 + (void)purgeCache;
 @end

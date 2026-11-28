@@ -336,7 +336,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
   NSDictionary *item=Array(result[@"items"]).firstObject;NSString *musicID=DGValue(item[@"musicID"]);
   if(!musicID.length){if(DGValue(self.music[@"id"]).length){[self loadMusicDetail];[self loadPage];return;}self->_more=NO;self->_empty.text=error?:@"这条作品未提供可识别的原声标识";[self->_footer setTitle:@"" forState:UIControlStateNormal];return;}
   NSMutableDictionary *music=[self.music mutableCopy];BOOL changed=![musicID isEqualToString:DGValue(music[@"id"])];
-  music[@"id"]=musicID;music[@"contextWork"]=item;music[@"title"]=item[@"musicTitle"]?:@"作品原声";music[@"author"]=item[@"musicAuthor"]?:@"";music[@"url"]=item[@"music"]?:@"";music[@"shareURL"]=item[@"musicShareURL"]?:@"";music[@"collected"]=item[@"musicCollected"]?:@NO;
+  music[@"id"]=musicID;music[@"contextWork"]=item;music[@"cover"]=DGMusicArtworkForRecord(item);music[@"title"]=item[@"musicTitle"]?:@"作品原声";music[@"author"]=item[@"musicAuthor"]?:@"";music[@"url"]=item[@"music"]?:@"";music[@"shareURL"]=item[@"musicShareURL"]?:@"";music[@"collected"]=item[@"musicCollected"]?:@NO;
   self.music=music;self->_searchPage=nil;if(changed){[self->_records removeAllObjects];[self->_ids removeAllObjects];self->_cursor=@"0";self->_more=YES;[self->_table reloadData];}
   DGDiagnostic(@"music.context_checked",[NSString stringWithFormat:@"work_id=%@ music_id=%@ id_changed=%d",work,musicID,changed]);
   [self seedKnownMusicWorks];[self updateMusicHeader];[self loadMusicDetail];[self loadPage];
@@ -346,7 +346,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     NSString *identifier=DGValue(self.music[@"id"]);if(!identifier.length)return;NSUInteger generation=_generation;__weak DGExplore *weakSelf=self;
     [_bridge request:@"musicDetail" parameters:@{@"id":identifier} completion:^(NSDictionary *result,NSString *error){DGExplore *self=weakSelf;if(!self)return;
         if(generation!=self->_generation||![identifier isEqualToString:DGValue(self.music[@"id"])])return;
-        if(!error){NSMutableDictionary *music=[self.music mutableCopy]?:[NSMutableDictionary dictionary];for(NSString *key in result)if(![key isEqualToString:@"id"]&&DGValue(result[key]).length)music[key]=result[key];self.music=music;[self updateMusicHeader];
+        if(!error){NSMutableDictionary *music=[self.music mutableCopy]?:[NSMutableDictionary dictionary];for(NSString *key in result)if(![key isEqualToString:@"id"]&&DGValue(result[key]).length)music[key]=result[key];self.music=music;[self updateMusicHeader];NSString *cover=DGValue(result[@"cover"]);if(cover.length){DGRememberMusicArtwork(identifier,cover);[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicArtworkChanged" object:nil userInfo:@{@"id":identifier,@"cover":cover}];}
             NSString *source=DGValue(result[@"sourceWorkID"]);if(!source.length)return;
             [self->_bridge request:@"detail" parameters:@{@"id":source} completion:^(NSDictionary *origin,NSString *failure){
                 DGExplore *self=weakSelf;if(!self||failure||generation!=self->_generation||![identifier isEqualToString:DGValue(self.music[@"id"])])return;

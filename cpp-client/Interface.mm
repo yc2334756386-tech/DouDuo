@@ -7,6 +7,7 @@
 #import "DGAnimation.h"
 #import "DGNavigationResume.h"
 #import "DGWorkDetails.h"
+#import "DGMusicIndex.h"
 #include "ChannelState.hpp"
 static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &sec,const std::string &uid,long long status){
  if(!douglass::matchesAuthor(String(record[@"authorID"]),String(record[@"authorUID"]),sec,uid))return record;
@@ -62,6 +63,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     NSMutableSet<NSString *> *_detailRequested;
     NSMutableDictionary<NSString *,NSDictionary *> *_resolvedDetails;
     NSMutableDictionary<NSString *,NSDictionary *> *_channelStates;douglass::ChannelSessions _channelSessions;
+    NSMutableSet<NSString *> *_musicCoverRequests;BOOL _musicCoverPending;
 }
 - (instancetype)init {if((self=[super init])){_ownsBridge=YES;_operation=@"feed";_records=[NSMutableArray array];_cursor=@"0";}return self;}
 - (instancetype)initWithRecords:(NSArray *)records selected:(NSInteger)selected bridge:(DGBridge *)bridge {
@@ -106,6 +108,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background) name:UIApplicationDidEnterBackgroundNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foreground) name:UIApplicationDidBecomeActiveNotification object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGResumePlayback" object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(workStateChanged:) name:@"DouGlassWorkStateChanged" object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(relationshipChanged:) name:@"DGRelationshipChanged" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(musicArtworkChanged:) name:@"DGMusicArtworkChanged" object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playbackPreferencesChanged) name:@"DGPlaybackQualityChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(filtersChanged) name:@"DGFiltersChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(accountChanged) name:@"DGAccountChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resume) name:@"DGMusicStateChanged" object:nil];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(verificationCompleted:) name:@"DGVerificationCompleted" object:nil];if(_staticFeed)[self updateEmpty:nil];else{[self restoreInterruptedPlayback];[self startWithCachedRecommendation];[self loadFeed:YES];[self loadProfile];}
 }
 - (void)dealloc{[_pagingClock invalidate];[NSNotificationCenter.defaultCenter removeObserver:self];}
@@ -240,6 +243,23 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
  for(NSUInteger i=0;i<_records.count;i++)_records[i]=DGWithRelationship(_records[i],sec,uid,status);
  for(NSString *channel in _channelStates.allKeys){NSDictionary *state=_channelStates[channel];NSMutableArray *records=[Array(state[@"records"])mutableCopy];for(NSUInteger i=0;i<records.count;i++)records[i]=DGWithRelationship(records[i],sec,uid,status);NSMutableDictionary *updated=[state mutableCopy];updated[@"records"]=records;_channelStates[channel]=updated;}
  for(DGFeedCell *cell in _collection.visibleCells){NSIndexPath *path=[_collection indexPathForCell:cell];if(path&&path.item<(NSInteger)_feed.works.size())[cell display:_feed.works[path.item]];}
+}
+- (void)musicArtworkChanged:(NSNotification *)notification{
+ NSString *identifier=Text(String(notification.userInfo[@"id"])),*cover=Text(String(notification.userInfo[@"cover"]));if(!identifier.length||!cover.length)return;DGRememberMusicArtwork(identifier,cover);NSMutableArray *changed=[NSMutableArray array];
+ for(NSUInteger i=0;i<_feed.works.size()&&i<_records.count;i++){Work &work=_feed.works[i];if(work.musicID!=String(identifier)||work.musicCover==String(cover))continue;work.musicCover=String(cover);NSMutableDictionary *record=[_records[i]mutableCopy];record[@"musicCover"]=cover;_records[i]=record;[changed addObject:record];DGFeedCell *cell=(DGFeedCell *)[_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:i inSection:0]];if(cell)[cell display:work];}
+ for(NSString *channel in _channelStates.allKeys){NSDictionary *state=_channelStates[channel];NSMutableArray *records=[Array(state[@"records"])mutableCopy];BOOL updated=NO;for(NSUInteger i=0;i<records.count;i++){if(String(records[i][@"musicID"])!=String(identifier))continue;NSMutableDictionary *record=[records[i]mutableCopy];record[@"musicCover"]=cover;records[i]=record;[changed addObject:record];updated=YES;}if(updated){NSMutableDictionary *next=[state mutableCopy];next[@"records"]=records;_channelStates[channel]=next;}}
+ DGIndexMusicWorks(changed);
+}
+- (void)requestCurrentMusicArtwork{
+ if(_musicCoverPending||!_foreground||_inactive||!_visible||_pagingMotion||_showingMessages||_current<0||_current>=(NSInteger)_feed.works.size())return;
+ const Work &work=_feed.works[_current];if(!work.musicCover.empty()||work.musicID.empty())return;DGFeedCell *cell=(DGFeedCell *)[_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:_current inSection:0]];if(!work.photo()&&![cell hasRenderedMedia])return;
+ NSString *identifier=Text(work.musicID),*cached=DGKnownMusicArtwork(identifier);if(cached.length){[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicArtworkChanged" object:nil userInfo:@{@"id":identifier,@"cover":cached}];return;}
+ if(!_musicCoverRequests)_musicCoverRequests=[NSMutableSet set];if([_musicCoverRequests containsObject:identifier])return;if(_musicCoverRequests.count>=240)[_musicCoverRequests removeAllObjects];[_musicCoverRequests addObject:identifier];_musicCoverPending=YES;NSString *scope=DGCurrentFeedScope();__weak DGFeed *weak=self;
+ [_bridge request:@"musicDetail" parameters:@{@"id":identifier} completion:^(NSDictionary *result,NSString *error){DGFeed *self=weak;if(!self)return;self->_musicCoverPending=NO;NSString *cover=Text(String(result[@"cover"]));
+  if(!error&&cover.length&&[scope isEqualToString:DGCurrentFeedScope()]){DGRememberMusicArtwork(identifier,cover);[NSNotificationCenter.defaultCenter postNotificationName:@"DGMusicArtworkChanged" object:nil userInfo:@{@"id":identifier,@"cover":cover}];}
+  else dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{DGFeed *self=weak;if(self)[self->_musicCoverRequests removeObject:identifier];});
+  [self requestCurrentMusicArtwork];
+ }];
 }
 - (void)close{if(self.navigationController&&self.navigationController.viewControllers.firstObject!=self){[self.navigationController popViewControllerAnimated:YES];return;}[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (void)updateEmpty:(NSString *)message {[self syncCleanScreen];_empty.hidden=_showingMessages||!_feed.works.empty();_state.text=_loading?@"让喜欢的内容，流进来":@"暂时没有新内容";_subtitle.text=message?:@"视频与图文推荐 · 登录后使用你的抖音账号";_state.hidden=_loading;_subtitle.hidden=_loading;_retry.hidden=_loading;_login.hidden=_loading;if(_loading)[_spinner startAnimating];else[_spinner stopAnimating];}
@@ -392,7 +412,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
   DGRecordViewed(current);[self warmAfterSettling];
  };if(_ownsBridge)cell.checkpointAction=^{DGFeed *self=weakSelf;if(self&&!self->_inactive&&CACurrentMediaTime()-self->_checkpointAttemptAt>=15)[self savePlaybackCheckpoint];};
  cell.advanceAction=^BOOL{return [weakSelf advanceWork];};cell.commentsAction=^{[weakSelf showComments:workID];};cell.profileAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeProfile(self->_bridge,sec,name,workID)];};
-    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":record[@"avatar"]?:@"",@"collected":record[@"musicCollected"]?:@NO,@"shareURL":record[@"musicShareURL"]?:@"",@"contextWork":record})];};
+    cell.musicAction=^{DGFeed *self=weakSelf;if(self)[self presentPage:DGMakeMusic(self->_bridge,@{@"id":record[@"musicID"]?:@"",@"url":record[@"music"]?:@"",@"title":record[@"musicTitle"]?:@"作品原声",@"author":record[@"musicAuthor"]?:@"",@"cover":DGMusicArtworkForRecord(record),@"collected":record[@"musicCollected"]?:@NO,@"shareURL":record[@"musicShareURL"]?:@"",@"contextWork":record})];};
 }
 - (void)resolveBriefWorkAtIndex:(NSInteger)index{
  if(index<0||index>=(NSInteger)_records.count)return;NSDictionary *record=_records[index];if(!DGWorkNeedsDetails(record))return;
@@ -501,7 +521,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
   DGFeedCell *active=(DGFeedCell *)[self->_collection cellForItemAtIndexPath:[NSIndexPath indexPathForItem:self->_current inSection:0]];
   BOOL photo=self->_current>=0&&self->_current<(NSInteger)self->_feed.works.size()&&self->_feed.works[self->_current].photo();
   if(!photo&&![active hasRenderedMedia])return;
-  [self resolveBriefWorkAtIndex:self->_current+1];
+  [self requestCurrentMusicArtwork];[self resolveBriefWorkAtIndex:self->_current+1];
   if(self->_current<(NSInteger)self->_feed.works.size())DGWarmWorks(self->_feed.works,self->_current);
   BOOL recommends=!self->_staticFeed&&[self->_operation isEqualToString:@"feed"];
   if(recommends){
@@ -570,7 +590,7 @@ static NSDictionary *DGWithRelationship(NSDictionary *record,const std::string &
     [menu addAction:[UIAlertAction actionWithTitle:@"登录 / 安全验证" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openLogin];}]];[menu addAction:[UIAlertAction actionWithTitle:@"退出当前账号" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self->_bridge signOut:^{[self sessionChanged:NO];}];}]];[menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];menu.popoverPresentationController.sourceView=_settings;menu.popoverPresentationController.sourceRect=_settings.bounds;[self presentViewController:menu animated:YES completion:nil];
 }
 - (void)openLogin{if(self.presentedViewController)return;for(DGFeedCell *cell in _collection.visibleCells)[cell active:NO];DGLogin *login=[DGLogin new];__weak DGFeed *weakSelf=self;login.finished=^{[weakSelf sessionChanged:YES];};UINavigationController *nav=[[DGNavigationController alloc] initWithRootViewController:login];DGConfigurePageTransition(nav);[self presentViewController:nav animated:YES completion:nil];}
-- (void)sessionChanged:(BOOL)reload{[_channelStates removeAllObjects];_channelSessions.clear();++_accountGeneration;_profileLoading=NO;_profileFailures=0;_profileCheckedAt=0;DGClearNavigationResume();[_detailRequested removeAllObjects];[_resolvedDetails removeAllObjects];_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
+- (void)sessionChanged:(BOOL)reload{[_musicCoverRequests removeAllObjects];[_channelStates removeAllObjects];_channelSessions.clear();++_accountGeneration;_profileLoading=NO;_profileFailures=0;_profileCheckedAt=0;DGClearNavigationResume();[_detailRequested removeAllObjects];[_resolvedDetails removeAllObjects];_restoredWork=nil;_checkpointWork=nil;DGPlaybackResumeClearCheckpoint();_beforeProfileViews.clear();[self cancelRecommendationFeedback];[self finishPaging];_cachedBootstrap=NO;DGCacheSetIdle(NO);_retainedComments=nil;_retainedCommentWorkID=nil;++_generation;[_locationRequested removeAllObjects];_loading=NO;_failed=NO;_profile=nil;[self closeComments];DGClearPlayers();DGMusicStop();DGResetInteractions();DGResetMusicPages();[self hideMessages];_messageChannel=nil;_messageScope=nil;_feed.clear();[_records removeAllObjects];[_collection reloadData];_refreshIndex=1;_cursor=@"0";_emptyPages=0;_current=0;if(reload)[_bridge reload];if(!reload)DGSeenScope(@"");[self loadFeed:YES];[self loadProfile];}
 @end
 UIViewController *DGMakeFeedController(void){return [DGFeed new];}
 UIViewController *DGMakeWorkPlayer(NSArray<NSDictionary *> *works,NSInteger selected,DGBridge *bridge){return [[DGFeed alloc] initWithRecords:works selected:selected bridge:bridge];}

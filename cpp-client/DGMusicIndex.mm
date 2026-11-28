@@ -6,13 +6,16 @@ constexpr NSUInteger Limit=240;
 NSString *IndexedScope;
 NSMutableArray<NSDictionary *> *Rows;
 NSMutableDictionary<NSString *,NSDictionary *> *ByWork;
+NSMutableDictionary<NSString *,NSString *> *Covers;
+NSString *ArtworkScope;
+void PrepareArtwork(){NSString *scope=DGCurrentFeedScope();if(![ArtworkScope isEqualToString:scope]){ArtworkScope=scope.copy;Covers=[NSMutableDictionary dictionary];}}
 NSURL *IndexFile(){return [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"KnownOriginalSoundWorks.json"];}
 dispatch_queue_t IndexIO(){static dispatch_queue_t queue;static dispatch_once_t once;dispatch_once(&once,^{queue=dispatch_queue_create("com.douglass.music-index",DISPATCH_QUEUE_SERIAL);});return queue;}
 BOOL Pending=NO;NSUInteger Generation=0;
 void Load(){
  NSString *scope=DGCurrentFeedScope();if([IndexedScope isEqualToString:scope])return;
  BOOL first=!IndexedScope;IndexedScope=scope.copy;++Generation;Pending=NO;
- Rows=[NSMutableArray array];ByWork=[NSMutableDictionary dictionary];
+ Rows=[NSMutableArray array];ByWork=[NSMutableDictionary dictionary];PrepareArtwork();
  NSData *data=first?[NSData dataWithContentsOfURL:IndexFile()]:nil;
  id saved=data.length&&data.length<=2*1024*1024?[NSJSONSerialization JSONObjectWithData:data options:0 error:nil]:nil;
  if(!first)dispatch_async(IndexIO(),^{[NSFileManager.defaultManager removeItemAtURL:IndexFile() error:nil];});
@@ -22,7 +25,7 @@ void Load(){
   if(![entry isKindOfClass:NSDictionary.class]||now-[entry[@"at"]doubleValue]>7200||now<[entry[@"at"]doubleValue])continue;
   NSDictionary *work=entry[@"work"];if(![work isKindOfClass:NSDictionary.class])continue;
   NSString *key=Text(String(work[@"id"]));if(!key.length||ByWork[key])continue;
-  [Rows addObject:entry];ByWork[key]=entry;if(Rows.count==Limit)break;
+  [Rows addObject:entry];ByWork[key]=entry;NSString *music=Text(String(work[@"musicID"])),*cover=Text(String(work[@"musicCover"]));DGRememberMusicArtwork(music,cover);if(Rows.count==Limit)break;
  }
 }
 void SaveSoon(){
@@ -34,6 +37,9 @@ void SaveSoon(){
  });
 }
 }
+void DGRememberMusicArtwork(NSString *musicID,NSString *cover){if(!musicID.length||!cover.length)return;PrepareArtwork();Covers[musicID]=cover;while(Covers.count>Limit){NSString *old=Covers.allKeys.firstObject;if([old isEqualToString:musicID])old=Covers.allKeys.lastObject;[Covers removeObjectForKey:old];}}
+NSString *DGKnownMusicArtwork(NSString *musicID){if(!musicID.length)return @"";PrepareArtwork();return Covers[musicID]?:@"";}
+NSString *DGMusicArtworkForRecord(NSDictionary *work){NSString *cover=Text(String(work[@"musicCover"]));return cover.length?cover:DGKnownMusicArtwork(Text(String(work[@"musicID"])));}
 void DGIndexMusicWorks(NSArray<NSDictionary *> *records){
  if(!records.count)return;
  BOOL changed=NO;
@@ -41,7 +47,7 @@ void DGIndexMusicWorks(NSArray<NSDictionary *> *records){
   if(![record isKindOfClass:NSDictionary.class])continue;
   NSString *music=Text(String(record[@"musicID"])),*work=Text(String(record[@"id"]));
   if(!music.length||!work.length||(!String(record[@"play"]).size()&&!Array(record[@"images"]).count))continue;
-  Load();NSDictionary *previous=ByWork[work];
+  Load();DGRememberMusicArtwork(music,Text(String(record[@"musicCover"])));NSDictionary *previous=ByWork[work];
   if(previous&&[previous[@"work"]isEqual:record])continue;
   if(previous)[Rows removeObjectIdenticalTo:previous];
   NSDictionary *entry=@{@"work":record,@"at":@(NSDate.date.timeIntervalSince1970)};
