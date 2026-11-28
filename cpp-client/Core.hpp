@@ -11,6 +11,8 @@ struct Work {
     std::string authorID, authorUID, musicID, musicTitle, musicAuthor, location, locationKind;
     std::vector<std::string> images;
     std::int64_t comments = 0, likes = 0, collects = 0, publishedAt = 0;
+    std::int64_t followStatus = 0;
+    bool followStatusKnown = false;
     bool liked = false, collected = false;
     bool isAd = false, isLive = false;
     double duration = 0;

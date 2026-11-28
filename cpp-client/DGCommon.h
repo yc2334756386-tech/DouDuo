@@ -7,6 +7,7 @@
 #import "DGBridge.h"
 #import "DGSession.h"
 #include "Core.hpp"
+#include "ClientPolicy.hpp"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -33,6 +34,8 @@ static inline Work ReadWork(NSDictionary *value) {
     work.comments = Number(value[@"comments"]); work.likes = Number(value[@"likes"]);
     work.duration = [value[@"duration"] doubleValue];
 work.authorID=String(value[@"authorID"]);work.authorUID=String(value[@"authorUID"]);
+work.followStatus=Number(value[@"authorFollowStatus"]);
+work.followStatusKnown=[value[@"authorFollowStatusKnown"]boolValue];
 work.musicID=String(value[@"musicID"]);work.musicTitle=String(value[@"musicTitle"]);work.musicAuthor=String(value[@"musicAuthor"]);
 work.location=String(value[@"location"]);work.locationKind=String(value[@"locationKind"]);
 work.publishedAt=Number(value[@"publishedAt"]);work.collects=Number(value[@"collects"]);
@@ -153,5 +156,6 @@ void DGRefreshEmbeddedMessages(UIViewController *page);
 void DGSetEmbeddedMessagesVisible(UIViewController *page,BOOL visible);
 
 NSArray *DGNormalizeWebItems(id items);
+NSDictionary *DGNormalizeWebPerson(NSDictionary *person);
 
 UIViewController *DGMakeNoticePlayer(NSArray<NSDictionary *> *works,DGBridge *bridge,NSString *commentID,NSString *parentID);

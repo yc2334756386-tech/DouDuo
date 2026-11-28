@@ -21,6 +21,11 @@ void AddVariant(NSMutableDictionary *variants,NSString *key,const douglass::Play
     if(!source.primary.empty())variants[key]=@{@"play":Text(source.primary),@"alternate":Text(source.alternate),@"fps":@(source.fps),@"shortSide":@(source.shortSide)};
 }
 }
+NSDictionary *DGNormalizeWebPerson(NSDictionary *person){
+    NSMutableDictionary *result=[person mutableCopy];
+    for(NSString *key in @[@"followers",@"works"]){NSString *known=[key stringByAppendingString:@"Known"];BOOL provided=person[known]?[person[known]boolValue]:(person[key]&&person[key]!=NSNull.null);const auto count=douglass::parseCount(String(person[key]),provided);result[key]=@(count.value);result[known]=@(count.known);}
+    return result;
+}
 NSArray *DGNormalizeWebItems(id items) {
     NSArray *rows=Array(items);
     NSMutableArray *results=[NSMutableArray arrayWithCapacity:rows.count];
@@ -28,7 +33,7 @@ NSArray *DGNormalizeWebItems(id items) {
         if(![raw isKindOfClass:NSDictionary.class])continue;
         NSDictionary *row=raw;
         id manifest=row[@"mediaSources"];
-        if(![manifest isKindOfClass:NSDictionary.class]){[results addObject:row];continue;}
+        if(![manifest isKindOfClass:NSDictionary.class]){[results addObject:row[@"nickname"]?DGNormalizeWebPerson(row):row];continue;}
         NSDictionary *media=manifest;
         std::vector<douglass::MediaSource> variants;
         for(id value in Array(media[@"candidates"])){

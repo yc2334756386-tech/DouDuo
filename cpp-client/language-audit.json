@@ -1,0 +1,54 @@
+{
+  "version": "0.20.7",
+  "date": "2026-11-28",
+  "scope": "cpp-client active IPA build; original DouDuo sources are excluded",
+  "compiler": "Apple clang++",
+  "standard": "C++20",
+  "active_source_counts": {
+    ".cpp": 4,
+    ".hpp": 4,
+    ".h": 21,
+    ".mm": 37,
+    ".js": 4
+  },
+  "compiled_translation_units": {
+    "C++20": 4,
+    "Objective-C++": 37,
+    "Swift": 0
+  },
+  "runtime_webkit_scripts": [
+    "bridge.js",
+    "messages.js",
+    "music-page.js",
+    "search-page.js"
+  ],
+  "new_pure_cpp_modules": [
+    "ClientPolicy.cpp",
+    "ChannelState.cpp"
+  ],
+  "existing_pure_cpp_modules": [
+    "Core.cpp",
+    "MediaSources.cpp"
+  ],
+  "moved_logic": [
+    "channel state and account scope",
+    "restored index and position validation",
+    "account confirmation classification",
+    "hold speed tiers",
+    "portrait fill eligibility",
+    "following state and author matching",
+    "statistics parsing and validation"
+  ],
+  "remaining_objective_cpp": "UIKit/AVFoundation/WebKit/Keychain integration and client logic not yet migrated",
+  "remaining_javascript": "Official-page requests, data extraction, search/music importing and message transport adapters",
+  "build_only_helpers": [
+    "scripts/build-ipa.sh",
+    "scripts/make_assets.py"
+  ],
+  "excluded_swift_files_under_DouDuo": 133,
+  "tests": {
+    "automated": false,
+    "device": false
+  },
+  "pure_cpp_only": false
+}

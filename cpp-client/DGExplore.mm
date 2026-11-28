@@ -291,7 +291,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
  NSString *signature=DGValue(result[@"signature"]);_signature.text=signature.length?signature:@"这个人还没有填写简介";
  _stats.text=[NSString stringWithFormat:@"%@ 获赞 · %@ 粉丝",DGCount(result[@"likes"]),DGCount(result[@"followers"])];
  BOOL worksKnown=result[@"worksKnown"]?[result[@"worksKnown"]boolValue]:result[@"works"]!=nil;[_tabs setTitle:worksKnown?[NSString stringWithFormat:@"作品 %lld",Number(result[@"works"])]:@"作品" forSegmentAtIndex:0];
- [_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];[self updateRelationship];
+ [_followingButton setTitle:[NSString stringWithFormat:@"%@ 关注 ›",DGCount(result[@"following"])] forState:UIControlStateNormal];[self updateRelationship];[self publishRelationship];
  NSString *location=DGValue(result[@"location"]);_context.text=self.locate.length?@"可点击下方按钮定位刚刚看过的作品":location.length?location:@"作品按平台返回顺序展示";
 }
 - (void)loadProfile {
@@ -432,6 +432,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
         if(self->_mode==DGExploreMusic)DGDiagnostic(@"music.lookup",[NSString stringWithFormat:@"source=%@ returned=%lu more=%d",[result[@"lookup"]isEqual:@"mobile"]?@"mobile":@"official",(unsigned long)Array(result[@"items"]).count,[result[@"more"]boolValue]]);
         for(id raw in Array(result[@"items"])){
             if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *record=raw;NSString *identifier=DGValue(record[people?@"sec":@"id"]);
+            if(self->_mode==DGExploreProfile&&self->_selectedTab==0&&![record[@"authorFollowStatusKnown"]boolValue]&&[self->_person[@"followStatusKnown"]boolValue]&&douglass::matchesAuthor(String(record[@"authorID"]),String(record[@"authorUID"]),String(self.sec),String(self.uid))){NSMutableDictionary *updated=[record mutableCopy];updated[@"authorFollowStatus"]=self->_person[@"followStatus"]?:@0;updated[@"authorFollowStatusKnown"]=@YES;record=updated;}
             if(!identifier.length||[self->_ids containsObject:identifier])continue;
             if(!people&&!music&&!ReadWork(record).playable())continue;
             if(self->_mode==DGExploreMusic&&![DGValue(record[@"musicID"])isEqualToString:DGValue(self.music[@"id"])])continue;
@@ -507,6 +508,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
     [_followUser setTitle:status==2?@"互相关注":status==4?@"已申请":status==1?@"已关注":@"关注" forState:UIControlStateNormal];_followUser.tintColor=status?UIColor.secondaryLabelColor:UIColor.systemPinkColor;
     [_blockUser setTitle:blocked?@"解除拉黑":@"拉黑" forState:UIControlStateNormal];_blockUser.tintColor=blocked?UIColor.systemOrangeColor:UIColor.secondaryLabelColor;
 }
+- (void)publishRelationship{if(![_person[@"followStatusKnown"]boolValue])return;[NSNotificationCenter.defaultCenter postNotificationName:@"DGRelationshipChanged" object:nil userInfo:@{@"sec":self.sec?:@"",@"uid":self.uid?:@"",@"followStatus":_person[@"followStatus"]?:@0}];}
 - (void)toggleFollow{
     if(_relationshipBusy||!_followUser.enabled)return;BOOL add=Number(_person[@"followStatus"])==0;[self writeRelationship:@"follow" add:add];
 }
@@ -518,7 +520,7 @@ typedef NS_ENUM(NSInteger,DGExploreMode){DGExploreProfile,DGExploreSearch,DGExpl
 - (void)writeRelationship:(NSString *)operation add:(BOOL)add{
     if(_relationshipBusy)return;_relationshipBusy=YES;[self updateRelationship];__weak DGExplore *weak=self;
     [_bridge request:operation parameters:@{@"uid":self.uid?:@"",@"sec":self.sec?:@"",@"add":@(add)} completion:^(NSDictionary *result,NSString *error){DGExplore *self=weak;if(!self)return;self->_relationshipBusy=NO;if(error||![result[@"ok"]boolValue]){[self updateRelationship];DGToast(self,error?:@"平台未确认操作结果，请稍后重试");return;}
-        NSMutableDictionary *person=[self->_person mutableCopy];if([operation isEqualToString:@"follow"])person[@"followStatus"]=result[@"followStatus"]?:@(add?1:0);else person[@"blocked"]=@(add);self->_person=person;[self updateRelationship];[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];DGToast(self,[operation isEqualToString:@"follow"]?(add?@"已提交关注":@"已取消关注"):(add?@"已拉黑":@"已解除拉黑"));
+        NSMutableDictionary *person=[self->_person mutableCopy];if([operation isEqualToString:@"follow"]){person[@"followStatus"]=result[@"followStatus"]?:@(add?1:0);person[@"followStatusKnown"]=@YES;}else person[@"blocked"]=@(add);self->_person=person;[self updateRelationship];if([operation isEqualToString:@"follow"])[self publishRelationship];[[[UIImpactFeedbackGenerator alloc]initWithStyle:UIImpactFeedbackStyleLight]impactOccurred];DGToast(self,[operation isEqualToString:@"follow"]?(add?@"已提交关注":@"已取消关注"):(add?@"已拉黑":@"已解除拉黑"));
     }];
 }
 - (void)toggleAudio{if(DGMusicMatches(DGValue(self.music[@"id"]))&&DGMusicPlayer().rate>0)DGMusicPause();else{DGMusicSetOwner(self);DGMusicPlay(self.music);}[self updateMusicPlayback];}

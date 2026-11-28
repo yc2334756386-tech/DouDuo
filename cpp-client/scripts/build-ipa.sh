@@ -26,11 +26,13 @@ for source in "$CLIENT"/*.cpp; do
     -miphoneos-version-min=18.0 -c "$source" -o "$object"
   OBJECTS+=("$object")
 done
+OBJCXX_SOURCES=("$CLIENT"/*.mm)
+echo "Translation units: ${#OBJECTS[@]} C++20, ${#OBJCXX_SOURCES[@]} Objective-C++, 0 Swift"
 xcrun --sdk iphoneos clang++ \
   -std=c++20 -O2 -DNDEBUG -fobjc-arc -fmodules -fvisibility=hidden \
   -Wno-deprecated-declarations -arch arm64 -isysroot "$SDK" \
   -miphoneos-version-min=18.0 -Wl,-dead_strip \
-  "${OBJECTS[@]}" "$CLIENT"/*.mm \
+  "${OBJECTS[@]}" "${OBJCXX_SOURCES[@]}" \
   -framework UIKit -framework Foundation -framework WebKit -framework AVFoundation \
   -framework CoreMedia -framework CoreGraphics -framework QuartzCore -framework ImageIO -framework AudioToolbox -framework Photos -framework QuickLook -framework Security -framework MediaPlayer -framework CoreImage -framework CoreVideo -framework AVKit -framework CoreText -framework UniformTypeIdentifiers -lz \
   -o "$APP/DouGlass"
@@ -52,7 +54,7 @@ info={
   'CFBundleInfoDictionaryVersion':'6.0',
   'CFBundleName':'抖音极简版',
   'CFBundlePackageType':'APPL',
-  'CFBundleShortVersionString':'0.20.6',
+  'CFBundleShortVersionString':'0.20.7',
   'UIBackgroundModes':['audio'],
   'NSPhotoLibraryAddUsageDescription':'保存你选择的视频、图集和评论图片到相册',
   'CFBundleVersion':sys.argv[3],
@@ -76,6 +78,6 @@ with open(app/'Info.plist','wb') as f: plistlib.dump(info,f,fmt=plistlib.FMT_BIN
 PY
 chmod 755 "$APP/DouGlass"
 cd "$OUTPUT"
-COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.20.6-unsigned.ipa Payload
-shasum -a 256 DouGlass-0.20.6-unsigned.ipa > SHA256.txt
-printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.20.6-unsigned.ipa"
+COPYFILE_DISABLE=1 /usr/bin/zip -qry DouGlass-0.20.7-unsigned.ipa Payload
+shasum -a 256 DouGlass-0.20.7-unsigned.ipa > SHA256.txt
+printf 'Built unsigned IPA: %s\n' "$OUTPUT/DouGlass-0.20.7-unsigned.ipa"

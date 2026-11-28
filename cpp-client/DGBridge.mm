@@ -128,10 +128,10 @@ NSString *DGUserAgent(void) {
     if(token!=_profileToken)return;__weak DGBridge *weak=self;
     [self request:@"profile" parameters:@{@"_profileRaw":@YES} completion:^(NSDictionary *result,NSString *error){
         DGBridge *self=weak;if(!self||token!=self->_profileToken)return;
-        BOOL authenticated=!error&&[result[@"loggedIn"]boolValue]&&String(result[@"uid"]).size()&&String(result[@"uid"])!="0";
-        if(authenticated){DGDiagnostic(@"session.profile",@"state=authenticated");[self finishProfile:result error:nil];return;}
-        if([result[@"authenticationExpired"]boolValue]){DGDiagnostic(@"session.profile",@"state=expired");[self finishProfile:@{@"loggedIn":@NO,@"authConfirmed":@YES} error:nil];return;}
-        if(!error&&attempt>=2&&!DGSessionMayBeSignedIn()){DGDiagnostic(@"session.profile",@"state=signed_out");NSMutableDictionary *confirmed=[result mutableCopy];confirmed[@"authConfirmed"]=@YES;[self finishProfile:confirmed error:nil];return;}
+        const auto state=douglass::assessAccount(!error,[result[@"loggedIn"]boolValue],String(result[@"uid"]),[result[@"authenticationExpired"]boolValue],DGSessionMayBeSignedIn(),static_cast<unsigned>(attempt));
+        if(state==douglass::AccountState::authenticated){DGDiagnostic(@"session.profile",@"state=authenticated");[self finishProfile:result error:nil];return;}
+        if(state==douglass::AccountState::expired){DGDiagnostic(@"session.profile",@"state=expired");[self finishProfile:@{@"loggedIn":@NO,@"authConfirmed":@YES} error:nil];return;}
+        if(state==douglass::AccountState::signedOut){DGDiagnostic(@"session.profile",@"state=signed_out");NSMutableDictionary *confirmed=[result mutableCopy];confirmed[@"authConfirmed"]=@YES;[self finishProfile:confirmed error:nil];return;}
         DGDiagnostic(@"session.profile",[NSString stringWithFormat:@"state=unconfirmed attempt=%lu",(unsigned long)attempt]);
         if(attempt<2){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)((attempt+1)*NSEC_PER_SEC)),dispatch_get_main_queue(),^{DGBridge *self=weak;if(!self||token!=self->_profileToken)return;DGSessionRestore(^{DGBridge *self=weak;if(self&&token==self->_profileToken)[self lookupProfile:token attempt:attempt+1];});});}
         else [self finishProfile:nil error:@"账号状态暂未确认，请稍后重试或打开安全验证"];
@@ -162,6 +162,7 @@ NSString *DGUserAgent(void) {
                 DGBridge *self = weakSelf;
                 if (!self || generation != self->_generation) { deliver(nil, @"账号状态已变化，请刷新"); return; }
                 NSDictionary *result = [value isKindOfClass:NSDictionary.class] ? value : nil;
+                if(([operation isEqualToString:@"profile"]||[operation isEqualToString:@"userProfile"])&&result[@"nickname"])result=DGNormalizeWebPerson(result);
                 if([result[@"items"]isKindOfClass:NSArray.class]){NSMutableDictionary *native=[result mutableCopy];native[@"items"]=DGNormalizeWebItems(result[@"items"]);result=native;}
                 NSString *message = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
                 if (failure || !result) message = @"网页请求未完成，请刷新或在登录网页完成验证";
