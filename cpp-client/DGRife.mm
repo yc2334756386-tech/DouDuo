@@ -113,6 +113,7 @@ struct DGRife::State {
     VTPixelTransferSessionRef transfer=nullptr;
     CGColorSpaceRef color=nullptr;
     size_t width=0,height=0;
+    double predictionCost=0;
     bool unavailable=false;
     ~State(){
         if(inputs)CVPixelBufferPoolRelease(inputs);
@@ -131,6 +132,7 @@ bool DGRife::rejected() const {
 
 std::array<CVPixelBufferRef,3> DGRife::copyInterpolatedFrames(CVPixelBufferRef previous,CVPixelBufferRef current,
                                                               double midpointDeadline,double quarterDeadline,
+                                                              unsigned multiplier,
                                                               const std::atomic_bool &cancelled) {
     if(cancelled.load()||rejected()||!previous||!current)return {};
     const size_t width=CVPixelBufferGetWidth(current),height=CVPixelBufferGetHeight(current);
@@ -217,11 +219,19 @@ std::array<CVPixelBufferRef,3> DGRife::copyInterpolatedFrames(CVPixelBufferRef p
             return output;
         }
     };
+    if(multiplier==3&&state.predictionCost>0&&CACurrentMediaTime()+2*state.predictionCost+.002<quarterDeadline){
+        auto firstThird=predict(1.f/3,quarterDeadline);
+        if(firstThird&&CACurrentMediaTime()+state.predictionCost<quarterDeadline){
+            auto secondThird=predict(2.f/3,quarterDeadline);
+            if(secondThird)return {firstThird.release(),nullptr,secondThird.release()};
+        }
+    }
     const auto started=CACurrentMediaTime();
     auto midpoint=predict(.5f,midpointDeadline);
     if(!midpoint)return {};
     const double cost=CACurrentMediaTime()-started;
-    if(CACurrentMediaTime()+2*cost+.002<quarterDeadline){
+    state.predictionCost=cost;
+    if(multiplier==4&&CACurrentMediaTime()+2*cost+.002<quarterDeadline){
         auto firstQuarter=predict(.25f,quarterDeadline);
         if(firstQuarter&&CACurrentMediaTime()+cost<quarterDeadline){
             auto thirdQuarter=predict(.75f,quarterDeadline);

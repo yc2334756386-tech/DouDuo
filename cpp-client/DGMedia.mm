@@ -447,7 +447,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 - (void)tick:(CMTime)time {
  [self syncDanmakuPlayback];
  if(!_player||_backgroundMode||_appInactive||_pagingMotion||_prepared.needsBeginning)return;double seconds=CMTimeGetSeconds(time),duration=CMTimeGetSeconds(_player.currentItem.duration);
- if(_active&&!_paused&&!_dragging&&!_seeking&&_player.rate>0&&DGRecoverAudioEnhancement(_observedItem))[self playCurrentVideo];
+ if(_active&&!_paused&&!_dragging&&!_seeking&&DGRecoverAudioEnhancement(_player))[self playCurrentVideo];
  if(_active&&!_paused&&!_dragging&&!_seeking)[_slider followPlayer:_player duration:duration];
  _elapsed.text=TimeLabel(seconds);_totalTime.text=TimeLabel(duration);[self displayFirstFrame];
  if(std::isfinite(seconds)&&seconds>=0)_lastPlaybackTime=seconds;
@@ -478,7 +478,7 @@ static NSString *TimeLabel(double value){if(!std::isfinite(value)||value<0)value
 }
 - (void)pagingInMotion:(BOOL)inMotion {
  if(_pagingMotion==inMotion)return;_pagingMotion=inMotion;
- if(inMotion){[_videoEffects suspendForPaging];DGSetMetalFXPlaybackActive(_observedItem,NO);DGReleaseVideoFrameCache(_observedItem);[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
+ if(inMotion){[_videoEffects suspendForPaging];if(DGSuperResolutionTransitionProtection())DGSetMetalFXPlaybackActive(_observedItem,NO);DGReleaseVideoFrameCache(_observedItem);[self cancelLoadingIndicator];[_slider stopFollowing];[self stopWatchdog];[_ambient active:NO];}
  [self syncDanmakuPlayback];
 }
 - (void)active:(BOOL)value {

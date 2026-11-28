@@ -2,6 +2,7 @@
 #import "DGAnimation.h"
 #import "DGDiagnostics.h"
 #import "DGRife.h"
+#import "DGMediaEnhancement.h"
 #include "InterpolationProtection.hpp"
 #import <VideoToolbox/VideoToolbox.h>
 #import <objc/runtime.h>
@@ -42,7 +43,8 @@ BOOL DGInterpolationTransitionProtection(void) {
 }
 NSString *const DGInterpolationMultiplierKey=@"douglass.experimental.interpolationMultiplier";
 unsigned DGInterpolationMultiplier(void) {
-    return [NSUserDefaults.standardUserDefaults integerForKey:DGInterpolationMultiplierKey]==4?4:2;
+    NSInteger value=[NSUserDefaults.standardUserDefaults integerForKey:DGInterpolationMultiplierKey];
+    return value>=2&&value<=4?static_cast<unsigned>(value):2;
 }
 BOOL DGVTSuperResolutionAvailable(void) {
     if(@available(iOS 26.0,*)){
@@ -55,13 +57,12 @@ BOOL DGVTSuperResolutionAvailable(void) {
 }
 
 namespace {
-constexpr double effectsSettleDelay=.20;
-constexpr double protectedSettleDelay=.55;
 constexpr double renderLead=.048;
 constexpr unsigned minimumReadyFrames=3;
 constexpr double interpolationHeadroom=.004;
 constexpr double fourTimesBackoff=1.5;
 constexpr std::array<double,3> phases{.25,.5,.75};
+constexpr std::array<double,3> thirdPhases{1./3,.5,2./3};
 
 dispatch_queue_t effectsQueue(){
     static dispatch_queue_t queue;
@@ -176,9 +177,16 @@ uint8x16_t blendQuarter(uint8x16_t nearFrame,uint8x16_t farFrame) {
     return vcombine_u8(vrshrn_n_u16(low,2),vrshrn_n_u16(high,2));
 }
 
+uint8x16_t blendThird(uint8x16_t nearFrame,uint8x16_t farFrame) {
+    auto low=vaddw_u8(vshll_n_u8(vget_low_u8(nearFrame),1),vget_low_u8(farFrame));
+    auto high=vaddw_u8(vshll_n_u8(vget_high_u8(nearFrame),1),vget_high_u8(farFrame));
+    return vcombine_u8(vmovn_u16(vreinterpretq_u16_s16(vqrdmulhq_n_s16(vreinterpretq_s16_u16(low),10923))),
+                       vmovn_u16(vreinterpretq_u16_s16(vqrdmulhq_n_s16(vreinterpretq_s16_u16(high),10923))));
+}
+
 // Compatibility interpolation avoids starting the affected system session.
 InsertedFrames blendFrames(CVPixelBufferPoolRef pool,CVPixelBufferRef previous,CVPixelBufferRef current,
-                           bool checkCut,double quarterDeadline,const std::atomic_bool &cancelled) {
+                           bool checkCut,unsigned multiplier,double extraDeadline,const std::atomic_bool &cancelled) {
     if(!previous||!current||CVPixelBufferGetPlaneCount(previous)!=2||CVPixelBufferGetPlaneCount(current)!=2)return {};
     if(CVPixelBufferGetWidth(previous)!=CVPixelBufferGetWidth(current)||CVPixelBufferGetHeight(previous)!=CVPixelBufferGetHeight(current))return {};
     LockedPixel readPrevious(previous,kCVPixelBufferLock_ReadOnly),readCurrent(current,kCVPixelBufferLock_ReadOnly);
@@ -200,12 +208,13 @@ InsertedFrames blendFrames(CVPixelBufferPoolRef pool,CVPixelBufferRef previous,C
     output[1]=allocate(pool,current);
     LockedPixel write(output[1].get(),0);
     if(!write)return {};
-    if(quarterDeadline>CACurrentMediaTime()){
+    if(extraDeadline>CACurrentMediaTime()){
         output[0]=allocate(pool,current);
         output[2]=allocate(pool,current);
     }
     LockedPixel writeQuarter(output[0].get(),0),writeThreeQuarters(output[2].get(),0);
-    bool four=writeQuarter&&writeThreeQuarters;
+    bool extra=writeQuarter&&writeThreeQuarters;
+    const bool thirds=multiplier==3;
     for(size_t plane=0;plane<2;++plane){
         const auto *a=static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(previous,plane));
         const auto *b=static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(current,plane));
@@ -215,36 +224,38 @@ InsertedFrames blendFrames(CVPixelBufferPoolRef pool,CVPixelBufferRef previous,C
         const size_t bStride=CVPixelBufferGetBytesPerRowOfPlane(current,plane);
         const size_t outStride=CVPixelBufferGetBytesPerRowOfPlane(output[1].get(),plane);
         if(!a||!b||!out||std::min({aStride,bStride,outStride})<bytes)return {};
-        auto *quarter=four?static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(output[0].get(),plane)):nullptr;
-        auto *threeQuarters=four?static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(output[2].get(),plane)):nullptr;
-        const size_t quarterStride=four?CVPixelBufferGetBytesPerRowOfPlane(output[0].get(),plane):0;
-        const size_t threeQuarterStride=four?CVPixelBufferGetBytesPerRowOfPlane(output[2].get(),plane):0;
-        four=four&&quarter&&threeQuarters&&std::min(quarterStride,threeQuarterStride)>=bytes;
+        auto *quarter=extra?static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(output[0].get(),plane)):nullptr;
+        auto *threeQuarters=extra?static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(output[2].get(),plane)):nullptr;
+        const size_t quarterStride=extra?CVPixelBufferGetBytesPerRowOfPlane(output[0].get(),plane):0;
+        const size_t threeQuarterStride=extra?CVPixelBufferGetBytesPerRowOfPlane(output[2].get(),plane):0;
+        extra=extra&&quarter&&threeQuarters&&std::min(quarterStride,threeQuarterStride)>=bytes;
         for(size_t y=0;y<CVPixelBufferGetHeightOfPlane(current,plane);++y){
             if((y&31)==0){
                 if(cancelled.load(std::memory_order_relaxed))return {};
-                if(four&&CACurrentMediaTime()>=quarterDeadline)four=false;
+                if(extra&&CACurrentMediaTime()>=extraDeadline)extra=false;
             }
             size_t x=0;
             for(;x+16<=bytes;x+=16){
                 const auto first=vld1q_u8(a+x),second=vld1q_u8(b+x);
                 vst1q_u8(out+x,vrhaddq_u8(first,second));
-                if(four){
-                    vst1q_u8(quarter+y*quarterStride+x,blendQuarter(first,second));
-                    vst1q_u8(threeQuarters+y*threeQuarterStride+x,blendQuarter(second,first));
+                if(extra){
+                    vst1q_u8(quarter+y*quarterStride+x,thirds?blendThird(first,second):blendQuarter(first,second));
+                    vst1q_u8(threeQuarters+y*threeQuarterStride+x,thirds?blendThird(second,first):blendQuarter(second,first));
                 }
             }
             for(;x<bytes;++x){
                 out[x]=(unsigned(a[x])+unsigned(b[x])+1)/2;
-                if(four){
-                    quarter[y*quarterStride+x]=(3u*a[x]+b[x]+2)/4;
-                    threeQuarters[y*threeQuarterStride+x]=(a[x]+3u*b[x]+2)/4;
+                if(extra){
+                    const unsigned nearWeight=thirds?2:3;
+                    const unsigned round=thirds?1:2;
+                    quarter[y*quarterStride+x]=(nearWeight*a[x]+b[x]+round)/(nearWeight+1);
+                    threeQuarters[y*threeQuarterStride+x]=(a[x]+nearWeight*b[x]+round)/(nearWeight+1);
                 }
             }
             a+=aStride;b+=bStride;out+=outStride;
         }
     }
-    if(!four){
+    if(!extra){
         // The locks must be destroyed before returning their buffers to the pool.
         return InsertedFrames{PixelBuffer{},output[1],PixelBuffer{}};
     }
@@ -254,12 +265,13 @@ InsertedFrames blendFrames(CVPixelBufferPoolRef pool,CVPixelBufferRef previous,C
 struct FramePair {
     PixelBuffer source,previous;
     CMTime time=kCMTimeInvalid,previousTime=kCMTimeInvalid;
-    bool allowsFourTimes=false;
+    bool allowsHigherRate=false;
 };
 struct FrameResult {
     PixelBuffer current;
     InsertedFrames inserted;
     bool supported=false,compatibility=false,upscaled=false,rife=false;
+    bool thirds=false;
     douglass::InterpolationHazard interpolationHazard=douglass::InterpolationHazard::none;
 };
 
@@ -323,28 +335,29 @@ public:
             if(@available(iOS 26.0,*))configureResolution();
         }
         const auto started=CACurrentMediaTime();
-        const bool requestFour=pair.previous&&pair.allowsFourTimes&&started>=fourTimesBackoffUntil_;
-        const double extraDeadline=requestFour?quarterDeadline:0.;
+        const bool requestHigher=pair.previous&&pair.allowsHigherRate&&started>=fourTimesBackoffUntil_;
+        const double extraDeadline=requestHigher?quarterDeadline:0.;
         if(key_.rife&&pair.previous){
             if(!rife_)rife_=std::make_unique<DGRife>();
-            const auto pixels=rife_->copyInterpolatedFrames(pair.previous.get(),pair.source.get(),midpointDeadline,extraDeadline,cancelled);
+            const auto pixels=rife_->copyInterpolatedFrames(pair.previous.get(),pair.source.get(),midpointDeadline,extraDeadline,key_.multiplier,cancelled);
             for(size_t i=0;i<pixels.size();++i)if(pixels[i])frames.inserted[i]=ownPixel(pixels[i]);
-            frames.rife=bool(frames.inserted[1]);
+            frames.rife=frames.inserted[1]||frames.inserted[0];
         }
         frames.supported=protectedFrame||interpolationSession_||resolutionSession_||blendPool_||
                          (key_.rife&&(!rife_||!rife_->rejected()))||
                          (key_.interpolation&&!interpolationConfigured_);
         if(cancelled.load(std::memory_order_relaxed)||!frames.supported)return frames;
         if(@available(iOS 26.0,*))processSystem(pair,midpointDeadline,extraDeadline,cancelled,frames);
-        if(!frames.inserted[1]&&pair.previous&&blendPool_){
-            frames.inserted=blendFrames(blendPool_,pair.previous.get(),pair.source.get(),!key_.protectInterpolation,extraDeadline,cancelled);
+        if(!frames.inserted[1]&&!frames.inserted[0]&&pair.previous&&blendPool_){
+            frames.inserted=blendFrames(blendPool_,pair.previous.get(),pair.source.get(),!key_.protectInterpolation,key_.multiplier,extraDeadline,cancelled);
             frames.compatibility=bool(frames.inserted[1]);
         }
-        if(requestFour&&(!frames.inserted[0]||!frames.inserted[2]||CACurrentMediaTime()>=quarterDeadline)){
+        if(requestHigher&&(!frames.inserted[0]||!frames.inserted[2]||CACurrentMediaTime()>=quarterDeadline)){
             frames.inserted[0].reset();
             frames.inserted[2].reset();
             fourTimesBackoffUntil_=CACurrentMediaTime()+fourTimesBackoff;
         }
+        frames.thirds=key_.multiplier==3&&frames.inserted[0]&&frames.inserted[2];
         if(!frames.current)frames.current=pair.source;
         return frames;
     }
@@ -375,7 +388,8 @@ private:
         if(!interpolationSession_&&!resolutionSession_)return;
         VTFrameProcessorFrame *source=[[VTFrameProcessorFrame alloc] initWithBuffer:pair.source.get() presentationTimeStamp:pair.time];
         if(!source)return;
-        if(interpolationSession_&&pair.previous){
+        // VideoToolbox's published phases are dyadic. The compatibility path produces exact thirds.
+        if(interpolationSession_&&pair.previous&&!(key_.multiplier==3&&blendPool_&&quarterDeadline>CACurrentMediaTime())){
             if(systemPhases_==2&&quarterDeadline>CACurrentMediaTime()){
                 frames.inserted=interpolateSystem(pair,source,true);
             }
@@ -552,6 +566,9 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     FramePair _latest;
     CMTime _lastQueued;
     CFTimeInterval _lastResult,_expectedGap;
+    CFTimeInterval _lastEffectStateChange;
+    unsigned _reportedMultiplier;
+    NSString *__strong _reportedBackend;
     CGAffineTransform _trackTransform;
     CGSize _pixelSize;
     OSType _pixelFormat;
@@ -580,10 +597,11 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     if(!item||(!interpolation&&!resolution))return;
     _nativeLayer=layer;_item=item;_interpolation=interpolation;_rife=rife;_resolution=resolution;
     _protection=protection;_protectInterpolation=protectInterpolation;_interpolationMultiplier=multiplier;
+    if(_interpolation)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"preparing",@"waiting_for_frame");
+    if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"preparing",@"waiting_for_frame");
     NSUInteger binding=++_binding;
     __weak DGVideoEffects *weak=self;
-    double delay=protection?protectedSettleDelay:effectsSettleDelay;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+    dispatch_async(dispatch_get_main_queue(),^{
         DGVideoEffects *effects=weak;
         if(effects&&effects->_binding==binding)[effects beginSampling];
     });
@@ -596,7 +614,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     if(DGAnimationProcessingDeferred()||!layer.readyForDisplay||layer.player.timeControlStatus!=AVPlayerTimeControlStatusPlaying){
         NSUInteger binding=_binding;
         __weak DGVideoEffects *weak=self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,80*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
             DGVideoEffects *effects=weak;
             if(effects&&effects->_binding==binding)[effects beginSampling];
         });
@@ -636,7 +654,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     DGVideoEffectsClock *target=[DGVideoEffectsClock new];target.owner=self;
     _clock=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];
     _displayHz=std::clamp<double>(UIScreen.mainScreen.maximumFramesPerSecond,30,120);
-    const float preferredHz=_interpolationMultiplier==4?_displayHz:std::min(60.,_displayHz);
+    const float preferredHz=_interpolationMultiplier>2?_displayHz:std::min(60.,_displayHz);
     _clock.preferredFrameRateRange=CAFrameRateRangeMake(30,preferredHz,preferredHz);
     [_clock addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     [self layout];
@@ -662,6 +680,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
 - (void)discardRenderedFrames {
     const BOOL flush=_display&&(!_display.hidden||CMTIME_IS_VALID(_lastQueued));
     _lastQueued=kCMTimeInvalid;_lastResult=0;_expectedGap=0;_readyFrames=0;
+    _reportedMultiplier=0;_reportedBackend=nil;
     _display.hidden=YES;
     if(flush)[_display.sampleBufferRenderer flushWithRemovalOfDisplayedImage:YES completionHandler:nil];
 }
@@ -678,8 +697,16 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     _cancellation.reset();
     dispatch_async(effectsQueue(),^{sharedVideoProcessor().clear();});
 }
-- (void)suspendForPaging { [self stop]; }
+- (void)suspendForPaging {
+    if(_item&&_protectInterpolation){
+        const BOOL hadProcessing=_cancellation!=nullptr;
+        [self stop];
+        if(hadProcessing)DGDiagnostic(@"video.interpolation.release",@"reason=clip_switch");
+    }else if(_interpolation||_protection)[self stop];
+}
 - (void)stop {
+    if(_interpolation)DGEndVideoEffect(DGVideoEffectInterpolation,self);
+    if(_resolution)DGEndVideoEffect(DGVideoEffectSuperResolution,self);
     ++_binding;
     [_clock invalidate];_clock=nil;
     [self resetFrames];
@@ -687,6 +714,8 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
     [_display removeFromSuperlayer];
     _display=nil;_item=nil;_nativeLayer=nil;
     _unsupported=NO;_reportedDisplay=NO;_preferResolution=NO;_consecutiveLate=0;
+    _interpolation=NO;_resolution=NO;_protectInterpolation=NO;_protection=NO;
+    _lastEffectStateChange=0;
     _rendererFourTimesBackoffUntil=0;
     _pixelSize=CGSizeZero;_pixelFormat=0;
 }
@@ -694,6 +723,8 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
 - (void)missedFrame {
     ++_consecutiveLate;
     if(!_display.hidden||_readyFrames)[self resetFrames];
+    if(_interpolation&&!_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"frame_budget");
+    if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"bypassed",@"frame_budget");
     if(_consecutiveLate<3)return;
     if(_interpolation&&_resolution&&!_preferResolution){
         _preferResolution=YES;
@@ -725,10 +756,16 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         AVPlayer *player=_nativeLayer.player;
         if(!player||player.currentItem!=_item){[self stop];return;}
         if(_unsupported)return;
+        const bool thermal=NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious;
         if(!_orientationReady||!_nativeLayer.readyForDisplay||player.timeControlStatus!=AVPlayerTimeControlStatusPlaying||
            player.rate<.75||player.rate>1.25||DGAnimationProcessingDeferred()||
-           NSProcessInfo.processInfo.thermalState>=NSProcessInfoThermalStateSerious){
+           thermal){
             if(_latest.source||!_display.hidden)[self resetFrames];
+            if(thermal||_lastEffectStateChange){
+                if(_interpolation&&!_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,self,thermal?@"bypassed":@"preparing",thermal?@"thermal":@"waiting_for_frame");
+                if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,thermal?@"bypassed":@"preparing",thermal?@"thermal":@"waiting_for_frame");
+                _lastEffectStateChange=0;
+            }
             return;
         }
         if(_lastResult&&CACurrentMediaTime()-_lastResult>std::max(.085,_expectedGap*2.4)){
@@ -742,6 +779,8 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         if(_latest.source&&CMTimeCompare(actual,_latest.time)==0)return;
         CFTypeRef transfer=CVBufferGetAttachment(pixel.get(),kCVImageBufferTransferFunctionKey,nullptr);
         if(transfer&&(CFEqual(transfer,kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)||CFEqual(transfer,kCVImageBufferTransferFunction_ITU_R_2100_HLG))){
+            if(_interpolation)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"unsupported_source");
+            if(_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,self,@"bypassed",@"unsupported_source");
             [self resetFrames];[self releaseProcessing];_unsupported=YES;_clock.paused=YES;return;
         }
         CGSize size=CGSizeMake(CVPixelBufferGetWidth(pixel.get()),CVPixelBufferGetHeight(pixel.get()));
@@ -754,16 +793,20 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         const double interval=CMTimeGetSeconds(CMTimeSubtract(actual,_latest.time));
         if(_latest.source&&(!std::isfinite(interval)||interval<=0||interval>.10))[self resetFrames];
         const bool interpolate=_latest.source&&_interpolation&&!_preferResolution&&interval>=.025&&interval<=.10;
-        const unsigned multiplier=_interpolationMultiplier==4&&_displayHz>=90?4:2;
+        const unsigned multiplier=_interpolationMultiplier;
         const double refreshInterval=link.targetTimestamp-link.timestamp;
-        const bool allowsFourTimes=interpolate&&multiplier==4&&interval*_displayHz>=3.96&&refreshInterval>0&&
-            interval>=refreshInterval*3.90&&.75*interval+interpolationHeadroom<renderLead&&
+        const double earliestOffset=interval*(1.-1./multiplier);
+        const bool allowsHigherRate=interpolate&&multiplier>2&&interval*_displayHz>=multiplier*.99&&refreshInterval>0&&
+            interval>=refreshInterval*multiplier*.975&&earliestOffset+interpolationHeadroom<renderLead&&
             CACurrentMediaTime()>=_rendererFourTimesBackoffUntil&&!NSProcessInfo.processInfo.lowPowerModeEnabled;
         const CMTime now=CMClockGetTime(CMClockGetHostTimeClock());
         FramePair pair={pixel,interpolate?_latest.source:PixelBuffer{},now,
-                        interpolate?CMTimeSubtract(now,CMTimeMakeWithSeconds(interval,60000)):kCMTimeInvalid,allowsFourTimes};
+                        interpolate?CMTimeSubtract(now,CMTimeMakeWithSeconds(interval,60000)):kCMTimeInvalid,allowsHigherRate};
         _latest={pixel,{},actual,kCMTimeInvalid};
-        if(_interpolation&&!_resolution&&!pair.previous)return;
+        if(_interpolation&&!_resolution&&!pair.previous){
+            if(interval>0&&interval<.025)DGReportVideoEffect(DGVideoEffectInterpolation,self,@"bypassed",@"source_rate");
+            return;
+        }
         if(processingFrame.exchange(true,std::memory_order_acq_rel))return;
         const BOOL rife=_rife&&!_preferResolution;
         ProcessorKey key={static_cast<size_t>(size.width),static_cast<size_t>(size.height),format,
@@ -776,7 +819,7 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
         CMTime displayTime=CMTimeAdd(now,CMTimeMakeWithSeconds(renderLead,60000));
         const double targetHostTime=CACurrentMediaTime()+renderLead;
         const double midpointDeadline=interpolate?targetHostTime-interval*.5-interpolationHeadroom:0.;
-        const double quarterDeadline=allowsFourTimes?targetHostTime-interval*.75-interpolationHeadroom:0.;
+        const double quarterDeadline=allowsHigherRate?targetHostTime-earliestOffset-interpolationHeadroom:0.;
         __weak DGVideoEffects *weak=self;
         dispatch_async(effectsQueue(),^{@autoreleasepool{
             const bool deferred=DGAnimationProcessingDeferred()||cancellation->load(std::memory_order_relaxed);
@@ -796,11 +839,16 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                         NSString *reason=hazard==douglass::InterpolationHazard::sceneChange?@"scene_change":
                                          hazard==douglass::InterpolationHazard::fastMotion?@"fast_motion":@"unstable";
                         DGDiagnostic(@"video.interpolation.protected",reason);
+                        DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"protected",reason);
+                        if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,@"preparing",@"waiting_for_frame");
                     }else{
                         DGDiagnostic(@"video.interpolation.resumed",nil);
+                        DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"preparing",@"waiting_for_frame");
                     }
                 }
                 if(!result.supported){
+                    if(effects->_interpolation&&!effects->_preferResolution)DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",@"unsupported_source");
+                    if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,@"bypassed",@"unsupported_source");
                     [effects resetFrames];[effects releaseProcessing];effects->_unsupported=YES;effects->_clock.paused=YES;
                     return;
                 }
@@ -814,27 +862,30 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                     return;
                 }
                 unsigned queuedInserted=0;
-                if(result.inserted[1]){
+                if(result.inserted[1]||result.thirds){
                     auto timeAtPhase=[&](double phase){
                         return CMTimeSubtract(displayTime,CMTimeMakeWithSeconds(interval*(1-phase),60000));
                     };
-                    const CMTime firstQuarter=timeAtPhase(phases[0]);
-                    const bool useFour=result.inserted[0]&&result.inserted[2]&&CMTimeCompare(firstQuarter,now)>0&&
-                        (!CMTIME_IS_VALID(effects->_lastQueued)||CMTimeCompare(firstQuarter,effects->_lastQueued)>0);
-                    if(useFour){
+                    const auto &schedule=result.thirds?thirdPhases:phases;
+                    const CMTime firstInserted=timeAtPhase(schedule[0]);
+                    const bool useHigher=result.inserted[0]&&result.inserted[2]&&CMTimeCompare(firstInserted,now)>0&&
+                        (!CMTIME_IS_VALID(effects->_lastQueued)||CMTimeCompare(firstInserted,effects->_lastQueued)>0);
+                    if(useHigher){
                         for(size_t i=0;i<phases.size();++i){
-                            if(![effects queuePixel:result.inserted[i].get() atHostTime:timeAtPhase(phases[i])])break;
+                            if(result.thirds&&i==1)continue;
+                            if(![effects queuePixel:result.inserted[i].get() atHostTime:timeAtPhase(schedule[i])])break;
                             ++queuedInserted;
                         }
-                        if(queuedInserted!=3){
+                        if(queuedInserted!=(result.thirds?2:3)){
                             effects->_rendererFourTimesBackoffUntil=CACurrentMediaTime()+fourTimesBackoff;
                             if(queuedInserted){
                                 [effects discardRenderedFrames];
+                                DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",@"renderer");
                                 return;
                             }
                         }
                     }
-                    if(!queuedInserted){
+                    if(!queuedInserted&&result.inserted[1]){
                         const CMTime midpoint=timeAtPhase(phases[1]);
                         if(CMTimeCompare(midpoint,now)>0&&[effects queuePixel:result.inserted[1].get() atHostTime:midpoint])queuedInserted=1;
                     }
@@ -844,7 +895,11 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                         [effects missedFrame];
                         return;
                     }
-                    if(!effects->_readyFrames)return;
+                    if(!effects->_readyFrames){
+                        if(effects->_interpolation)DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",@"no_output");
+                        if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,@"bypassed",@"no_output");
+                        return;
+                    }
                 }
                 if([effects queuePixel:result.current.get() atHostTime:displayTime]){
                     effects->_lastResult=CACurrentMediaTime();effects->_consecutiveLate=0;
@@ -852,12 +907,29 @@ void DGReleaseVideoFrameCache(AVPlayerItem *item){
                     ++effects->_readyFrames;
                     if(effects->_readyFrames>=minimumReadyFrames&&effects->_display.readyForDisplay){
                         effects->_display.hidden=NO;
+                        if(effects->_resolution)DGReportVideoEffect(DGVideoEffectSuperResolution,effects,result.upscaled?@"active":@"bypassed",result.upscaled?@"frame_output":@"no_output");
+                        if(queuedInserted){
+                            NSString *backend=result.rife?@"rife":(result.compatibility?@"compatibility":@"system");
+                            if(!effects->_reportedMultiplier||CACurrentMediaTime()-effects->_lastEffectStateChange>.35){
+                                unsigned multiplier=queuedInserted+1;
+                                if(effects->_reportedMultiplier!=multiplier||![effects->_reportedBackend isEqualToString:backend]){
+                                    effects->_reportedMultiplier=multiplier;
+                                    effects->_reportedBackend=backend;
+                                    effects->_lastEffectStateChange=CACurrentMediaTime();
+                                    DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"active",
+                                                        multiplier<effects->_interpolationMultiplier?@"adaptive_fallback":@"frame_output",multiplier,backend);
+                                }
+                            }
+                        }else if(effects->_interpolation&&!effects->_preferResolution&&!protectedFrame){
+                            effects->_reportedMultiplier=0;
+                            DGReportVideoEffect(DGVideoEffectInterpolation,effects,@"bypassed",interval>0&&interval<.025?@"source_rate":@"no_output");
+                        }
                         if(!effects->_reportedDisplay){
                             effects->_reportedDisplay=YES;
                             DGDiagnostic(@"video.vt.display",[NSString stringWithFormat:@"midpoint=%d compatibility=%d rife=%d multiplier=%u width=%zu",queuedInserted!=0,result.compatibility,result.rife,queuedInserted+1,CVPixelBufferGetWidth(result.current.get())]);
                         }
                     }
-                }else if(queuedInserted==3){
+                }else if(queuedInserted>=2){
                     effects->_rendererFourTimesBackoffUntil=CACurrentMediaTime()+fourTimesBackoff;
                     [effects discardRenderedFrames];
                 }else if(protectedFrame)[effects discardRenderedFrames];

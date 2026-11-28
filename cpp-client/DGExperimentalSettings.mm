@@ -10,6 +10,8 @@
 @interface DGExperimentalControlCell:UITableViewCell
 @property(nonatomic,strong) UILabel *controlTitle,*controlDetail;
 @property(nonatomic,strong) UIStackView *controlStack;
+@property(nonatomic,strong) UILabel *effectStatusLabel;
+@property(nonatomic) DGVideoEffect trackedEffect;
 @end
 @implementation DGExperimentalControlCell
 - (instancetype)init{
@@ -28,7 +30,25 @@
 @interface DGExperimentalSettings:UITableViewController
 @end
 @implementation DGExperimentalSettings
-- (void)viewDidLoad{[super viewDidLoad];self.title=@"画面与音频实验室";self.tableView.backgroundColor=UIColor.systemGroupedBackgroundColor;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=92;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];}
+- (void)viewDidLoad{[super viewDidLoad];self.title=@"画面与音频实验室";self.tableView.backgroundColor=UIColor.systemGroupedBackgroundColor;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=92;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(effectStatusChanged) name:DGVideoEffectStatusChanged object:nil];}
+- (void)trackEffect:(DGVideoEffect)effect inCell:(DGExperimentalControlCell *)cell {
+ UILabel *label=[UILabel new];
+ label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+ label.adjustsFontForContentSizeCategory=YES;
+ label.numberOfLines=0;
+ label.textColor=UIColor.secondaryLabelColor;
+ label.text=DGVideoEffectStatusText(effect);
+ cell.effectStatusLabel=label;
+ cell.trackedEffect=effect;
+ [cell.controlStack addArrangedSubview:label];
+}
+- (void)effectStatusChanged {
+ for(UITableViewCell *visible in self.tableView.visibleCells){
+  if(![visible isKindOfClass:DGExperimentalControlCell.class])continue;
+  DGExperimentalControlCell *cell=(DGExperimentalControlCell *)visible;
+  if(cell.effectStatusLabel)cell.effectStatusLabel.text=DGVideoEffectStatusText(cell.trackedEffect);
+ }
+}
 - (void)close{[self dismissViewControllerAnimated:YES completion:^{[NSNotificationCenter.defaultCenter postNotificationName:@"DGResumePlayback" object:nil];}];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 4;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return section==0?7:section==1?2:section==2?8:1;}
@@ -50,6 +70,8 @@
  if(!available)cell.controlDetail.text=@"当前设备或系统不支持";
  [control addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
  cell.accessoryView=control;
+ if([key isEqualToString:@"douglass.experimental.metalfx"])[self trackEffect:DGVideoEffectMetalFX inCell:cell];
+ if([key isEqualToString:@"douglass.experimental.vtSuperResolution"])[self trackEffect:DGVideoEffectSuperResolution inCell:cell];
  return cell;
 }
 - (UITableViewCell *)segments:(NSString *)title key:(NSString *)key items:(NSArray *)items{DGExperimentalControlCell *cell=[self base:title detail:nil];UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:items];control.apportionsSegmentWidthsByContent=YES;control.accessibilityIdentifier=key;control.selectedSegmentIndex=MIN((NSInteger)items.count-1,MAX(0,[NSUserDefaults.standardUserDefaults integerForKey:key]));[control addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];[cell.controlStack addArrangedSubview:control];[control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;return cell;}
@@ -66,21 +88,22 @@
    cell.controlDetail.hidden=NO;
    if(control.selectedSegmentIndex==2)cell.controlDetail.text=@"实验模式。由 Core ML 检查 ANE 分配，超时回到原帧。";
    else cell.controlDetail.text=DGVTFSystemInterpolationAvailable()?@"低延迟优先使用系统插帧。":@"低延迟使用兼容插帧，快速运动时可能出现残影。";
+   [self trackEffect:DGVideoEffectInterpolation inCell:cell];
    return cell;
   }
   if(path.row==3){
-   DGExperimentalControlCell *cell=[self base:@"插帧倍率" detail:@"4× 需要更高刷新率和处理性能，来不及补帧时自动降档。"];
-   UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:@[@"2×",@"4×"]];
+   DGExperimentalControlCell *cell=[self base:@"插帧倍率" detail:@"低延迟模式的 3× 使用兼容插帧。刷新率或处理性能不足时自动降至 2×。"];
+   UISegmentedControl *control=[[UISegmentedControl alloc]initWithItems:@[@"2×",@"3×",@"4×"]];
    control.accessibilityIdentifier=DGInterpolationMultiplierKey;
-   control.selectedSegmentIndex=DGInterpolationMultiplier()==4?1:0;
+   control.selectedSegmentIndex=DGInterpolationMultiplier()-2;
    [control addTarget:self action:@selector(interpolationMultiplierChanged:) forControlEvents:UIControlEventValueChanged];
    [cell.controlStack addArrangedSubview:control];
    [control.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;
    return cell;
   }
-  if(path.row==4)return [self toggle:@"插帧转场保护" key:DGInterpolationProtectionKey detail:@"画面跳变、快速转场或快运镜时播放原始帧，稳定后恢复插帧"];
+  if(path.row==4)return [self toggle:@"插帧转场保护" key:DGInterpolationProtectionKey detail:@"切换作品时释放插帧资源。视频内快切和快运镜时暂用原始帧。"];
   if(path.row==5)return [self toggle:@"低延迟超分" key:@"douglass.experimental.vtSuperResolution" detail:@"对支持的视频尺寸进行实时放大，与 MetalFX 二选一"];
-  return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"切片时释放增强资源，画面稳定后再启动增强"];
+  return [self toggle:@"超分转场保护" key:@"douglass.experimental.transitionProtection" detail:@"滑动换片时提前释放超分资源。新作品有可处理的帧就启动超分。"];
  }
 
  if(path.section==1){if(path.row==0)return [self toggle:@"启用音频增强" key:@"douglass.experimental.audio" detail:@"八段 C++ IIR，参数平滑与峰值保护"];return [self segments:@"均衡预设" key:@"douglass.experimental.audioPreset" items:@[@"平直",@"人声",@"低音",@"柔和"]];}
@@ -92,11 +115,13 @@
  [prefs setInteger:control.selectedSegmentIndex forKey:@"douglass.experimental.interpolationBackend"];
  [prefs setBool:control.selectedSegmentIndex==1 forKey:@"douglass.experimental.frameInterpolation"];
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];
+ DGLogVideoEffectSnapshot();
  [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:2 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
 }
 - (void)interpolationMultiplierChanged:(UISegmentedControl *)control {
- [NSUserDefaults.standardUserDefaults setInteger:control.selectedSegmentIndex==1?4:2 forKey:DGInterpolationMultiplierKey];
+ [NSUserDefaults.standardUserDefaults setInteger:control.selectedSegmentIndex+2 forKey:DGInterpolationMultiplierKey];
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];
+ DGLogVideoEffectSnapshot();
 }
 - (void)toggleChanged:(UISwitch *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setBool:control.on forKey:key];if([key isEqualToString:@"douglass.experimental.transitionProtection"]||[key isEqualToString:DGInterpolationProtectionKey]){
  [NSNotificationCenter.defaultCenter postNotificationName:@"DGVideoEffectsChanged" object:nil];return;
@@ -107,6 +132,7 @@ if([key isEqualToString:@"douglass.experimental.metalfx"]||[key isEqualToString:
   [NSUserDefaults.standardUserDefaults setBool:NO forKey:other];
  }
  DGMediaEnhancementApply();
+ DGLogVideoEffectSnapshot();
  [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 }else{DGUpdateAudioControls();if([key isEqualToString:@"douglass.experimental.audio"]){DGInvalidateAudioPreloads();[NSNotificationCenter.defaultCenter postNotificationName:@"DGAudioEnhancementChanged" object:nil];}}}
 - (void)segmentChanged:(UISegmentedControl *)control{NSString *key=control.accessibilityIdentifier;[NSUserDefaults.standardUserDefaults setInteger:control.selectedSegmentIndex forKey:key];if([key isEqualToString:@"douglass.experimental.picturePreset"]){DGMediaEnhancementApply();return;}if([key isEqualToString:@"douglass.experimental.audioPreset"]){static const float presets[4][8]={{0,0,0,0,0,0,0,0},{-1,-1,0,1.5,2,1,-.5,-1},{3,2,0,-.5,0,.5,0,-.5},{0,0,.5,.5,0,-1,-2,-2}};for(unsigned i=0;i<8;++i)[NSUserDefaults.standardUserDefaults setFloat:presets[control.selectedSegmentIndex][i] forKey:[NSString stringWithFormat:@"douglass.experimental.eq.%u",i]];[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}DGUpdateAudioControls();}

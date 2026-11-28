@@ -13,9 +13,10 @@ public:
     ~DGRife();
     DGRife(const DGRife &)=delete;
     DGRife &operator=(const DGRife &)=delete;
-    // The caller owns the returned buffers at phases 1/4, 1/2 and 3/4.
+    // The caller owns the frames. In 3× mode the outside slots are thirds.
     std::array<CVPixelBufferRef,3> copyInterpolatedFrames(CVPixelBufferRef previous,CVPixelBufferRef current,
                                                           double midpointDeadline,double quarterDeadline,
+                                                          unsigned multiplier,
                                                           const std::atomic_bool &cancelled);
     bool rejected() const;
 private:

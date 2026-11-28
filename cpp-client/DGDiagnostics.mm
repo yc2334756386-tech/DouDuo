@@ -1,4 +1,5 @@
 #import "DGDiagnostics.h"
+#import "DGMediaEnhancement.h"
 #import "DGCommon.h"
 #import <mach/mach.h>
 #include <atomic>
@@ -74,6 +75,7 @@ void DGDiagnosticEnable(BOOL enabled) {
     if(enabled)PrepareExceptionRecord();else if(ExceptionFile>=0){close(ExceptionFile);ExceptionFile=-1;}
     NSString *event=enabled?[NSString stringWithFormat:@"logging.enabled version=%@ build=%@",NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"],NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"]]:@"logging.disabled";
     NSDate *when=NSDate.date;dispatch_async(LogQueue(),^{Append(event,when);});
+    if(enabled)DGLogVideoEffectSnapshot();
 }
 BOOL DGDiagnosticEnabled(void){return Enabled.load(std::memory_order_relaxed);}
 void DGDiagnostic(NSString *event,NSString *metrics) {

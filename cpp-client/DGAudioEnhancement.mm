@@ -8,13 +8,20 @@
 #include <cmath>
 #import <QuartzCore/QuartzCore.h>
 
-struct DGAudioTapTelemetry{std::atomic<int> sourceError{0};std::atomic<unsigned> failures{0},emptyReads{0};};
+struct DGAudioTapTelemetry {
+ std::atomic<int> sourceError{0};
+ std::atomic<unsigned> failures{0},emptyReads{0};
+ std::atomic<uint64_t> suppliedFrames{0};
+};
 struct DGAudioTapState{douglass::AudioEnhancer processor;AudioStreamBasicDescription format{};bool supported=false;std::shared_ptr<DGAudioTapTelemetry> telemetry;};
 @interface DGAudioPreparation:NSObject{
- @public std::shared_ptr<DGAudioTapTelemetry> telemetry;
+ @public
+ std::shared_ptr<DGAudioTapTelemetry> telemetry;
+ uint64_t observedFrames;
+ CMTime lastMediaTime;
+ double missingAudioDuration;
 }
 @property(nonatomic) BOOL sealed,completed,bypassed;
-@property(nonatomic) CFTimeInterval attachedAt;
 @property(nonatomic,copy) dispatch_block_t completion;
 - (void)finish;
 @end
@@ -31,7 +38,9 @@ static void DGTapProcess(MTAudioProcessingTapRef tap,CMItemCount frames,MTAudioP
  if(result!=noErr){state->telemetry->sourceError.store(result,std::memory_order_relaxed);state->telemetry->failures.fetch_add(1,std::memory_order_relaxed);*outFrames=0;*outFlags=0;return;}
  state->telemetry->failures.store(0,std::memory_order_relaxed);
  if(*outFrames<=0){if(!(*outFlags&kMTAudioProcessingTapFlag_EndOfStream))state->telemetry->emptyReads.fetch_add(1,std::memory_order_relaxed);return;}
- state->telemetry->emptyReads.store(0,std::memory_order_relaxed);if(!state->supported)return;
+ state->telemetry->emptyReads.store(0,std::memory_order_relaxed);
+ state->telemetry->suppliedFrames.fetch_add((uint64_t)*outFrames,std::memory_order_relaxed);
+ if(!state->supported)return;
  if(*outFlags&kMTAudioProcessingTapFlag_StartOfStream)state->processor.reset();float *data[8]{};unsigned count=MIN(8u,buffers->mNumberBuffers);bool interleaved=!(state->format.mFormatFlags&kAudioFormatFlagIsNonInterleaved);
  for(unsigned i=0;i<count;++i){data[i]=static_cast<float *>(buffers->mBuffers[i].mData);std::size_t required=(std::size_t)*outFrames*sizeof(float)*(interleaved?state->format.mChannelsPerFrame:1);if(buffers->mBuffers[i].mDataByteSize<required)return;}
  state->processor.process(data,count,state->format.mChannelsPerFrame,(std::size_t)*outFrames,interleaved);
@@ -53,17 +62,45 @@ void DGPrepareAudioEnhancement(AVPlayerItem *item,dispatch_block_t completion){
      OSStatus status=MTAudioProcessingTapCreate(kCFAllocatorDefault,&callbacks,kMTAudioProcessingTapCreationFlag_PostEffects,&tap);if(status!=noErr){delete state;continue;}
      AVMutableAudioMixInputParameters *input=[AVMutableAudioMixInputParameters audioMixInputParametersWithTrack:track];input.audioTapProcessor=tap;CFRelease(tap);[inputs addObject:input];
     }
-    if(inputs.count){AVMutableAudioMix *mix=[AVMutableAudioMix audioMix];mix.inputParameters=inputs;current.audioMix=mix;stage.attachedAt=CACurrentMediaTime();DGDiagnostic(@"audio.tap.attached",[NSString stringWithFormat:@"tracks=%lu before_playback=1",(unsigned long)inputs.count]);}
+    if(inputs.count){AVMutableAudioMix *mix=[AVMutableAudioMix audioMix];mix.inputParameters=inputs;current.audioMix=mix;DGDiagnostic(@"audio.tap.attached",[NSString stringWithFormat:@"tracks=%lu before_playback=1",(unsigned long)inputs.count]);}
     [stage finish];
    });
   }];
  }];
 }
 void DGSealAudioEnhancement(AVPlayerItem *item){DGAudioPreparation *stage=objc_getAssociatedObject(item,DGAudioPreparationKey);if(!stage)return;if(!stage.completed)DGDiagnostic(@"audio.tap.bypass",@"reason=playback_started_before_optional_processing_ready");stage.sealed=YES;[stage finish];}
-BOOL DGRecoverAudioEnhancement(AVPlayerItem *item){
- DGAudioPreparation *stage=objc_getAssociatedObject(item,DGAudioPreparationKey);if(!stage||stage.bypassed||!item.audioMix||CACurrentMediaTime()-stage.attachedAt<1.2)return NO;
- unsigned failures=stage->telemetry->failures.load(std::memory_order_relaxed),empty=stage->telemetry->emptyReads.load(std::memory_order_relaxed);if(failures<3&&empty<24)return NO;
- stage.bypassed=YES;item.audioMix=nil;DGDiagnostic(@"audio.tap.recovered_original",[NSString stringWithFormat:@"error=%d failures=%u empty_reads=%u",stage->telemetry->sourceError.load(std::memory_order_relaxed),failures,empty]);return YES;
+BOOL DGRecoverAudioEnhancement(AVPlayer *player){
+ AVPlayerItem *item=player.currentItem;
+ DGAudioPreparation *stage=item?objc_getAssociatedObject(item,DGAudioPreparationKey):nil;
+ if(!stage||stage.bypassed||!item.audioMix)return NO;
+ if(player.timeControlStatus!=AVPlayerTimeControlStatusPlaying||player.rate<=0){
+  stage->lastMediaTime=kCMTimeInvalid;
+  stage->missingAudioDuration=0;
+  return NO;
+ }
+ const CMTime now=player.currentTime;
+ const double advanced=CMTimeGetSeconds(CMTimeSubtract(now,stage->lastMediaTime));
+ stage->lastMediaTime=now;
+ const auto frames=stage->telemetry->suppliedFrames.load(std::memory_order_relaxed);
+ if(frames!=stage->observedFrames||!std::isfinite(advanced)||advanced<0||advanced>2.5){
+  stage->observedFrames=frames;
+  stage->missingAudioDuration=0;
+ }else if(advanced>0){
+  stage->missingAudioDuration+=advanced/player.rate;
+ }
+ const auto failures=stage->telemetry->failures.load(std::memory_order_relaxed);
+ const auto empty=stage->telemetry->emptyReads.load(std::memory_order_relaxed);
+ const double duration=CMTimeGetSeconds(item.duration),position=CMTimeGetSeconds(now);
+ if(std::isfinite(duration)&&duration-position<.35)return NO;
+ const bool sourceFailed=stage->missingAudioDuration>=.35&&(failures>=3||empty>=8);
+ if(!sourceFailed&&stage->missingAudioDuration<.75)return NO;
+ stage.bypassed=YES;
+ [player pause];
+ item.audioMix=nil;
+ DGDiagnostic(@"audio.tap.recovered_original",[NSString stringWithFormat:@"reason=%@ error=%d failures=%u empty_reads=%u missing_ms=%.0f",
+     sourceFailed?@"source_read":@"no_output",stage->telemetry->sourceError.load(std::memory_order_relaxed),
+     failures,empty,stage->missingAudioDuration*1000]);
+ return YES;
 }
 AVPlayer *DGMakeAudioPlayer(AVPlayerItem *item,void (^ready)(AVPlayer *)){
  AVPlayer *player=[AVPlayer new];player.automaticallyWaitsToMinimizeStalling=NO;__weak AVPlayer *weak=player;__block BOOL bound=NO;
